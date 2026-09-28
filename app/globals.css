@@ -1,0 +1,187 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --surface-2: #f3f3f5;
+  --surface-3: #ebebef;
+  --border: #e6e6ea;
+  --border-strong: #d4d4da;
+  --text: #0f0f12;
+  --text-2: #55555f;
+  --text-3: #8b8b96;
+  --accent: #6d4aff;
+  --accent-2: #8b6dff;
+  --accent-soft: #efebff;
+  --accent-text: #5b36f2;
+  --success: #12a150;
+  --success-soft: #e6f6ec;
+  --warning: #d97706;
+  --warning-soft: #fdf3e2;
+  --danger: #e5484d;
+  --danger-soft: #fdecec;
+  --info: #0b8ad9;
+  --info-soft: #e5f3fc;
+  --ring: rgba(109, 74, 255, 0.35);
+  --shadow: 0 1px 2px rgba(16, 16, 24, 0.04), 0 1px 1px rgba(16, 16, 24, 0.02);
+  --shadow-lg: 0 12px 40px -12px rgba(16, 16, 24, 0.18), 0 2px 6px rgba(16, 16, 24, 0.05);
+  --chart-1: #6d4aff;
+  --chart-2: #0ea5e9;
+  --chart-3: #14b8a6;
+  --chart-4: #f59e0b;
+  --chart-5: #ec4899;
+  --chart-6: #64748b;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #09090b;
+  --surface: #111114;
+  --surface-2: #17171b;
+  --surface-3: #1f1f25;
+  --border: #232329;
+  --border-strong: #303039;
+  --text: #f4f4f6;
+  --text-2: #a8a8b3;
+  --text-3: #71717c;
+  --accent: #8b6dff;
+  --accent-2: #a58dff;
+  --accent-soft: #1d1733;
+  --accent-text: #b3a1ff;
+  --success: #3dd68c;
+  --success-soft: #0f2419;
+  --warning: #f5b544;
+  --warning-soft: #2a1f0c;
+  --danger: #ff6369;
+  --danger-soft: #2d1215;
+  --info: #52a9ff;
+  --info-soft: #0d1f33;
+  --ring: rgba(139, 109, 255, 0.45);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 48px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --chart-1: #8b6dff;
+  --chart-2: #38bdf8;
+  --chart-3: #2dd4bf;
+  --chart-4: #fbbf24;
+  --chart-5: #f472b6;
+  --chart-6: #94a3b8;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--text);
+  --color-fg-2: var(--text-2);
+  --color-fg-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-lg);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--border);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Thin, unobtrusive scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.ai-gradient {
+  background: linear-gradient(135deg, #6d4aff 0%, #b45cff 45%, #ff6fb1 100%);
+}
+.ai-text {
+  background: linear-gradient(135deg, #6d4aff 0%, #b45cff 50%, #ff6fb1 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.dark .ai-text {
+  background: linear-gradient(135deg, #a58dff 0%, #d19cff 50%, #ff9ccb 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation: fade-up 0.18s ease-out both;
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.animate-slide {
+  animation: slide-in-right 0.2s ease-out both;
+}
+
+.recharts-cartesian-grid line {
+  stroke: var(--border);
+}
+.recharts-text {
+  fill: var(--text-3);
+  font-size: 11px;
+}
+
+/* Grid/flex children default to min-width:auto, so a wide table or chart inside a card
+   stretches its column past the viewport on phones. Let them shrink; tables scroll inside. */
+main .grid > *,
+main .flex > .flex-1 {
+  min-width: 0;
+}
