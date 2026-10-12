@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/groq": "^4.0.59",
+    "@openrouter/ai-sdk-provider": "^3.1.0",
     "ai": "^7.0.118",
     "clsx": "^2.1.1",
     "lucide-react": "^1.48.0",

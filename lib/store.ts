@@ -46,6 +46,8 @@ import type {
 import { AI_ACTIONS, NOTIFICATION_CATEGORIES } from "./types";
 import { buildOnboarding, buildSeed, type SeedData } from "./seed";
 import type { Access, Module } from "./permissions";
+import type { AgentReportContent } from "./ai/reporting";
+import type { ImportedMetricRow } from "./domain/metricsImport";
 import { DEFAULT_CRITERIA, scoreLead } from "./ai/scoring";
 import { runLocalResearch } from "./ai/research";
 import { classifyReply, DEFAULT_SEQUENCE, isOptOut, personalizeFirstMessage, renderStep } from "./ai/outreach";
@@ -219,6 +221,11 @@ export interface CRMState extends SeedData {
   // Reports
   generateReport: (clientId: string, format: ReportSchedule["format"], period: string) => void;
   upsertSchedule: (s: ReportSchedule) => void;
+  // Saves a report written by the Reporting agent; the "Reports" approval mode decides its status.
+  saveAgentReport: (clientId: string, period: string, content: AgentReportContent) => string;
+  // Excel/CSV performance data → campaigns tagged dataSource "upload" (re-uploading a day overwrites it).
+  importMetrics: (clientId: string, rows: ImportedMetricRow[], fileName: string) => { created: number; updated: number; days: number };
+  removeUploadedMetrics: (clientId: string) => void;
 
   // ---------- Generic collection helpers (used by every OS module) ----------
   upsert: <K extends CollectionKey>(k: K, item: CRMState[K][number]) => void;
@@ -927,7 +934,10 @@ export const useCRM = create<CRMState>()(
           if (ap.ref?.type === "recommendation") {
             set((s) => ({ recommendations: s.recommendations.map((r) => (r.id === ap.ref!.id ? { ...r, status: approve ? "Executed" : "Dismissed", resolvedAt: now(), resolvedBy: me() } : r)) }));
           }
-          if (!approve) return;
+          if (!approve) {
+            if (ap.ref?.type === "report") set((s) => ({ reports: s.reports.map((r) => (r.id === ap.ref!.id ? { ...r, status: "Rejected" } : r)) }));
+            return;
+          }
           if (ap.apply) {
             const { collection, id: targetId, patch } = ap.apply;
             const before = (get()[collection] as { id: string }[]).find((x) => x.id === targetId) as Record<string, unknown> | undefined;
@@ -962,6 +972,55 @@ export const useCRM = create<CRMState>()(
           }));
           const c = get().clients.find((x) => x.id === clientId);
           log({ actor: "ai", entity: "client", entityId: clientId, action: `Generated ${format} report`, detail: `${c?.company} · ${period}` });
+        },
+        saveAgentReport: (clientId, period, content) => {
+          const id = uid("rep");
+          const m = mode("Reports");
+          const status = m === "Manual" ? "Draft" : m === "Automatic" ? "Approved" : "Awaiting approval";
+          const c = get().clients.find((x) => x.id === clientId);
+          set((s) => ({
+            reports: [{ id, clientId, period, format: "Dashboard" as const, createdAt: now(), sent: false, status, content }, ...s.reports],
+            clients: s.clients.map((x) => (x.id === clientId ? { ...x, lastReportAt: now() } : x)),
+          }));
+          log({ actor: "ai", agent: "reporting", entity: "client", entityId: clientId, action: "Wrote client report", detail: `${c?.company} · ${period}`, after: status });
+          if (status === "Awaiting approval") {
+            get().requestApproval({ kind: "Reports", title: `Approve report: ${c?.company}`, detail: `${period} — ${content.headline}`, ref: { type: "report", id }, agent: "reporting", apply: { collection: "reports", id, patch: { status: "Approved" } } });
+          }
+          return id;
+        },
+        importMetrics: (clientId, rows, fileName) => {
+          const client = get().clients.find((x) => x.id === clientId);
+          if (!client || !rows.length) return { created: 0, updated: 0, days: 0 };
+          const byCampaign = new Map<string, ImportedMetricRow[]>();
+          for (const r of rows) byCampaign.set(r.campaign, [...(byCampaign.get(r.campaign) ?? []), r]);
+          const existing = get().campaigns.filter((c) => c.clientId === clientId && c.dataSource === "upload");
+          const serviceFor = (platform: string): Campaign["service"] =>
+            /meta|facebook|instagram/i.test(platform) ? "Meta Ads" : /google|youtube|search|pmax/i.test(platform) ? "Google Ads" : /linkedin/i.test(platform) ? "LinkedIn Ads" : /amazon|flipkart|retail/i.test(platform) ? "Retail Media" : /blinkit|zepto|instamart/i.test(platform) ? "Quick Commerce" : (client.services[0] ?? "Consulting");
+          const fresh: Campaign[] = [];
+          const patched = new Map<string, Campaign>();
+          for (const [name, rs] of byCampaign) {
+            const metrics = rs.map((r) => ({ date: r.date, spend: r.spend, impressions: r.impressions, reach: r.reach, clicks: r.clicks, leads: r.leads, conversions: r.conversions, revenue: r.revenue }));
+            const prior = existing.find((c) => c.name.toLowerCase() === name.toLowerCase());
+            if (prior) {
+              const days = new Map(prior.metrics.map((m) => [m.date, m]));
+              metrics.forEach((m) => days.set(m.date, m));
+              patched.set(prior.id, { ...prior, metrics: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)), endDate: rs.at(-1)!.date > prior.endDate.slice(0, 10) ? rs.at(-1)!.date : prior.endDate });
+            } else {
+              const platform = rs[0]!.platform;
+              const spend = metrics.reduce((a, m) => a + m.spend, 0);
+              fresh.push({ id: uid("cmp"), name, clientId, service: serviceFor(platform), platform, objective: "Imported", budget: Math.round((spend / metrics.length) * 30), startDate: rs[0]!.date, endDate: rs.at(-1)!.date, teamIds: [], status: "Active", kpis: [], metrics, influencerIds: [], ownerId: me(), dataSource: "upload" });
+            }
+          }
+          set((s) => ({ campaigns: [...fresh, ...s.campaigns.map((c) => patched.get(c.id) ?? c)] }));
+          const days = new Set(rows.map((r) => r.date)).size;
+          log({ actor: "human", actorId: me(), entity: "client", entityId: clientId, action: "Imported performance data", detail: `${client.company} · ${fileName} · ${rows.length} rows, ${days} days, ${byCampaign.size} campaign(s)` });
+          return { created: fresh.length, updated: patched.size, days };
+        },
+        removeUploadedMetrics: (clientId) => {
+          const gone = get().campaigns.filter((c) => c.clientId === clientId && c.dataSource === "upload");
+          if (!gone.length) return;
+          set((s) => ({ campaigns: s.campaigns.filter((c) => !(c.clientId === clientId && c.dataSource === "upload")) }));
+          log({ actor: "human", actorId: me(), entity: "client", entityId: clientId, action: "Removed uploaded performance data", detail: `${gone.length} campaign(s)` });
         },
         upsertSchedule: (sch) =>
           set((s) => ({ reportSchedules: s.reportSchedules.some((x) => x.id === sch.id) ? s.reportSchedules.map((x) => (x.id === sch.id ? sch : x)) : [...s.reportSchedules, sch] })),

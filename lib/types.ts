@@ -2,6 +2,8 @@
 // Every entity has a stable string id and ISO timestamps so the store can be
 // swapped for a real database (Postgres + Drizzle/Prisma) without UI changes.
 
+import type { AgentReportContent } from "./ai/reporting";
+
 export type ID = string;
 
 export type Role =
@@ -321,6 +323,7 @@ export interface Campaign {
   ownerId?: ID;
   creativeIds?: ID[];
   adAccountId?: string;
+  dataSource?: "upload"; // metrics came from an Excel/CSV upload rather than a connected platform
 }
 
 export const CAMPAIGN_TYPES = ["Lead Generation", "Brand Awareness", "Conversion", "Retargeting", "Ecommerce", "App Installs", "Traffic"] as const;
@@ -590,6 +593,9 @@ export interface GeneratedReport {
   format: ReportSchedule["format"];
   createdAt: string;
   sent: boolean;
+  // Reports written by the Reporting agent carry their content and an approval status.
+  status?: "Draft" | "Awaiting approval" | "Approved" | "Rejected";
+  content?: AgentReportContent;
 }
 
 export interface Notification {
@@ -1031,4 +1037,4 @@ export interface Organization {
 export type CollectionKey =
   | "leads" | "deals" | "clients" | "campaigns" | "tasks" | "invoices" | "influencers" | "proposals" | "meetings"
   | "strategies" | "creatives" | "concepts" | "videos" | "socialPosts" | "seoProjects" | "assets" | "knowledge"
-  | "aiTasks" | "recommendations" | "expenses" | "engagements" | "projects" | "savedViews" | "ads" | "threads";
+  | "aiTasks" | "recommendations" | "expenses" | "engagements" | "projects" | "savedViews" | "ads" | "threads" | "reports";

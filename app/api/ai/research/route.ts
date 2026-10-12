@@ -6,7 +6,7 @@ import { SERVICES, type Lead, type LeadResearch } from "@/lib/types";
 const finding = z.object({
   text: z.string(),
   kind: z.enum(["verified", "assumption", "recommendation"]),
-  source: z.string().optional(),
+  source: z.string().nullable(), // nullable, not optional: strict structured-output providers require every key
 });
 const schema = z.object({
   summary: z.string().describe("3-4 sentence AI Lead Summary"),
@@ -57,7 +57,8 @@ Adbibe services: ${SERVICES.join(", ")}.`,
       }`,
       output: Output.object({ schema }),
     });
-    const research: LeadResearch = { status: "done", generatedAt: new Date().toISOString(), ...output };
+    const sections = output.sections.map((s) => ({ ...s, findings: s.findings.map(({ source, ...f }) => (source ? { ...f, source } : f)) }));
+    const research: LeadResearch = { status: "done", generatedAt: new Date().toISOString(), ...output, sections };
     return Response.json({ research });
   } catch (e) {
     return Response.json({ research: null, error: e instanceof Error ? e.message : "AI request failed" }, { status: 502 });

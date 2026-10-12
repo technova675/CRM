@@ -4,10 +4,12 @@ import { AI_MODEL, aiConfigured, SAFETY_RULES } from "@/lib/ai/provider";
 import { AGENTS } from "@/lib/ai/agents";
 import { AGENT_IDS, type AgentId } from "@/lib/types";
 
+// Strict structured-output providers (Groq) reject optional keys, so "source" is nullable
+// in the schema and stripped back to optional before returning.
 const insight = z.object({
   text: z.string(),
   kind: z.enum(["data", "assumption", "recommendation"]),
-  source: z.string().optional(),
+  source: z.string().nullable(),
 });
 const insightsSchema = z.object({
   summary: z.string().describe("2-4 sentence answer"),
@@ -32,7 +34,7 @@ Context: ${JSON.stringify(body.context ?? {}).slice(0, 50_000)}`;
   try {
     if (body.format === "insights") {
       const { output } = await generateText({ model: AI_MODEL, instructions, prompt: body.task, output: Output.object({ schema: insightsSchema }) });
-      return Response.json(output);
+      return Response.json({ ...output, insights: output.insights.map(({ source, ...i }) => (source ? { ...i, source } : i)) });
     }
     const { text } = await generateText({ model: AI_MODEL, instructions, prompt: body.task });
     return Response.json({ text });

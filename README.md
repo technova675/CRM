@@ -20,7 +20,11 @@ Use the user switcher (bottom-left) to try all 13 roles — Founder/Admin, Sales
 
 ### Turn on real AI (optional)
 
-Copy `.env.example` to `.env.local` and set `AI_GATEWAY_API_KEY`. The top-bar pill changes from **AI local** to **AI live**. Every agent then calls the model through `/api/ai/agent` (plus the existing research/draft/assistant routes) with only the data the current user is authorised to see; without a key each agent runs a deterministic local engine over your real data. Either way, every AI output line is tagged **Data** (with its source) / **Assumption** / **Recommendation**.
+Copy `.env.example` to `.env.local` and set one provider key: `GROQ_API_KEY` or `OPENROUTER_API_KEY` (both have free tiers), or `AI_GATEWAY_API_KEY`. The first provider with a key is used, or set `AI_PROVIDER`; the Reporting agent falls back to the next provider when the first one fails. The top-bar pill changes from **AI local** to **AI live**. Every agent then calls the model through `/api/ai/agent` (plus the existing research/draft/assistant routes) with only the data the current user is authorised to see; without a key each agent runs a deterministic local engine over your real data. Either way, every AI output line is tagged **Data** (with its source) / **Assumption** / **Recommendation**.
+
+### Reporting agent
+
+**Reports → Generate AI report** runs a tool-calling agent (`/api/ai/report`): it pulls the client's totals, campaign breakdown, weekly trend, unusual days, goals and creatives through tools, then writes the summary, insights, recommendations and a cover email. Every figure is calculated in `lib/ai/reporting.ts`, not by the model. The report is saved under the Reports approval mode and can be approved, downloaded as a printable page, or opened in your email app. **Reports → Import data** loads real performance data from Excel/CSV (Meta Ads Manager and Google Ads exports map automatically); uploaded data is reported separately from the demo data.
 
 ## Modules
 

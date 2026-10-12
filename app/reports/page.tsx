@@ -2,14 +2,18 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState, type ReactNode } from "react";
-import { CalendarClock, Database, FileSpreadsheet, FileText, Link2, Plus, Presentation, Sparkles } from "lucide-react";
+import { CalendarClock, Database, FileSpreadsheet, FileText, Link2, Plus, Presentation, Sparkles, Upload } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import type { InsightItem, ReportSchedule } from "@/lib/types";
 import { cn, compact, compactMoney, downloadFile, fmtDate, fmtDateTime, fmtShort, money, pct, toCSV, uid } from "@/lib/utils";
 import { AreaTrend, Bars, aggregateMetrics, totals } from "@/components/charts";
-import { AIBadge, Badge, Button, Card, CardHeader, EmptyState, Field, Input, InsightLegend, InsightList, Modal, PageHeader, Progress, Readonly, Segmented, Select, StatusBadge, Table, Td, Th, Toggle } from "@/components/ui";
+import { AIBadge, Badge, Button, Card, CardHeader, EmptyState, Field, Input, InsightLegend, InsightList, Modal, PageHeader, Progress, Readonly, Segmented, Select, StatusBadge, Table, Td, Textarea, Th, Toggle } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
+import { inWindow, reportWindow } from "@/lib/ai/reporting";
+import { campaignLabel, runReportingAgent, scopeCampaigns, type DataScope } from "@/components/reports/agent";
+import { MetricsImportModal } from "@/components/reports/MetricsImport";
+import { REPORT_STATUS_TONE, ReportViewer } from "@/components/reports/ReportViewer";
 
 type Range = "7" | "30" | "60";
 type Format = ReportSchedule["format"];
@@ -41,6 +45,7 @@ function ReportsInner() {
   const strategies = useCRM((s) => s.strategies);
   const generateReport = useCRM((s) => s.generateReport);
   const upsertSchedule = useCRM((s) => s.upsertSchedule);
+  const removeUploadedMetrics = useCRM((s) => s.removeUploadedMetrics);
   const isClient = me.role === "client";
   const writable = can(me.role, "reports", "write") && !isClient;
 
@@ -49,39 +54,51 @@ function ReportsInner() {
   const [clientId, setClientId] = useState(() => params.get("client") ?? "");
   const [range, setRange] = useState<Range>(() => (["7", "30", "60"].includes(params.get("range") ?? "") ? (params.get("range") as Range) : "30"));
   const [editing, setEditing] = useState<ReportSchedule | null>(null);
+  const [scopeChoice, setScopeChoice] = useState<DataScope>("upload");
+  const [importOpen, setImportOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [focus, setFocus] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const client = clients.find((c) => c.id === clientId) ?? clients[0];
 
-  const clientCampaigns = useMemo(() => campaigns.filter((c) => c.clientId === client?.id), [campaigns, client]);
-  const rows = useMemo(() => aggregateMetrics(clientCampaigns.flatMap((c) => c.metrics.slice(-Number(range)))), [clientCampaigns, range]);
-  const prevRows = useMemo(() => aggregateMetrics(clientCampaigns.flatMap((c) => c.metrics.slice(-Number(range) * 2, -Number(range)))), [clientCampaigns, range]);
+  // Uploaded (Excel/CSV) data is reported on its own by default so it never mixes with demo data.
+  const uploadedCount = useMemo(() => scopeCampaigns(campaigns, client?.id, "upload").length, [campaigns, client]);
+  const scope: DataScope = uploadedCount ? scopeChoice : "all";
+  const clientCampaigns = useMemo(() => scopeCampaigns(campaigns, client?.id, scope), [campaigns, client, scope]);
+  // The window ends on the latest day with data and is compared with the same number of days before it.
+  const win = useMemo(() => reportWindow(clientCampaigns, Number(range)), [clientCampaigns, range]);
+  const rows = useMemo(() => aggregateMetrics(clientCampaigns.flatMap((c) => inWindow(c.metrics, win.start, win.end))), [clientCampaigns, win]);
+  const prevRows = useMemo(() => aggregateMetrics(clientCampaigns.flatMap((c) => inWindow(c.metrics, win.prevStart, win.prevEnd))), [clientCampaigns, win]);
   const t = useMemo(() => totals(rows), [rows]);
   const p = useMemo(() => totals(prevRows), [prevRows]);
-  const perCampaign = useMemo(() => clientCampaigns.map((c) => ({ c, t: totals(aggregateMetrics(c.metrics.slice(-Number(range)))), p: totals(aggregateMetrics(c.metrics.slice(-Number(range) * 2, -Number(range)))) })), [clientCampaigns, range]);
-  const period = `Last ${range} days (to ${fmtShort(new Date().toISOString())})`;
-  const src = `Connected ad platforms · last ${range} days`;
+  const perCampaign = useMemo(() => clientCampaigns.map((c) => ({ c, t: totals(aggregateMetrics(inWindow(c.metrics, win.start, win.end))), p: totals(aggregateMetrics(inWindow(c.metrics, win.prevStart, win.prevEnd))) })), [clientCampaigns, win]);
+  const period = `${fmtShort(win.start)} – ${fmtShort(win.end)} (${range} days)`;
+  const src = `${scope === "upload" ? "Uploaded data" : "Connected ad platforms"} · ${range} days to ${fmtShort(win.end)}`;
   const delta = (a: number, b: number) => (b ? ((a - b) / b) * 100 : 0);
   const sign = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(0)}%`;
 
   // ---- Creative performance: creative library first, else ad-level rows (7-day windows) ----
   const creativeRows = useMemo(() => {
-    const lib = creatives.filter((c) => c.clientId === client?.id && c.performance).map((c) => ({ id: c.id, name: c.title, format: c.format, spend: c.performance!.spend, ctr: c.performance!.ctr, cpa: c.performance!.cpa, roas: c.performance!.roas, source: "Creative library" }));
+    const ids = new Set(clientCampaigns.map((c) => c.id));
+    const lib = creatives.filter((c) => scope === "all" && c.clientId === client?.id && c.performance).map((c) => ({ id: c.id, name: c.title, format: c.format, spend: c.performance!.spend, ctr: c.performance!.ctr, cpa: c.performance!.cpa, roas: c.performance!.roas, source: "Creative library" }));
     if (lib.length) return lib.sort((a, b) => b.roas - a.roas).slice(0, 8);
     return ads
-      .filter((a) => a.clientId === client?.id)
+      .filter((a) => a.clientId === client?.id && ids.has(a.campaignId))
       .map((a) => ({ id: a.id, name: a.hook ? `${a.name} — “${a.hook}”` : a.name, format: `${a.platform} · ${a.format}`, spend: a.curr.spend, ctr: a.curr.impressions ? (a.curr.clicks / a.curr.impressions) * 100 : 0, cpa: a.curr.conversions ? a.curr.spend / a.curr.conversions : 0, roas: a.curr.spend ? a.curr.revenue / a.curr.spend : 0, source: "Ad platforms · last 7 days" }))
       .sort((a, b) => b.roas - a.roas)
       .slice(0, 8);
-  }, [creatives, ads, client]);
+  }, [creatives, ads, client, clientCampaigns, scope]);
 
   // ---- Goals: campaign KPIs target vs actual ----
   const goals = useMemo(() => clientCampaigns.flatMap((c) => c.kpis.map((k) => {
     const lower = /cpa|cpc|cpl|cost/i.test(k.label);
     const ratio = k.target ? (lower ? (k.actual ? k.target / k.actual : 0) : k.actual / k.target) * 100 : 0;
-    return { campaign: c.service, ...k, ratio };
+    return { campaign: campaignLabel(c), ...k, ratio };
   })), [clientCampaigns]);
 
-  const clientRecs = useMemo(() => recommendations.filter((r) => r.clientId === client?.id && ["New", "Approved", "Awaiting Approval"].includes(r.status)).sort((a, b) => (a.priority === "High" ? -1 : 1) - (b.priority === "High" ? -1 : 1)).slice(0, 5), [recommendations, client]);
-  const strategy = useMemo(() => strategies.find((s) => s.clientId === client?.id && s.status === "Approved") ?? strategies.find((s) => s.clientId === client?.id), [strategies, client]);
+  const clientRecs = useMemo(() => recommendations.filter((r) => r.clientId === client?.id && ["New", "Approved", "Awaiting Approval"].includes(r.status) && (scope === "all" || clientCampaigns.some((c) => c.id === r.campaignId))).sort((a, b) => (a.priority === "High" ? -1 : 1) - (b.priority === "High" ? -1 : 1)).slice(0, 5), [recommendations, client, clientCampaigns, scope]);
+  const strategy = useMemo(() => (scope === "all" ? (strategies.find((s) => s.clientId === client?.id && s.status === "Approved") ?? strategies.find((s) => s.clientId === client?.id)) : undefined), [strategies, client, scope]);
 
   const narrative = useMemo(() => {
     const best = [...perCampaign].filter((x) => x.t.spend > 0).sort((a, b) => b.t.roas - a.t.roas)[0];
@@ -94,25 +111,25 @@ function ReportsInner() {
     if (!rows.length) return { summary, insights, changed, recs, plan };
     summary.push({ kind: "data", text: `${compactMoney(t.spend)} invested across ${perCampaign.filter((x) => x.t.spend > 0).length} campaign(s), returning ${compactMoney(t.revenue)} revenue at ${t.roas.toFixed(2)}x ROAS.`, source: src });
     summary.push({ kind: "data", text: `${compact(t.leads)} leads and ${compact(t.conversions)} conversions at ${money(t.cpa)} CPA (${sign(delta(t.cpa, p.cpa))} vs previous ${range} days).`, source: src });
-    if (best) summary.push({ kind: "data", text: `Best performer: ${best.c.service} at ${best.t.roas.toFixed(2)}x ROAS.`, source: src });
+    if (best) summary.push({ kind: "data", text: `Best performer: ${campaignLabel(best.c)} at ${best.t.roas.toFixed(2)}x ROAS.`, source: src });
 
-    if (best) insights.push({ kind: "data", text: `${best.c.service} drove ${t.revenue ? pct((best.t.revenue / t.revenue) * 100, 0) : "—"} of revenue on ${t.spend ? pct((best.t.spend / t.spend) * 100, 0) : "—"} of spend.`, source: src });
+    if (best) insights.push({ kind: "data", text: `${campaignLabel(best.c)} drove ${t.revenue ? pct((best.t.revenue / t.revenue) * 100, 0) : "—"} of revenue on ${t.spend ? pct((best.t.spend / t.spend) * 100, 0) : "—"} of spend.`, source: src });
     if (t.ctr < 1.2) insights.push({ kind: "assumption", text: `CTR is ${pct(t.ctr, 2)} — below the ~1.2% we'd expect; creative fatigue or weak hooks are the likely cause.` });
     else insights.push({ kind: "data", text: `CTR ${pct(t.ctr, 2)} with CPC ${money(t.cpc)} — attention is healthy.`, source: src });
     if (t.leads && t.conversions) insights.push({ kind: "data", text: `Lead → conversion rate ${pct((t.conversions / t.leads) * 100)}.`, source: src });
 
     const metricsList: [string, number, number, boolean][] = [["Spend", t.spend, p.spend, true], ["Leads", t.leads, p.leads, true], ["Conversions", t.conversions, p.conversions, true], ["CPA", t.cpa, p.cpa, false], ["ROAS", t.roas, p.roas, true], ["CTR", t.ctr, p.ctr, true]];
     metricsList.forEach(([label, a, b]) => { if (b && Math.abs(delta(a, b)) >= 5) changed.push({ kind: "data", text: `${label} ${delta(a, b) >= 0 ? "up" : "down"} ${Math.abs(delta(a, b)).toFixed(0)}% vs the previous ${range} days.`, source: src }); });
-    perCampaign.forEach((x) => { if (x.p.roas && Math.abs(delta(x.t.roas, x.p.roas)) >= 15) changed.push({ kind: "data", text: `${x.c.service} ROAS moved ${sign(delta(x.t.roas, x.p.roas))} (${x.p.roas.toFixed(2)}x → ${x.t.roas.toFixed(2)}x).`, source: src }); });
+    perCampaign.forEach((x) => { if (x.p.roas && Math.abs(delta(x.t.roas, x.p.roas)) >= 15) changed.push({ kind: "data", text: `${campaignLabel(x.c)} ROAS moved ${sign(delta(x.t.roas, x.p.roas))} (${x.p.roas.toFixed(2)}x → ${x.t.roas.toFixed(2)}x).`, source: src }); });
     if (!changed.length) changed.push({ kind: "data", text: "No metric moved more than 5% — performance was stable.", source: src });
 
     clientRecs.forEach((r) => recs.push({ kind: "recommendation", text: `${r.title} — ${r.recommendation}${r.impact ? ` (est. ${r.impact})` : ""}` }));
-    if (worst && best && worst.c.id !== best.c.id && worst.t.roas < 2) recs.push({ kind: "recommendation", text: `Shift budget from ${worst.c.service} (${worst.t.roas.toFixed(2)}x) toward ${best.c.service} (${best.t.roas.toFixed(2)}x).` });
+    if (worst && best && worst.c.id !== best.c.id && worst.t.roas < 2) recs.push({ kind: "recommendation", text: `Shift budget from ${campaignLabel(worst.c)} (${worst.t.roas.toFixed(2)}x) toward ${campaignLabel(best.c)} (${best.t.roas.toFixed(2)}x).` });
     if (t.ctr < 1.2) recs.push({ kind: "recommendation", text: "Refresh creatives: test 3 new hooks and a UGC-style variant." });
     if (!recs.length) recs.push({ kind: "recommendation", text: "Keep the current allocation; scale the best performer gradually (+10–15%/week) while CPA holds." });
 
     const top = creativeRows[0];
-    if (best) plan.push({ kind: "recommendation", text: `Scale ${best.c.service} budget in controlled steps while CPA stays below ${money(t.cpa * 1.1)}.` });
+    if (best) plan.push({ kind: "recommendation", text: `Scale ${campaignLabel(best.c)} budget in controlled steps while CPA stays below ${money(t.cpa * 1.1)}.` });
     if (top) plan.push({ kind: "recommendation", text: `Build 3 iterations of the top creative (“${top.name.slice(0, 60)}”).` });
     strategy?.testing.slice(0, 2).forEach((x) => plan.push({ kind: "recommendation", text: `${x.week}: ${x.test} — ${x.hypothesis}` }));
     goals.filter((g) => g.ratio < 90).slice(0, 2).forEach((g) => plan.push({ kind: "recommendation", text: `Close the gap on ${g.campaign} ${g.label} (${g.actual}${g.unit === "x" ? "x" : ""} vs target ${g.target}${g.unit === "x" ? "x" : ""}).` }));
@@ -160,7 +177,7 @@ ${slide(`<p class="a" style="font-weight:600">Adbibe · Performance report</p><h
 ${slide(`<h2>Executive summary</h2>${list(narrative.summary)}`)}
 ${slide(`<h2>Headline numbers</h2><div class="g">${kpis.map(([l, v]) => `<div class="k"><p>${l}</p><b>${v}</b></div>`).join("")}</div>`)}
 ${goals.length ? slide(`<h2>Goals</h2><table><tr><th>Campaign</th><th>KPI</th><th>Target</th><th>Actual</th><th>Progress</th></tr>${goals.map((g) => `<tr><td>${esc(g.campaign)}</td><td>${esc(g.label)}</td><td>${g.target}</td><td>${g.actual}</td><td>${g.ratio.toFixed(0)}%</td></tr>`).join("")}</table>`) : ""}
-${slide(`<h2>Campaign performance</h2><table><tr><th>Campaign</th><th>Spend</th><th>Leads</th><th>CPA</th><th>ROAS</th></tr>${perCampaign.map(({ c, t }) => `<tr><td>${esc(c.service)}</td><td>${compactMoney(t.spend)}</td><td>${t.leads}</td><td>${money(t.cpa)}</td><td>${t.roas.toFixed(2)}x</td></tr>`).join("")}</table>`)}
+${slide(`<h2>Campaign performance</h2><table><tr><th>Campaign</th><th>Spend</th><th>Leads</th><th>CPA</th><th>ROAS</th></tr>${perCampaign.map(({ c, t }) => `<tr><td>${esc(campaignLabel(c))}</td><td>${compactMoney(t.spend)}</td><td>${t.leads}</td><td>${money(t.cpa)}</td><td>${t.roas.toFixed(2)}x</td></tr>`).join("")}</table>`)}
 ${creativeRows.length ? slide(`<h2>Creative performance</h2><table><tr><th>Creative</th><th>Spend</th><th>CTR</th><th>CPA</th><th>ROAS</th></tr>${creativeRows.map((c) => `<tr><td>${esc(c.name)}</td><td>${compactMoney(c.spend)}</td><td>${c.ctr.toFixed(2)}%</td><td>${money(c.cpa)}</td><td>${c.roas.toFixed(2)}x</td></tr>`).join("")}</table>`) : ""}
 ${slide(`<h2>Key insights & what changed</h2>${list([...narrative.insights, ...narrative.changed])}`)}
 ${slide(`<h2>What we recommend next</h2>${list(narrative.recs)}`)}
@@ -185,7 +202,20 @@ ${slide(`<h2>Next month's plan</h2>${list(narrative.plan)}<p style="color:#9a9aa
     toast("Dashboard link copied", "Clients with portal access can open it after signing in.");
   };
 
+  const generate = async () => {
+    if (!client) return;
+    setGenerating(true);
+    const res = await runReportingAgent(client.id, Number(range), scope, focus);
+    setGenerating(false);
+    if ("error" in res) return toast("Report not generated", res.error, "warning");
+    setAgentOpen(false);
+    setFocus("");
+    setViewingId(res.id);
+    toast("Report ready", res.content.mode === "ai" ? "Written by the Reporting agent." : "Written by the local engine.", "ai");
+  };
+
   const visibleReports = reports.filter((r) => clients.some((c) => c.id === r.clientId));
+  const viewing = visibleReports.find((r) => r.id === viewingId && r.content);
   const visibleSchedules = schedules.filter((s) => clients.some((c) => c.id === s.clientId));
   const sources = integrations.filter((i) => SOURCE_KEYS.includes(i.key));
 
@@ -197,6 +227,8 @@ ${slide(`<h2>Next month's plan</h2>${list(narrative.plan)}<p style="color:#9a9aa
         description="Automated client reporting from connected ad and analytics platforms — dashboard, PDF, PPT and Excel."
         actions={
           <div className="no-print flex flex-wrap gap-2">
+            {writable && <Button variant="ai" icon={<Sparkles className="size-3.5" />} onClick={() => setAgentOpen(true)}>Generate AI report</Button>}
+            {writable && <Button icon={<Upload className="size-3.5" />} onClick={() => setImportOpen(true)}>Import data</Button>}
             <Button icon={<FileText className="size-3.5" />} onClick={exportPdf}>PDF</Button>
             <Button icon={<FileSpreadsheet className="size-3.5" />} onClick={exportExcel}>Excel</Button>
             <Button icon={<Presentation className="size-3.5" />} onClick={exportDeck}>PPT</Button>
@@ -213,7 +245,8 @@ ${slide(`<h2>Next month's plan</h2>${list(narrative.plan)}<p style="color:#9a9aa
           </Select>
         )}
         <Segmented value={range} onChange={setRange} options={[{ value: "7", label: "7 days" }, { value: "30", label: "30 days" }, { value: "60", label: "60 days" }]} />
-        <span className="text-xs text-fg-3">{clientCampaigns.length} campaigns · compared with previous {range} days</span>
+        {uploadedCount > 0 && <Segmented value={scope} onChange={setScopeChoice} options={[{ value: "upload", label: "Uploaded data" }, { value: "all", label: "All campaigns" }]} />}
+        <span className="text-xs text-fg-3">{clientCampaigns.length} campaigns · {period} · compared with previous {range} days</span>
       </div>
 
       {!client ? (
@@ -264,14 +297,14 @@ ${slide(`<h2>Next month's plan</h2>${list(narrative.plan)}<p style="color:#9a9aa
           </div>
 
           <Section n={5} title="Campaign performance">
-            <div className="-mx-4 mb-3"><Bars data={perCampaign.map(({ c, t }) => ({ name: c.service, spend: t.spend, revenue: t.revenue }))} x="name" series={[{ key: "spend", label: "Spend" }, { key: "revenue", label: "Revenue" }]} fmt={compactMoney} height={200} /></div>
+            <div className="-mx-4 mb-3"><Bars data={perCampaign.map(({ c, t }) => ({ name: campaignLabel(c), spend: t.spend, revenue: t.revenue }))} x="name" series={[{ key: "spend", label: "Spend" }, { key: "revenue", label: "Revenue" }]} fmt={compactMoney} height={200} /></div>
             <div className="-mx-4">
               <Table>
                 <thead><tr><Th>Campaign</Th><Th>Status</Th><Th>Spend</Th><Th>Reach</Th><Th>Clicks</Th><Th>CTR</Th><Th>CPC</Th><Th>Leads</Th><Th>Conv.</Th><Th>CPA</Th><Th>ROAS</Th><Th>Revenue</Th></tr></thead>
                 <tbody className="tabular-nums">
                   {perCampaign.map(({ c, t }) => (
                     <tr key={c.id}>
-                      <Td><p className="font-medium">{c.service}</p><p className="text-xs text-fg-3">{c.platform}</p></Td>
+                      <Td><p className="font-medium">{campaignLabel(c)}</p><p className="text-xs text-fg-3">{c.platform}</p></Td>
                       <Td><StatusBadge status={c.status} /></Td>
                       <Td>{compactMoney(t.spend)}</Td><Td>{compact(t.reach)}</Td><Td>{compact(t.clicks)}</Td><Td>{pct(t.ctr, 2)}</Td><Td>{money(t.cpc)}</Td>
                       <Td>{t.leads}</Td><Td>{t.conversions}</Td><Td>{money(t.cpa)}</Td>
@@ -361,9 +394,14 @@ ${slide(`<h2>Next month's plan</h2>${list(narrative.plan)}<p style="color:#9a9aa
             ))}
             <li className="flex items-center gap-2 text-[13px]">
               <FileSpreadsheet className="size-3.5 text-fg-3" />
-              <span className="flex-1">Excel upload</span>
-              <Badge tone="success" dot>Built-in</Badge>
+              <span className="flex-1">Excel / CSV upload{uploadedCount > 0 && <span className="block text-[11px] text-fg-3">{uploadedCount} uploaded campaign(s) for {client?.company}</span>}</span>
+              {writable ? <Button size="xs" onClick={() => setImportOpen(true)}>Upload</Button> : <Badge tone="success" dot>Built-in</Badge>}
             </li>
+            {writable && client && uploadedCount > 0 && (
+              <li className="pl-5.5">
+                <button className="text-[11px] text-fg-3 hover:text-danger hover:underline" onClick={() => { if (window.confirm(`Remove all uploaded performance data for ${client.company}?`)) { removeUploadedMetrics(client.id); toast("Uploaded data removed"); } }}>Remove uploaded data</button>
+              </li>
+            )}
           </ul>
         </Card>
       </div>
@@ -371,18 +409,19 @@ ${slide(`<h2>Next month's plan</h2>${list(narrative.plan)}<p style="color:#9a9aa
       <Card className="no-print mt-4">
         <CardHeader title="Generated reports" subtitle="History of reports produced from this workspace" />
         {visibleReports.length === 0 ? (
-          <EmptyState icon={<CalendarClock className="size-5" />} title="No reports generated yet" description="Export a PDF, Excel or PPT above to create one." />
+          <EmptyState icon={<CalendarClock className="size-5" />} title="No reports generated yet" description="Generate an AI report, or export a PDF, Excel or PPT above." />
         ) : (
           <Table>
-            <thead><tr><Th>Client</Th><Th>Period</Th><Th>Format</Th><Th>Created</Th><Th>Status</Th></tr></thead>
+            <thead><tr><Th>Client</Th><Th>Period</Th><Th>Format</Th><Th>Created</Th><Th>Status</Th><Th /></tr></thead>
             <tbody>
               {visibleReports.map((r) => (
                 <tr key={r.id}>
                   <Td className="font-medium">{allClients.find((c) => c.id === r.clientId)?.company}</Td>
                   <Td className="text-xs">{r.period}</Td>
-                  <Td><Badge>{FORMAT_LABEL[r.format]}</Badge></Td>
+                  <Td>{r.content ? <AIBadge>AI report</AIBadge> : <Badge>{FORMAT_LABEL[r.format]}</Badge>}</Td>
                   <Td className="text-xs">{fmtDate(r.createdAt)}</Td>
-                  <Td>{r.sent ? <Badge tone="success" dot>Sent</Badge> : <Badge tone="warning" dot>{isClient ? "Being prepared" : "Awaiting approval"}</Badge>}</Td>
+                  <Td>{r.content && r.status ? (isClient && r.status !== "Approved" ? <Badge tone="warning" dot>Being prepared</Badge> : <Badge tone={REPORT_STATUS_TONE[r.status]} dot>{r.status}</Badge>) : r.sent ? <Badge tone="success" dot>Sent</Badge> : <Badge tone="warning" dot>{isClient ? "Being prepared" : "Awaiting approval"}</Badge>}</Td>
+                  <Td>{r.content && (!isClient || r.status === "Approved") && <Button size="xs" variant="ghost" onClick={() => setViewingId(r.id)}>View</Button>}</Td>
                 </tr>
               ))}
             </tbody>
@@ -390,6 +429,17 @@ ${slide(`<h2>Next month's plan</h2>${list(narrative.plan)}<p style="color:#9a9aa
         )}
       </Card>
 
+      {importOpen && <MetricsImportModal open onClose={() => setImportOpen(false)} clients={clients.map((c) => ({ id: c.id, company: c.company }))} defaultClientId={client?.id} onImported={(id) => { setClientId(id); setScopeChoice("upload"); }} />}
+      {viewing && <ReportViewer report={viewing} onClose={() => setViewingId(null)} />}
+      {agentOpen && client && (
+        <Modal open onClose={() => !generating && setAgentOpen(false)} title="Generate AI report" subtitle={`${client.company} · ${period} · ${scope === "upload" ? "uploaded data" : "all campaigns"}`}
+          footer={<><Button variant="ghost" disabled={generating} onClick={() => setAgentOpen(false)}>Cancel</Button><Button variant="ai" loading={generating} icon={<Sparkles className="size-3.5" />} onClick={generate}>{generating ? "Agent is working…" : "Generate report"}</Button></>}>
+          <p className="mb-3 text-[13px] leading-relaxed text-fg-2">The Reporting agent pulls this client&apos;s numbers, compares them with the previous {range} days, looks for unusual days and weak campaigns, then writes the report and a cover email. It is saved under the Reports approval mode — nothing is sent to the client.</p>
+          <Field label="Anything to focus on? (optional)">
+            <Textarea value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="e.g. Explain why CPA rose, and whether we should move budget to Google." disabled={generating} />
+          </Field>
+        </Modal>
+      )}
       {editing && (
         <ScheduleModal
           schedule={editing}
