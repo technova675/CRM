@@ -22,9 +22,19 @@ Use the user switcher (bottom-left) to try all 13 roles — Founder/Admin, Sales
 
 Copy `.env.example` to `.env.local` and set one provider key: `GROQ_API_KEY` or `OPENROUTER_API_KEY` (both have free tiers), or `AI_GATEWAY_API_KEY`. The first provider with a key is used, or set `AI_PROVIDER`; the Reporting agent falls back to the next provider when the first one fails. The top-bar pill changes from **AI local** to **AI live**. Every agent then calls the model through `/api/ai/agent` (plus the existing research/draft/assistant routes) with only the data the current user is authorised to see; without a key each agent runs a deterministic local engine over your real data. Either way, every AI output line is tagged **Data** (with its source) / **Assumption** / **Recommendation**.
 
-### Reporting agent
+### Reports from uploaded files
 
-**Reports → Generate AI report** runs a tool-calling agent (`/api/ai/report`): it pulls the client's totals, campaign breakdown, weekly trend, unusual days, goals and creatives through tools, then writes the summary, insights, recommendations and a cover email. Every figure is calculated in `lib/ai/reporting.ts`, not by the model. The report is saved under the Reports approval mode and can be approved, downloaded as a printable page, or opened in your email app. **Reports → Import data** loads real performance data from Excel/CSV (Meta Ads Manager and Google Ads exports map automatically); uploaded data is reported separately from the demo data.
+**Reports → Upload file** accepts Excel (`.xlsx`, every worksheet), CSV and PowerPoint (`.pptx`). Reports have no dependency on demo CRM companies, schedules, campaign figures or generated reports. The company filter is built from uploads saved in Neon. A company name is suggested only when a recognized company/client column contains one distinct name; otherwise enter it in the upload preview.
+
+No fixed column schema is required. Review the suggested header row for each sheet, select a different row, or choose no headers for complex layouts. All sheets are saved together; the original file (base64), raw cell grids, and interpreted columns/rows are retained in Postgres. The original binary preserves formulas, formatting and other workbook details; the report uses extracted cell values, not an Excel calculation engine. You can switch between interpreted data and original worksheet cells. Mixed independent tables on a single sheet can be preserved as a raw grid; they are not automatically treated as independent datasets.
+
+The dashboard generates metric cards, up to three charts, source information, searchable/sortable tables, pagination, selected-sheet CSV export and print/PDF from each saved sheet. Identifier columns are not summed. Rates and unit costs default to explicitly labeled unweighted averages; aggregation can be changed to sum, average, minimum or maximum. Missing data, targets and prior periods are never invented. Legacy `.xls` / `.ppt` and encrypted workbooks must be converted first.
+
+Set `DATABASE_URL` in `.env.local`, then run `npm run db:init:reports` to create or update `report_companies`, `report_files` and `report_tables`. The same idempotent schema setup runs on first API use. Uploads are atomic and bounded to 60 sheets/tables, 200 columns and 50,000 source rows per sheet, with a 4 MB total JSON request including the original file and raw/parsed data. Oversized files are rejected explicitly instead of silently truncated.
+
+Until the app has real authentication, report APIs isolate uploads with an unguessable HttpOnly browser-workspace cookie. This is browser workspace isolation, not organization membership or cross-device login. Keep that cookie to reopen saved reports in the same browser; another browser cannot access them. Older uploads without a workspace assignment are not exposed to new sessions. Public sharing and fake scheduling controls are omitted.
+
+Verification: `npm run test:reports` tests parsing and aggregation. With the app running on port 3001, `npm run test:reports:integration` verifies a real Neon upload/reload/delete cycle, workspace isolation, original-file retention and cleanup of its temporary data.
 
 ## Modules
 
@@ -50,7 +60,7 @@ Copy `.env.example` to `.env.local` and set one provider key: `GROQ_API_KEY` or 
 | Influencers | `/influencers` | Creator CRM, AI matching → shortlist, engagement pipeline (outreach → payment → performance) |
 | SEO | `/seo` | Health over time, audit issues → tasks, rankings, keyword ideas (estimates), content gaps & briefs, backlinks, Search Console status |
 | Analytics & AI Insights | `/analytics` | Unified metrics by client/platform/campaign/ad/creative/audience/geo/date, period compare, anomaly investigation: Finding → Evidence → Recommendation → Priority |
-| Reports | `/reports` | 16 report sections, Dashboard/PDF/PPT/Excel, schedules |
+| Reports | `/reports` | Upload-driven companies and dashboards from Excel/CSV/PPTX, original-file/raw-cell preservation in Neon, header preview, charts, CSV and print/PDF |
 | Tasks & Projects | `/tasks` | Dependencies, comments, attachments, recurring tasks, projects, team workload |
 | Finance | `/payments` | Revenue → Cost → Gross margin → Outstanding → Profitability, invoices, expenses, client/project profitability, forecast |
 | Team | `/team` | Members, per-module permission matrix (editable), workload vs capacity |

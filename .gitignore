@@ -40,3 +40,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local data / sample files
+/.env.local
+/Logo-in-2-Hours-Ads-1-Sep-2026-9-Oct-2026.csv
+/Logo-in-2-Hours-Ad-sets-1-Sep-2026-9-Oct-2026.csv
+/6575_Mid_Funnel_Campaign_2023_20221227_225107_3964337159.csv
+/Adbibe Dec 2.pptx
+/Adbibe.pptx
