@@ -1,13 +1,15 @@
 "use client";
 
-import { CheckCircle2, HelpCircle, Lightbulb } from "lucide-react";
+import { CheckCircle2, HelpCircle, Lightbulb, FileText, CircleAlert, ExternalLink } from "lucide-react";
 import type { LeadResearch, ResearchFinding } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const KIND_META: Record<ResearchFinding["kind"], { label: string; icon: typeof CheckCircle2; cls: string; desc: string }> = {
-  verified: { label: "Verified", icon: CheckCircle2, cls: "text-success bg-success-soft", desc: "Directly supported by the CRM record or fetched public content — source shown." },
-  assumption: { label: "Assumption", icon: HelpCircle, cls: "text-warning bg-warning-soft", desc: "Inferred by the AI. Confirm before using it in a message." },
+  verified: { label: "Verified excerpt", icon: CheckCircle2, cls: "text-success bg-success-soft", desc: "Observed in a fetched public source. This verifies what was published, not the truth of every claim." },
+  assumption: { label: "AI inference", icon: HelpCircle, cls: "text-warning bg-warning-soft", desc: "An interpretation with a cited basis. Confirm before using it in a message." },
   recommendation: { label: "Recommendation", icon: Lightbulb, cls: "text-accent-text bg-accent-soft", desc: "Suggested action or service from Adbibe's playbook." },
+  record: {label:"CRM supplied",icon:FileText,cls:"text-info bg-info-soft",desc:"Provided by a person or import. Not independently verified against public information."},
+  unavailable: {label:"Not verified",icon:CircleAlert,cls:"text-fg-2 bg-surface-2",desc:"No reliable evidence was obtained. Missing or blocked sources do not establish a problem."},
 };
 
 export function KindTag({ kind }: { kind: ResearchFinding["kind"] }) {
@@ -41,11 +43,12 @@ export function ResearchSections({ research }: { research: LeadResearch }) {
           <p className="mb-2 text-xs font-semibold text-fg-2">{s.title}</p>
           <ul className="space-y-2">
             {s.findings.map((f, i) => (
-              <li key={i} className="flex items-start gap-2 text-[13px]">
-                <KindTag kind={f.kind} />
+              <li key={i} className="flex flex-col items-start gap-2 text-[13px] sm:flex-row">
+                <KindTag kind={!research.mode && f.kind==="verified" ? "record" : f.kind} />
                 <span className="min-w-0">
                   <span className="text-fg">{f.text}</span>
-                  {f.source && <span className="block text-[11px] text-fg-3">Source: {f.source}</span>}
+                  {f.evidenceQuote && f.kind!=="verified" && <blockquote className="mt-2 border-l-2 border-border pl-2 text-xs leading-6 text-fg-2">“{f.evidenceQuote}”</blockquote>}
+                  {f.source && (/^https?:\/\//i.test(f.source)?<a href={f.source} target="_blank" rel="noreferrer" className="mt-1 flex min-h-11 items-center gap-1 break-all text-xs text-accent-text underline">Source <ExternalLink size={12} aria-hidden="true"/>{f.source}</a>:<span className="mt-1 block text-xs text-fg-2">Source: {f.source}</span>)}
                 </span>
               </li>
             ))}
@@ -54,4 +57,13 @@ export function ResearchSections({ research }: { research: LeadResearch }) {
       ))}
     </div>
   );
+}
+
+export function ResearchEvidencePanel({research}:{research:LeadResearch}){
+  return <div className="space-y-4">
+    <div className="rounded-xl border border-border bg-surface p-4"><p className="text-sm font-semibold">{research.mode==="public_ai"?"Public research + AI synthesis":research.mode==="public_evidence"?"Public evidence only":research.mode==="crm_only"?"CRM-only assessment":"Imported or older research · not independently verified"}</p>{research.model&&<p className="mt-1 text-xs text-fg-2">Model: {research.model}</p>}<p className="mt-2 text-xs leading-6 text-fg-2">Only matched public-source observations are labelled as evidence. Inferences and recommendations require review. A profile link, tracking tag or unreadable page does not prove activity or inactivity.</p></div>
+    {research.coverage&&<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label="Research coverage">{research.coverage.map(item=><div key={item.topic} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface p-3 text-xs"><span>{item.label}</span><span className={item.status==="evidence"?"text-success":item.status==="inference"?"text-warning":"text-fg-2"}>{item.status==="evidence"?"Evidence found":item.status==="inference"?"Inference only":"Not verified"}</span></div>)}</div>}
+    {!!research.limitations?.length&&<div className="rounded-xl border border-warning/30 bg-warning-soft p-4"><p className="text-sm font-semibold">Research limitations</p><ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-6">{research.limitations.map((limitation,index)=><li key={index}>{limitation}</li>)}</ul></div>}
+    {!!research.sources?.length&&<details className="rounded-xl border border-border bg-surface p-4"><summary className="min-h-11 cursor-pointer text-sm font-semibold">Sources checked · {research.sources.length}</summary><ul className="mt-3 space-y-3">{research.sources.map(source=><li key={source.id} className="rounded-lg border border-border p-3 text-xs"><a href={/^https?:\/\//i.test(source.url)?source.url:undefined} target="_blank" rel="noreferrer" className="break-all text-accent-text underline">{source.title} · {source.url}</a><p className="mt-1 text-fg-2">{source.status==="ok"?"Read successfully":"Unavailable"} · {new Date(source.checkedAt).toLocaleString()}</p>{source.reason&&<p className="mt-1 text-fg-2">{source.reason}</p>}</li>)}</ul></details>}
+  </div>;
 }

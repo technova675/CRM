@@ -6,33 +6,34 @@ import Papa from "papaparse";
 import { readSheet } from "read-excel-file/browser";
 import { FileSpreadsheet, Upload } from "lucide-react";
 import { useCRM } from "@/lib/store";
-import { LEAD_SOURCES, SERVICES, type CompanySize, type Lead, type LeadSource, type Service } from "@/lib/types";
+import { LEAD_SOURCES, LEAD_STATUSES, SERVICES, type CompanySize, type LeadStatus, type LeadSource, type Service } from "@/lib/types";
 import { Badge, Button, Field, Input, Modal, Select, Table, Td, Textarea, Th } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
-import { cn } from "@/lib/utils";
+import { cn, downloadFile, toCSV } from "@/lib/utils";
+import { importedLead, LEAD_IMPORT_FIELDS, normalizeHeader } from "@/lib/domain/leadImport";
 import { CustomFieldInput, findDuplicatesFor } from "./LeadTools";
 
 export const INDUSTRIES = ["D2C / E-commerce", "Real Estate", "Education", "Healthcare", "Hospitality", "Fashion", "Beauty", "SaaS", "Fintech", "Automotive", "Food & Beverage", "Fitness", "Consulting", "Other"];
-export const SIZES: CompanySize[] = ["1-10", "11-50", "51-200", "201-1000", "1000+"];
+export const SIZES: CompanySize[] = ["Unknown","1-10", "11-50", "51-200", "201-1000", "1000+"];
 
 type Draft = {
   name: string; company: string; jobTitle: string; email: string; phone: string; linkedin: string; instagram: string; website: string;
   location: string; industry: string; companySize: CompanySize; source: LeadSource; ownerId: string; services: Service[]; notes: string;
-  dealValue: string; customFields: Record<string, string>;
+  dealValue: string; customFields: Record<string, string>; status: LeadStatus; leadScore: string; tags: string; communicationHistory: string;
 };
 
 const empty = (ownerId: string): Draft => ({
-  name: "", company: "", jobTitle: "", email: "", phone: "", linkedin: "", instagram: "", website: "", location: "", industry: INDUSTRIES[0]!,
-  companySize: "11-50", source: "Website", ownerId, services: [], notes: "", dealValue: "", customFields: {},
+  name: "", company: "", jobTitle: "", email: "", phone: "", linkedin: "", instagram: "", website: "", location: "", industry: "Other",
+  companySize: "Unknown", status: "New", leadScore: "", tags: "", communicationHistory: "", source: "Website", ownerId, services: [], notes: "", dealValue: "", customFields: {},
 });
 
-export function ServicePicker({ value, onChange }: { value: Service[]; onChange: (v: Service[]) => void }) {
+export function ServicePicker({ value, onChange, ...accessibility }: { value: Service[]; onChange: (v: Service[]) => void; "aria-labelledby"?: string }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div {...accessibility} role="group" className="flex flex-wrap gap-1.5">
       {SERVICES.map((s) => {
         const on = value.includes(s);
         return (
-          <button key={s} type="button" onClick={() => onChange(on ? value.filter((x) => x !== s) : [...value, s])} className={cn("rounded-md border px-2 py-1 text-xs transition", on ? "border-accent bg-accent-soft text-accent-text" : "border-border text-fg-2 hover:bg-surface-2")}>
+          <button key={s} type="button" aria-pressed={on} onClick={() => onChange(on ? value.filter((x) => x !== s) : [...value, s])} className={cn("min-h-11 rounded-md border px-3 py-2 text-xs transition", on ? "border-accent bg-accent-soft text-accent-text" : "border-border text-fg-2 hover:bg-surface-2")}>
             {s}
           </button>
         );
@@ -54,16 +55,20 @@ export function AddLeadModal({ open, onClose }: { open: boolean; onClose: () => 
 
   const submit = () => {
     if (!d.name.trim() || !d.company.trim()) return toast("Name and company are required", undefined, "warning");
-    const { dealValue, customFields, ...rest } = d;
+    const { dealValue, customFields, leadScore, tags, ...rest } = d;
+    if (d.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) return toast("Enter a valid email", undefined, "warning");
+    const initialScore = leadScore.trim() === "" ? undefined : Number(leadScore);
+    if (initialScore !== undefined && (!Number.isInteger(initialScore) || initialScore < 0 || initialScore > 100)) return toast("Lead score must be 0–100", undefined, "warning");
+    if (dealValue && (!Number.isFinite(Number(dealValue)) || Number(dealValue) < 0)) return toast("Deal value must be non-negative",undefined,"warning");
     const cf = Object.fromEntries(Object.entries(customFields).filter(([, v]) => v !== ""));
-    const lead = addLead({ ...rest, linkedin: d.linkedin || undefined, instagram: d.instagram || undefined, website: d.website || undefined, dealValue: Number(dealValue) || undefined, customFields: Object.keys(cf).length ? cf : undefined });
-    toast("Lead added", `${lead.company} — AI research started`, "ai");
+    const lead = addLead({ ...rest, name: d.name.trim(), company: d.company.trim(), email: d.email.trim(), initialScore, tags: tags.split(/[;,]/).map(tag => tag.trim().replace(/^#/, "")).filter(Boolean), linkedin: d.linkedin || undefined, instagram: d.instagram || undefined, website: d.website || undefined, dealValue: dealValue.trim() === "" ? undefined : Number(dealValue), customFields: Object.keys(cf).length ? cf : undefined });
+    toast("Lead added", `${lead.company} · ${lead.status}`);
     setD(empty(me));
     onClose();
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add lead" subtitle="AI research and scoring run automatically when the lead is saved." size="lg"
+    <Modal open={open} onClose={onClose} title="Add lead" subtitle="Create a complete lead profile. Scores are calculated automatically; AI research is also available from the lead profile." size="lg"
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={submit}>Save lead</Button></>}>
       {dups.length > 0 && (
         <div className="mb-3 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
@@ -98,13 +103,17 @@ export function AddLeadModal({ open, onClose }: { open: boolean; onClose: () => 
         <Field label="Assigned salesperson">
           <Select value={d.ownerId} onChange={(e) => set("ownerId", e.target.value)}>{sellers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select>
         </Field>
-        <Field label="Expected deal value (₹)"><Input type="number" value={d.dealValue} placeholder="e.g. 150000" onChange={(e) => set("dealValue", e.target.value)} /></Field>
+        <Field label="Status"><Select value={d.status} onChange={(e) => set("status", e.target.value as LeadStatus)}>{LEAD_STATUSES.map(status => <option key={status}>{status}</option>)}</Select></Field>
+        <Field label="Lead score (0–100)"><Input type="number" min={0} max={100} value={d.leadScore} placeholder="Leave blank to calculate automatically" onChange={(e) => set("leadScore", e.target.value)} /></Field>
+        <Field label="Tags"><Input value={d.tags} placeholder="Separate tags with commas" onChange={(e) => set("tags",e.target.value)} /></Field>
+        <Field label="Deal value (₹)"><Input type="number" value={d.dealValue} placeholder="e.g. 150000" onChange={(e) => set("dealValue", e.target.value)} /></Field>
         {customDefs.map((def) => (
           <Field key={def.key} label={def.label}>
             <CustomFieldInput def={def} value={d.customFields[def.key] ?? ""} onChange={(v) => set("customFields", { ...d.customFields, [def.key]: v })} />
           </Field>
         ))}
-        <Field label="Potential services" className="sm:col-span-2"><ServicePicker value={d.services} onChange={(v) => set("services", v)} /></Field>
+        <Field label="Services required" className="sm:col-span-2"><ServicePicker value={d.services} onChange={(v) => set("services", v)} /></Field>
+        <Field label="Communication history" className="sm:col-span-2"><Textarea value={d.communicationHistory} onChange={(e) => set("communicationHistory",e.target.value)} placeholder="Record earlier calls, emails or meetings…" /></Field>
         <Field label="Notes" className="sm:col-span-2"><Textarea value={d.notes} onChange={(e) => set("notes", e.target.value)} /></Field>
       </div>
     </Modal>
@@ -112,34 +121,15 @@ export function AddLeadModal({ open, onClose }: { open: boolean; onClose: () => 
 }
 
 // ---------------- Import ----------------
-const TARGETS: { key: keyof Lead | "skip"; label: string; guess: RegExp }[] = [
-  { key: "name", label: "Name", guess: /^(full.?)?name$|contact|person/i },
-  { key: "company", label: "Company", guess: /company|brand|organi[sz]ation|business/i },
-  { key: "jobTitle", label: "Job title", guess: /title|designation|role|position/i },
-  { key: "email", label: "Email", guess: /e-?mail/i },
-  { key: "phone", label: "Phone", guess: /phone|mobile|whatsapp|contact.?no/i },
-  { key: "linkedin", label: "LinkedIn", guess: /linkedin/i },
-  { key: "instagram", label: "Instagram", guess: /insta/i },
-  { key: "website", label: "Website", guess: /web|site|url|domain/i },
-  { key: "location", label: "Location", guess: /city|location|country|region|address/i },
-  { key: "industry", label: "Industry", guess: /industry|category|sector|vertical/i },
-  { key: "companySize", label: "Company size", guess: /size|employees|headcount/i },
-  { key: "source", label: "Lead source", guess: /source|channel/i },
-  { key: "notes", label: "Notes", guess: /note|comment|remark/i },
-];
-
-const normSize = (v: string): CompanySize => {
-  const n = parseInt(v.replace(/[^0-9]/g, ""), 10);
-  if (SIZES.includes(v as CompanySize)) return v as CompanySize;
-  if (!n) return "11-50";
-  return n <= 10 ? "1-10" : n <= 50 ? "11-50" : n <= 200 ? "51-200" : n <= 1000 ? "201-1000" : "1000+";
-};
-const normSource = (v: string): LeadSource => (LEAD_SOURCES.find((s) => s.toLowerCase() === v.toLowerCase()) ?? "Cold List") as LeadSource;
+const TARGETS = LEAD_IMPORT_FIELDS;
 
 export function ImportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const importLeads = useCRM((s) => s.importLeads);
   const me = useCRM((s) => s.currentUserId);
   const team = useCRM((s) => s.team);
+  const customDefs = useCRM((s) => s.settings.leadCustomFields);
+  const [issues, setIssues] = useState<string[]>([]);
+  const [paste, setPaste] = useState("");
   const [file, setFile] = useState<string>("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
@@ -148,7 +138,7 @@ export function ImportModal({ open, onClose }: { open: boolean; onClose: () => v
   const [result, setResult] = useState<{ added: number; skipped: number } | null>(null);
   const [drag, setDrag] = useState(false);
 
-  const reset = () => { setFile(""); setHeaders([]); setRows([]); setMap({}); setResult(null); };
+  const reset = () => { setFile(""); setHeaders([]); setRows([]); setMap({}); setResult(null); setIssues([]); };
   const close = () => { reset(); onClose(); };
 
   const load = (hs: string[], data: string[][], name: string) => {
@@ -158,8 +148,8 @@ export function ImportModal({ open, onClose }: { open: boolean; onClose: () => v
     const used = new Set<string>();
     const m: Record<number, string> = {};
     hs.forEach((h, i) => {
-      const t = TARGETS.find((t) => !used.has(t.key) && t.guess.test(h.trim()));
-      if (t) { used.add(t.key); m[i] = t.key; } else m[i] = "skip";
+      const t = TARGETS.find((t) => !used.has(t.key) && (t.aliases as readonly string[]).includes(normalizeHeader(h)));
+      if (t) { used.add(t.key); m[i] = t.key; } else { const custom = customDefs.find(def => [def.key,def.label].map(normalizeHeader).includes(normalizeHeader(h))); m[i] = custom ? `custom:${custom.key}` : "skip"; }
     });
     setMap(m);
   };
@@ -167,19 +157,21 @@ export function ImportModal({ open, onClose }: { open: boolean; onClose: () => v
   const onFile = async (f: File) => {
     setResult(null);
     try {
-      if (/\.xlsx?$/i.test(f.name)) {
+      if (f.size > 20_000_000) throw new Error("Lead imports support files up to 20 MB. Split a larger list into batches.");
+      if (/\.xls$/i.test(f.name)) throw new Error("Save the legacy .xls file as .xlsx or CSV first.");
+      if (/\.xlsx$/i.test(f.name)) {
         const data = await readSheet(f);
         const str = data.map((r) => r.map((c) => (c == null ? "" : c instanceof Date ? c.toISOString() : String(c))));
         load(str[0] ?? [], str.slice(1), f.name);
       } else {
         Papa.parse<string[]>(f, {
           skipEmptyLines: true,
-          complete: (res) => load(res.data[0] ?? [], res.data.slice(1), f.name),
+          complete: (res) => { if (res.errors.length) toast("Could not parse CSV",res.errors[0].message,"warning"); else load(res.data[0] ?? [], res.data.slice(1), f.name); },
           error: () => toast("Could not parse CSV", undefined, "warning"),
         });
       }
-    } catch {
-      toast("Could not read file", "Use .csv or .xlsx", "warning");
+    } catch (error) {
+      toast("Could not read file", error instanceof Error ? error.message : "Use .csv or .xlsx", "warning");
     }
   };
 
@@ -192,39 +184,32 @@ export function ImportModal({ open, onClose }: { open: boolean; onClose: () => v
   }, [rows, headers, map]);
 
   const run = () => {
-    const leads = mapped.map((o) => ({
-      name: o.name || "",
-      company: o.company || o.name || "",
-      jobTitle: o.jobTitle || "",
-      email: o.email || "",
-      phone: o.phone || "",
-      linkedin: o.linkedin || undefined,
-      instagram: o.instagram || undefined,
-      website: o.website ? (o.website.startsWith("http") ? o.website : `https://${o.website}`) : undefined,
-      location: o.location || "",
-      industry: o.industry || "Other",
-      companySize: normSize(o.companySize || ""),
-      source: normSource(o.source || ""),
-      ownerId: owner,
-      notes: o.notes || "",
-    }));
-    const r = importLeads(leads);
+    const failures: string[] = [];
+    const valid: ReturnType<typeof importedLead>[] = [];
+    mapped.forEach((row,index) => { try { valid.push(importedLead(row,owner,team.filter(member => ["admin","sales"].includes(member.role)))); } catch(error) { failures.push(`Row ${index+2}: ${error instanceof Error ? error.message : "Invalid data"}`); } });
+    const imported = importLeads(valid);
+    const r = { added: imported.added, skipped: imported.skipped + failures.length };
+    setIssues(failures);
     setResult(r);
     toast("Import complete", `${r.added} added · ${r.skipped} skipped`);
   };
 
-  const hasName = Object.values(map).includes("name");
+  const hasName = Object.values(map).includes("name") && Object.values(map).includes("company");
+  const mappedFields = Object.values(map).filter(value => value !== "skip");
+  const duplicateMapping = new Set(mappedFields).size !== mappedFields.length;
 
   return (
-    <Modal open={open} onClose={close} size="xl" title="Import leads" subtitle="Upload CSV or Excel (.xlsx). Columns are auto-mapped; duplicates by email are skipped."
-      footer={result ? <Button variant="primary" onClick={close}>Done</Button> : <><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" disabled={!rows.length || !hasName} onClick={run}>Import {rows.length.toLocaleString()} leads</Button></>}>
+    <Modal open={open} onClose={close} size="xl" title="Import leads" subtitle="Import CSV or Excel (.xlsx), or paste a CSV list. Map every lead field; duplicate email addresses and phone numbers are skipped."
+      footer={result ? <Button variant="primary" onClick={close}>Done</Button> : <><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" disabled={!rows.length || !hasName || duplicateMapping || rows.length > 10000} onClick={run}>Import {rows.length.toLocaleString()} leads</Button></>}>
       {result ? (
         <div className="py-8 text-center">
           <p className="text-3xl font-semibold">{result.added.toLocaleString()}</p>
-          <p className="text-sm text-fg-3">leads imported · {result.skipped} skipped (duplicate email or missing name)</p>
+          <p className="text-sm text-fg-3">leads imported · {result.skipped} skipped (duplicates or invalid rows)</p>
+          {issues.length > 0 && <div className="mx-auto mt-4 max-h-52 max-w-xl overflow-auto rounded-lg border border-border p-3 text-left text-xs"><p className="font-semibold">Rows that need correction</p>{issues.map(issue => <p key={issue} className="mt-1">{issue}</p>)}</div>}
           <p className="mt-3 text-xs text-fg-3">Imported leads were scored instantly. Run AI research from the Leads or AI Research page.</p>
         </div>
       ) : !rows.length ? (
+        <div className="space-y-4"><Button icon={<FileSpreadsheet size={15}/>} onClick={() => downloadFile("crm-leads-template.csv",toCSV([{name:"",company:"",website:"",email:"",phone:"",linkedin:"",instagram:"",industry:"",location:"",company_size:"",lead_source:"",services_required:"",assigned_salesperson:"",lead_score:"",status:"New",notes:"",communication_history:"",ai_research:"",deal_value:"",tags:""}]),"text/csv")}>Download CSV template</Button>
         <label
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
@@ -232,9 +217,9 @@ export function ImportModal({ open, onClose }: { open: boolean; onClose: () => v
           className={cn("flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed py-14 text-center transition", drag ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-2")}>
           <Upload className="mb-2 size-6 text-fg-3" />
           <p className="text-sm font-medium">Drop a file here or click to browse</p>
-          <p className="mt-1 text-xs text-fg-3">.csv, .xlsx — up to thousands of rows. First row must contain headers.</p>
-          <input type="file" accept=".csv,.xlsx,.xls,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
-        </label>
+          <p className="mt-1 text-xs text-fg-3">.csv, .xlsx — up to 20 MB and 10,000 leads per batch. First row must contain headers.</p>
+          <input type="file" accept=".csv,.xlsx,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
+        </label><Field label="Or paste a bulk CSV list"><Textarea rows={5} value={paste} onChange={event => setPaste(event.target.value)} placeholder="Name,Company,Email,Phone,Status" /></Field><Button disabled={!paste.trim()} onClick={() => { const parsed=Papa.parse<string[]>(paste,{skipEmptyLines:true}); if(parsed.errors.length)toast("Could not parse CSV",parsed.errors[0].message,"warning");else load(parsed.data[0]??[],parsed.data.slice(1),"Pasted lead list"); }}>Preview pasted leads</Button></div>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -258,12 +243,14 @@ export function ImportModal({ open, onClose }: { open: boolean; onClose: () => v
                   <span className="text-fg-3">→</span>
                   <Select value={map[i] ?? "skip"} onChange={(e) => setMap((m) => ({ ...m, [i]: e.target.value }))} className="w-36">
                     <option value="skip">Skip</option>
-                    {TARGETS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                    {TARGETS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}{customDefs.map(def => <option key={def.key} value={`custom:${def.key}`}>Custom: {def.label}</option>)}
                   </Select>
                 </div>
               ))}
             </div>
-            {!hasName && <p className="mt-2 text-xs text-danger">Map at least one column to “Name”.</p>}
+            {duplicateMapping && <p role="alert" className="mt-2 text-xs text-danger">Map each destination field only once to prevent overwriting values.</p>}
+            {rows.length > 10000 && <p role="alert" className="mt-2 text-xs text-danger">Split this list into batches of no more than 10,000 leads.</p>}
+            {!hasName && <p className="mt-2 text-xs text-danger">Map one column to “Name” and one to “Company”.</p>}
           </div>
           <div>
             <p className="mb-2 text-xs font-medium text-fg-2">Preview (first 5 rows)</p>

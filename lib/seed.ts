@@ -161,7 +161,7 @@ function makeLeads(n: number): Lead[] {
 const stageFromStatus = (s: LeadStatus): DealStage | null =>
   ({ Qualified: "Qualified", Contacted: "Contacted", Replied: "Contacted", Meeting: "Meeting", Proposal: "Proposal", Negotiation: "Negotiation", Won: "Won", Lost: "Lost" } as Partial<Record<LeadStatus, DealStage>>)[s] ?? null;
 
-const PROB: Record<DealStage, number> = { "New Lead": 10, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
+const PROB: Record<DealStage, number> = { "New": 10, Researching: 15, Replied: 35, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
 
 function metricsFor(days: number, budget: number, seed: number, conv = 1): DailyMetric[] {
   const r = rng(seed);

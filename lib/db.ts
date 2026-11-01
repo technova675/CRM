@@ -1,73 +1,76 @@
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
-
-// Neon Postgres over HTTP (works in serverless functions without a connection pool).
-// Server-only: never import this from a client component.
-
+// Server-only Supabase Data API access. Never import into client components.
+import { AuthenticationRequiredError, AuthenticationUnavailableError } from "./auth/identity.ts";
+import { ReportStorageError } from "./reportR2.ts";
+import { resilientFetch } from "./auth/resilientFetch.ts";
 export class DbNotConfiguredError extends Error {
   constructor() {
-    super("Database not configured: set DATABASE_URL in .env.local");
+    super("Configure SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY on the server.");
   }
 }
 
-export const dbConfigured = () => !!process.env.DATABASE_URL;
-
-let client: NeonQueryFunction<false, false> | null = null;
-let schema: Promise<unknown> | null = null;
-
-// Creates the report tables on first use, so a fresh Neon database needs no manual setup.
-function ensureSchema(sql: NeonQueryFunction<false, false>) {
-  return sql.transaction([
-    sql`CREATE TABLE IF NOT EXISTS report_companies (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      name_key TEXT NOT NULL UNIQUE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )`,
-    sql`CREATE TABLE IF NOT EXISTS report_files (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      size INTEGER NOT NULL DEFAULT 0,
-      uploaded_by TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )`,
-    sql`CREATE INDEX IF NOT EXISTS report_files_client_idx ON report_files (client_id, created_at DESC)`,
-    sql`CREATE TABLE IF NOT EXISTS report_tables (
-      id TEXT PRIMARY KEY,
-      file_id TEXT NOT NULL REFERENCES report_files(id) ON DELETE CASCADE,
-      position INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      columns JSONB NOT NULL,
-      rows JSONB NOT NULL,
-      row_count INTEGER NOT NULL,
-      column_count INTEGER NOT NULL
-    )`,
-    sql`CREATE INDEX IF NOT EXISTS report_tables_file_idx ON report_tables (file_id, position)`,
-    sql`ALTER TABLE report_files ADD COLUMN IF NOT EXISTS original_base64 TEXT`,
-    sql`ALTER TABLE report_files ADD COLUMN IF NOT EXISTS workspace_id TEXT`,
-    sql`CREATE INDEX IF NOT EXISTS report_files_workspace_idx ON report_files (workspace_id, created_at DESC)`,
-    sql`ALTER TABLE report_tables ADD COLUMN IF NOT EXISTS raw_rows JSONB`,
-    sql`ALTER TABLE report_tables ADD COLUMN IF NOT EXISTS header_row INTEGER`,
-  ]);
+export class SupabaseDbError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, status: number) {
+    super(`Supabase request failed (${code})`);
+    this.code = code;
+    this.status = status;
+  }
 }
 
-export async function db() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new DbNotConfiguredError();
-  client ??= neon(url);
-  // Retry schema creation on the next request if it failed (e.g. the database was asleep or unreachable).
-  schema ??= ensureSchema(client).catch((e) => {
-    schema = null;
-    throw e;
-  });
-  await schema;
-  return client;
+export const dbConfigured = () => !!((process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY));
+
+type RequestOptions = { query?: Record<string, string>; method?: "GET" | "POST" | "DELETE"; body?: unknown; prefer?: string; timeoutMs?: number };
+
+export async function supabaseRequest<T>(resource: string, options: RequestOptions = {}): Promise<T> {
+  const base = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+  if (!base || !key) throw new DbNotConfiguredError();
+  if (!/^[a-z_][a-z0-9_]*(?:\/[a-z_][a-z0-9_]*)?$/.test(resource)) throw new Error("Invalid database resource");
+  let url: URL;
+  try {
+    url = new URL(`/rest/v1/${resource}`, base);
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) throw new Error();
+  } catch {
+    throw new SupabaseDbError("invalid_configuration", 503);
+  }
+  for (const [name, value] of Object.entries(options.query ?? {})) url.searchParams.set(name, value);
+  const headers: Record<string, string> = { apikey: key, Accept: "application/json", "Accept-Profile": "public", "Content-Profile": "public" };
+  // Legacy service_role keys are JWTs; newer sb_secret_ keys use only the apikey header.
+  if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
+  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  if (options.prefer) headers.Prefer = options.prefer;
+  let response: Response;
+  try {
+    response = await resilientFetch(url, {
+      method: options.method ?? "GET", headers, cache: "no-store", signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
+      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+    });
+  } catch {
+    throw new SupabaseDbError("connection_failed", 503);
+  }
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new SupabaseDbError(typeof error.code === "string" ? error.code : `http_${response.status}`, response.status);
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
 }
 
-// JSON error response for a failed DB call; hides connection details from the browser.
-export function dbError(e: unknown) {
-  if (e instanceof DbNotConfiguredError) return Response.json({ error: e.message, code: "no_db" }, { status: 503 });
-  console.error("[db]", e);
-  return Response.json({ error: "Database error. Check DATABASE_URL and that the Neon project is running." }, { status: 500 });
+export function dbError(error: unknown) {
+  if (error instanceof ReportStorageError) return Response.json({ error: error.message, code: "storage_unavailable" }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
+  if (error instanceof AuthenticationRequiredError) return Response.json({ error: error.message, code: "auth_required" }, { status: 401, headers: { "Cache-Control": "private, no-store" } });
+  if (error instanceof AuthenticationUnavailableError) return Response.json({ error: error.message, code: "auth_unavailable" }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
+  if (error instanceof DbNotConfiguredError) return Response.json({ error: error.message, code: "no_db" }, { status: 503 });
+  if (error instanceof SupabaseDbError) {
+    console.error("[db] Supabase", { code: error.code, status: error.status });
+    if (error.code === "22023") return Response.json({ error: "The upload is incomplete, expired or contains invalid chunk data. Please retry the upload.", code: "upload_invalid" }, { status: 400 });
+    if (error.code === "42501") return Response.json({ error: "These reports or upload sessions are not available to this account.", code: "access_denied" }, { status: 403 });
+    if (["PGRST205", "PGRST202", "42P01", "42883", "PGRST200"].includes(error.code)) {
+      return Response.json({ error: "Supabase application schema is not ready. Apply the SQL files in supabase/migrations in order in the Supabase SQL Editor, then refresh.", code: "schema_missing" }, { status: 503 });
+    }
+    if (error.status === 401 || error.status === 403) return Response.json({ error: "Supabase denied server access. Check the server service key and apply the reporting migration.", code: "db_auth" }, { status: 503 });
+    if (error.status === 503) return Response.json({ error: "Could not reach Supabase. Check the project URL, project status and network connection.", code: "db_unavailable" }, { status: 503 });
+  } else console.error("[db] Unexpected database failure");
+  return Response.json({ error: "Supabase could not complete this request. Please try again.", code: "db_error" }, { status: 500 });
 }

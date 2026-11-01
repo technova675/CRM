@@ -1,12 +1,12 @@
-// Uploaded report files (Excel / CSV / PowerPoint) turned into plain tables.
+// Uploaded report files (Excel / CSV / PowerPoint / PDF) turned into plain tables.
 // Shared by the browser (parsing, display) and the API routes (validation, storage). Pure: no DOM or DB access.
 
 export type Cell = string | number | null;
-export type ReportFileKind = "excel" | "csv" | "pptx";
+export type ReportFileKind = "excel" | "csv" | "pptx" | "pdf";
 export type ColumnType = "number" | "date" | "text";
 
 export interface ReportTable {
-  name: string; // sheet name, or "Slide 3 · Table 1" for presentations
+  name: string; // sheet name, "Slide 3 · Table 1" for presentations, "Page 2 · Table" for PDFs
   columns: string[];
   rows: Cell[][];
   rawRows?: Cell[][];
@@ -29,21 +29,21 @@ export interface ReportFileSummary extends ReportFileMeta {
 }
 
 export interface ReportFileDetail extends ReportFileMeta {
-  tables: (ReportTable & { id: string })[];
+  tables: (ReportTable & { id: string; chunked?: boolean; rowParts?: number; rawParts?: number })[];
 }
 
 // A report_files row (snake_case, as stored in Postgres) → the API shape.
 export type ReportFileRow = { id: string; client_id: string; company_name?: string; name: string; kind: ReportFileKind; size: number; uploaded_by: string; created_at: string | Date };
 export const fileRowToMeta = (f: ReportFileRow): ReportFileMeta => ({ id: f.id, clientId: f.client_id, companyName: f.company_name ?? "Unassigned", name: f.name, kind: f.kind, size: f.size, uploadedBy: f.uploaded_by, createdAt: new Date(f.created_at).toISOString() });
 
-// Vercel caps a request body at 4.5 MB, so the parsed tables must fit under that when sent as JSON.
+// Legacy single-request API cap. The current uploader uses reportTransfer.ts for 200 MB files in small chunks.
 export const MAX_PAYLOAD_BYTES = 4_000_000;
 export const MAX_TABLES = 60;
 export const MAX_COLUMNS = 200;
 export const MAX_ROWS = 50_000;
 
-const KIND_BY_EXT: Record<string, ReportFileKind> = { xlsx: "excel", csv: "csv", pptx: "pptx" };
-export const ACCEPTED_EXTENSIONS = ".xlsx,.csv,.pptx";
+const KIND_BY_EXT: Record<string, ReportFileKind> = { xlsx: "excel", csv: "csv", pptx: "pptx", pdf: "pdf" };
+export const ACCEPTED_EXTENSIONS = ".xlsx,.csv,.pptx,.pdf";
 
 // Which parser to use for a file name, or why it can't be read.
 export function fileKind(name: string): { kind: ReportFileKind } | { error: string; hint: string } {
@@ -52,7 +52,7 @@ export function fileKind(name: string): { kind: ReportFileKind } | { error: stri
   if (kind) return { kind };
   if (ext === "xls") return { error: "Old Excel format (.xls) isn't supported", hint: "Open it in Excel and save it as .xlsx, then upload again." };
   if (ext === "ppt") return { error: "Old PowerPoint format (.ppt) isn't supported", hint: "Open it in PowerPoint and save it as .pptx, then upload again." };
-  return { error: "Unsupported file type", hint: "Upload an Excel (.xlsx), CSV or PowerPoint (.pptx) file." };
+  return { error: "Unsupported file type", hint: "Upload an Excel (.xlsx), CSV, PowerPoint (.pptx) or PDF file." };
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -71,8 +71,8 @@ export function toCell(v: unknown): Cell {
   return s === "" ? null : s;
 }
 
-// A raw grid (first non-empty row = headers) → a table. Empty rows and completely empty columns are dropped;
-// blank headers become "Column N" and repeated ones get a " (2)" suffix. Returns null when nothing is left.
+// Preserve the raw grid and suggest headers. Empty rows/cells stay in storage; reportView handles display cleanup.
+// Blank headers become "Column N" and repeated ones get a " (2)" suffix. Returns null for an empty grid.
 export function gridToTable(name: string, grid: unknown[][], header?: number | null): ReportTable | null {
   const rawRows = grid.map((r) => r.map(toCell));
   const width = rawRows.reduce((n, r) => Math.max(n, r.length), 0);

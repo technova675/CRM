@@ -13,7 +13,7 @@ import { AIBadge, Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, In
 import { CustomFieldInput, nextBestAction } from "@/components/sales/LeadTools";
 import { toast } from "@/components/shell/toast";
 import { INDUSTRIES, ServicePicker, SIZES } from "@/components/sales/LeadForms";
-import { ResearchSections } from "@/components/sales/ResearchView";
+import { ResearchEvidencePanel, ResearchSections } from "@/components/sales/ResearchView";
 
 function StatusStepper({ lead, disabled }: { lead: Lead; disabled?: boolean }) {
   const setLeadStatus = useCRM((s) => s.setLeadStatus);
@@ -194,6 +194,7 @@ function EditDetails({ lead, onDone }: { lead: Lead; onDone: () => void }) {
   const updateLead = useCRM((s) => s.updateLead);
   const rescore = useCRM((s) => s.rescoreLeads);
   const [d, setD] = useState(lead);
+  const [initial] = useState(lead);
   const set = <K extends keyof Lead>(k: K, v: Lead[K]) => setD((x) => ({ ...x, [k]: v }));
   return (
     <div className="space-y-3 px-4 pb-4">
@@ -213,7 +214,7 @@ function EditDetails({ lead, onDone }: { lead: Lead; onDone: () => void }) {
         <Field label="Deal value (₹)"><Input type="number" value={d.dealValue ?? ""} onChange={(e) => set("dealValue", e.target.value ? Number(e.target.value) : undefined)} /></Field>
       </div>
       <div className="flex gap-2">
-        <Button size="xs" variant="primary" onClick={() => { const { id: _id, ...patch } = d; void _id; updateLead(lead.id, patch); rescore([lead.id]); toast("Lead updated", "Score recalculated"); onDone(); }}>Save</Button>
+        <Button size="xs" variant="primary" onClick={() => { if (!d.name.trim() || !d.company.trim()) { toast("Name and company are required",undefined,"warning"); return; } const editable: (keyof Lead)[] = ["name","company","jobTitle","email","phone","website","linkedin","instagram","location","industry","companySize","source","dealValue"]; const patch = Object.fromEntries(editable.filter(key => d[key] !== initial[key]).map(key => [key,d[key]])); updateLead(lead.id, patch); rescore([lead.id]); toast("Lead updated", "Score recalculated"); onDone(); }}>Save</Button>
         <Button size="xs" variant="ghost" onClick={onDone}>Cancel</Button>
       </div>
     </div>
@@ -292,12 +293,12 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
         <div className="space-y-4 lg:col-span-2 min-w-0">
           <Card className="overflow-hidden">
             <div className="flex items-center justify-between gap-2 border-b border-border bg-gradient-to-r from-accent-soft to-transparent px-4 py-3">
-              <div className="flex items-center gap-2"><AIBadge>AI Lead Summary</AIBadge>{lead.research?.generatedAt && <span className="text-[11px] text-fg-3">{relTime(lead.research.generatedAt)}</span>}</div>
+              <div className="flex items-center gap-2"><AIBadge>AI Company Summary</AIBadge>{lead.research?.generatedAt && <span className="text-[11px] text-fg-3">{relTime(lead.research.generatedAt)}</span>}</div>
             </div>
             <div className="px-4 py-4">
               {running ? (
                 <div className="space-y-2"><div className="skeleton h-3 w-full rounded" /><div className="skeleton h-3 w-5/6 rounded" /><div className="skeleton h-3 w-2/3 rounded" /><p className="pt-1 text-xs text-fg-3">Researching public information and scoring…</p></div>
-              ) : lead.research?.status === "done" ? (
+              ) : lead.research?.status === "failed" ? (<p role="alert" className="text-sm leading-6 text-danger">{lead.research.error??"Public research could not complete. Use Run AI research to retry."}</p>) : lead.research?.status === "done" ? (
                 <div className="space-y-3">
                   <p className="text-[13px] leading-relaxed">{lead.research.summary}</p>
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -313,15 +314,16 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
           </Card>
 
           {lead.research?.status === "done" && (
-            <Card>
+            <Card id="research-findings" className="scroll-mt-20">
               <CardHeader title="Research findings" subtitle="Verified facts are separated from assumptions and recommendations." />
-              <div className="px-4 pb-4"><ResearchSections research={lead.research} /></div>
+              <div className="space-y-4 px-4 pb-4"><ResearchEvidencePanel research={lead.research} /><ResearchSections research={lead.research} /></div>
             </Card>
           )}
 
           <Card>
             <CardHeader title="Communication history" subtitle={`${history.length} messages across ${convs.length} conversation(s)`} action={convs[0] && <Link href={`/inbox?c=${convs[0].id}`} className="text-xs text-accent-text hover:underline">Open in inbox</Link>} />
             <div className="px-4 pb-4">
+              <Field label="Communication notes"><Textarea key={lead.id} value={lead.communicationHistory ?? ""} disabled={!canWrite} placeholder="Record earlier calls, emails, meetings and next steps…" onChange={event => updateLead(lead.id,{communicationHistory:event.target.value})} /></Field>
               {history.length === 0 ? <p className="py-6 text-center text-xs text-fg-3">No messages yet.</p> : (
                 <ul className="space-y-2">
                   {history.slice(0, 12).map((m) => (
@@ -366,7 +368,7 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
             <CardHeader title="Details" action={canWrite && !editing && <button onClick={() => setEditing(true)} className="rounded-md p-1 text-fg-3 hover:bg-surface-2"><Pencil className="size-3.5" /></button>} />
             {editing ? <EditDetails lead={lead} onDone={() => setEditing(false)} /> : (
               <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-4 pb-4 text-[13px]">
-                {[["Industry", lead.industry], ["Company size", lead.companySize], ["Source", lead.source], ["Added", fmtDate(lead.createdAt)], ["Last contacted", lead.lastContactedAt ? relTime(lead.lastContactedAt) : "—"], ["Next follow-up", lead.nextFollowUpAt ? fmtDate(lead.nextFollowUpAt) : "—"], ["Deal value", lead.dealValue ? money(lead.dealValue) : deal ? `${money(deal.value)} (deal)` : "—"], ["Tags", lead.tags.length ? lead.tags.map((t) => `#${t}`).join(" ") : "—"]].map(([k, v]) => (
+                {[["Industry", lead.industry], ["Company size", lead.companySize], ["Source", lead.source], ["Added", fmtDate(lead.createdAt)], ["Last contacted", lead.lastContactedAt ? relTime(lead.lastContactedAt) : "—"], ["Next follow-up", lead.nextFollowUpAt ? fmtDate(lead.nextFollowUpAt) : "—"], ["Deal value", lead.dealValue != null ? money(lead.dealValue) : deal ? `${money(deal.value)} (deal)` : "—"], ["Tags", lead.tags.length ? lead.tags.map((t) => `#${t}`).join(" ") : "—"]].map(([k, v]) => (
                   <div key={k}><dt className="text-[11px] text-fg-3">{k}</dt><dd className="truncate">{v}</dd></div>
                 ))}
                 <div className="col-span-2">
@@ -382,14 +384,14 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
           <CustomFieldsCard lead={lead} canWrite={canWrite} />
 
           <Card>
-            <CardHeader title="Potential services" />
+            <CardHeader title="Services required" />
             <div className="px-4 pb-4">{canWrite ? <ServicePicker value={lead.services} onChange={(v) => updateLead(lead.id, { services: v })} /> : <div className="flex flex-wrap gap-1">{lead.services.map((s) => <Badge key={s}>{s}</Badge>)}</div>}</div>
           </Card>
 
           <Card>
             <CardHeader title="Notes & tags" />
             <div className="space-y-2 px-4 pb-4">
-              <Textarea defaultValue={lead.notes} disabled={!canWrite} placeholder="Add notes…" onBlur={(e) => e.target.value !== lead.notes && updateLead(lead.id, { notes: e.target.value })} />
+              <Textarea value={lead.notes} disabled={!canWrite} placeholder="Add notes…" onChange={(e) => updateLead(lead.id, { notes: e.target.value })} />
               <div className="flex flex-wrap items-center gap-1">
                 {lead.tags.map((t) => (
                   <span key={t} className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px]">{t}{canWrite && <button onClick={() => updateLead(lead.id, { tags: lead.tags.filter((x) => x !== t) })}><X className="size-3" /></button>}</span>

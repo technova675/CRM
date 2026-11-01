@@ -13,7 +13,9 @@ import { toast } from "@/components/shell/toast";
 import { DealDrawer, ServicePicker } from "@/components/deals/DealDrawer";
 
 const STAGE_DOT: Record<DealStage, string> = {
-  "New Lead": "bg-info",
+  "New": "bg-info",
+  Researching: "bg-accent",
+  Replied: "bg-info",
   Qualified: "bg-accent",
   Contacted: "bg-fg-3",
   Meeting: "bg-warning",
@@ -113,10 +115,10 @@ function NewDealModal({ open, onClose }: { open: boolean; onClose: () => void })
   const [leadId, setLeadId] = useState("");
   const [value, setValue] = useState(150000);
   const [services, setServices] = useState<Service[]>(["Meta Ads"]);
-  const [stage, setStage] = useState<DealStage>("Qualified");
+  const [stage, setStage] = useState<DealStage>("New");
   const [owner, setOwner] = useState(me.id);
   const [close, setClose] = useState(() => new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10));
-  const PROB: Record<DealStage, number> = { "New Lead": 10, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
+  const PROB: Record<DealStage, number> = { "New": 10, Researching: 15, Replied: 35, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
   const lead = leads.find((l) => l.id === leadId);
   const name = company || lead?.company || "";
   return (

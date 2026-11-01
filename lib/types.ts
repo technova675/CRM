@@ -72,7 +72,7 @@ export type LeadSource = (typeof LEAD_SOURCES)[number];
 export const CHANNELS = ["Email", "LinkedIn", "WhatsApp", "Instagram", "Phone"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
-export type CompanySize = "1-10" | "11-50" | "51-200" | "201-1000" | "1000+";
+export type CompanySize = "Unknown" | "1-10" | "11-50" | "51-200" | "201-1000" | "1000+";
 
 export interface ScoreFactor {
   key: string;
@@ -92,8 +92,9 @@ export interface LeadScore {
 
 export interface ResearchFinding {
   text: string;
-  kind: "verified" | "assumption" | "recommendation";
+  kind: "verified" | "assumption" | "recommendation" | "record" | "unavailable";
   source?: string;
+  evidenceQuote?: string;
 }
 
 export interface LeadResearch {
@@ -107,6 +108,13 @@ export interface LeadResearch {
   }[];
   recommendedServices: Service[];
   outreachAngle?: string;
+  mode?: "public_ai" | "public_evidence" | "crm_only";
+  model?: string;
+  startedAt?: string;
+  error?: string;
+  sources?: { id:string;url:string;title:string;status:"ok"|"unavailable";checkedAt:string;reason?:string }[];
+  coverage?: {topic:string;label:string;status:"evidence"|"inference"|"unavailable"}[];
+  limitations?: string[];
 }
 
 export interface Lead {
@@ -129,6 +137,7 @@ export interface Lead {
   score?: LeadScore;
   services: Service[];
   notes: string;
+  communicationHistory?: string; // imported or manually recorded communication context
   tags: string[];
   research?: LeadResearch;
   optedOut?: boolean;
@@ -166,7 +175,7 @@ export interface Conversation {
   subject?: string;
 }
 
-export const DEAL_STAGES = ["New Lead", "Qualified", "Contacted", "Meeting", "Proposal", "Negotiation", "Won", "Lost"] as const;
+export const DEAL_STAGES = LEAD_STATUSES;
 export type DealStage = (typeof DEAL_STAGES)[number];
 
 export type PaymentStatus = "Pending" | "Partially Paid" | "Paid" | "Overdue";
@@ -477,6 +486,15 @@ export interface OutreachRecipient {
   service?: Service;
   stopReason?: string;
   lastSentAt?: string;
+  variant?: "A" | "B";
+  approvalToken?: string;
+  approvedAt?: string;
+  approvedBy?: ID;
+  draftSource?: string;
+  draftStartedAt?: string;
+  error?: string;
+  deliveryId?: string;
+  nextDueAt?: string;
 }
 
 export interface OutreachCampaign {
@@ -488,7 +506,10 @@ export interface OutreachCampaign {
   status: "Draft" | "Review" | "Running" | "Paused" | "Completed";
   recipients: OutreachRecipient[];
   channel: Channel;
+  abTest?: { variantB: { label: string; template: string } };
 }
+
+export interface OutreachTemplate { id: ID; label: string; template: string }
 
 // ---------- Automations ----------
 export type AutomationNodeType = "trigger" | "condition" | "ai_decision" | "ai_action" | "approval" | "action" | "wait";

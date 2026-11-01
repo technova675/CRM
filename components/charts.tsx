@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export const CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
@@ -26,13 +26,14 @@ function Tip({ active, payload, label, fmt }: { active?: boolean; payload?: { na
 
 const axis = { tickLine: false, axisLine: false, fontSize: 11 } as const;
 
-export function AreaTrend({ data, x, series, height = 220, fmt, stacked }: { data: Row[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; stacked?: boolean }) {
+export function AreaTrend({ data, x, series, height = 220, fmt, tickFmt, stacked }: { data: Row[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; tickFmt?: Fmt; stacked?: boolean }) {
+  const gradientId = useId();
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
         <defs>
           {series.map((s, i) => (
-            <linearGradient key={s.key} id={`g-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+            <linearGradient key={s.key} id={`${gradientId}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={s.color ?? CHART_COLORS[i]} stopOpacity={0.28} />
               <stop offset="100%" stopColor={s.color ?? CHART_COLORS[i]} stopOpacity={0} />
             </linearGradient>
@@ -40,30 +41,30 @@ export function AreaTrend({ data, x, series, height = 220, fmt, stacked }: { dat
         </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis dataKey={x} {...axis} minTickGap={24} />
-        <YAxis {...axis} tickFormatter={(v) => (fmt ? fmt(v) : Intl.NumberFormat("en", { notation: "compact" }).format(v))} width={52} />
+        <YAxis {...axis} tickFormatter={(v) => ((tickFmt ?? fmt) ? (tickFmt ?? fmt)!(v) : Intl.NumberFormat("en", { notation: "compact" }).format(v))} width={52} />
         <Tooltip content={<Tip fmt={fmt} />} cursor={{ stroke: "var(--border-strong)" }} />
         {series.map((s, i) => (
-          <Area key={s.key} type="monotone" dataKey={s.key} name={s.label} stackId={stacked ? "1" : undefined} stroke={s.color ?? CHART_COLORS[i]} strokeWidth={2} fill={`url(#g-${s.key})`} />
+          <Area key={s.key} type="monotone" dataKey={s.key} name={s.label} stackId={stacked ? "1" : undefined} stroke={s.color ?? CHART_COLORS[i]} strokeWidth={2} fill={`url(#${gradientId}-${s.key})`} />
         ))}
       </AreaChart>
     </ResponsiveContainer>
   );
 }
 
-export function Bars({ data, x, series, height = 220, fmt, horizontal, stacked }: { data: Row[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; horizontal?: boolean; stacked?: boolean }) {
+export function Bars({ data, x, series, height = 220, fmt, tickFmt, horizontal, stacked }: { data: Row[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; tickFmt?: Fmt; horizontal?: boolean; stacked?: boolean }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} layout={horizontal ? "vertical" : "horizontal"} margin={{ top: 8, right: 8, left: horizontal ? 8 : -12, bottom: 0 }} barCategoryGap="22%">
         <CartesianGrid vertical={!!horizontal} horizontal={!horizontal} strokeDasharray="3 3" />
         {horizontal ? (
           <>
-            <XAxis type="number" {...axis} tickFormatter={(v) => (fmt ? fmt(v) : Intl.NumberFormat("en", { notation: "compact" }).format(v))} />
+            <XAxis type="number" {...axis} tickFormatter={(v) => ((tickFmt ?? fmt) ? (tickFmt ?? fmt)!(v) : Intl.NumberFormat("en", { notation: "compact" }).format(v))} />
             <YAxis type="category" dataKey={x} {...axis} width={96} />
           </>
         ) : (
           <>
             <XAxis dataKey={x} {...axis} />
-            <YAxis {...axis} tickFormatter={(v) => (fmt ? fmt(v) : Intl.NumberFormat("en", { notation: "compact" }).format(v))} width={52} />
+            <YAxis {...axis} tickFormatter={(v) => ((tickFmt ?? fmt) ? (tickFmt ?? fmt)!(v) : Intl.NumberFormat("en", { notation: "compact" }).format(v))} width={52} />
           </>
         )}
         <Tooltip content={<Tip fmt={fmt} />} cursor={{ fill: "var(--surface-2)" }} />
@@ -75,13 +76,13 @@ export function Bars({ data, x, series, height = 220, fmt, horizontal, stacked }
   );
 }
 
-export function Lines({ data, x, series, height = 220, fmt }: { data: Row[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt }) {
+export function Lines({ data, x, series, height = 220, fmt, tickFmt }: { data: Row[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; tickFmt?: Fmt }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis dataKey={x} {...axis} minTickGap={24} />
-        <YAxis {...axis} tickFormatter={(v) => (fmt ? fmt(v) : Intl.NumberFormat("en", { notation: "compact" }).format(v))} width={52} />
+        <YAxis {...axis} tickFormatter={(v) => ((tickFmt ?? fmt) ? (tickFmt ?? fmt)!(v) : Intl.NumberFormat("en", { notation: "compact" }).format(v))} width={52} />
         <Tooltip content={<Tip fmt={fmt} />} cursor={{ stroke: "var(--border-strong)" }} />
         {series.map((s, i) => (
           <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color ?? CHART_COLORS[i]} strokeWidth={2} dot={false} />

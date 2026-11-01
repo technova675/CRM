@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Loader2, Search, Sparkles, X } from "lucide-react";
@@ -156,10 +156,12 @@ export function Select({ className, children, ...p }: SelectHTMLAttributes<HTMLS
   );
 }
 export function Field({ label, children, hint, className }: { label: string; children: ReactNode; hint?: string; className?: string }) {
+  const labelId=useId();
+  const control=isValidElement(children)?cloneElement(children as ReactElement<Record<string,unknown>>,{"aria-labelledby":labelId}):children;
   return (
     <label className={cn("block space-y-1", className)}>
-      <span className="text-xs font-medium text-fg-2">{label}</span>
-      {children}
+      <span id={labelId} className="text-xs font-medium text-fg-2">{label}</span>
+      {control}
       {hint && <span className="block text-[11px] text-fg-3">{hint}</span>}
     </label>
   );
@@ -246,16 +248,28 @@ function useEsc(open: boolean, onClose: () => void) {
   }, [open, onClose]);
 }
 export function Modal({ open, onClose, title, subtitle, children, footer, size = "md" }: { open: boolean; onClose: () => void; title: ReactNode; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; size?: "sm" | "md" | "lg" | "xl" }) {
+  const titleId=useId();
+  const dialogRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!open)return;
+    const previous=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    const node=dialogRef.current;if(!node)return;
+    const controls=()=>Array.from(node.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')).filter(element=>element.getClientRects().length>0);
+    if(!node.contains(document.activeElement))(controls()[0]??node).focus();
+    const trap=(event:KeyboardEvent)=>{if(event.key!=="Tab")return;const elements=controls();const first=elements[0],last=elements.at(-1);if(!first){event.preventDefault();node.focus();}else if(event.shiftKey&&(document.activeElement===first||document.activeElement===node)){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}};
+    node.addEventListener("keydown",trap);
+    return()=>{node.removeEventListener("keydown",trap);if(previous?.isConnected)previous.focus();};
+  },[open]);
   useEsc(open, onClose);
   if (!open) return null;
   return (
     <Portal>
       <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
         <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-        <div className={cn("relative animate-in w-full max-h-[92dvh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-border bg-surface shadow-pop", size === "sm" && "sm:max-w-md", size === "md" && "sm:max-w-xl", size === "lg" && "sm:max-w-3xl", size === "xl" && "sm:max-w-5xl")}>
+        <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={cn("relative animate-in w-full max-h-[92dvh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-border bg-surface shadow-pop", size === "sm" && "sm:max-w-md", size === "md" && "sm:max-w-xl", size === "lg" && "sm:max-w-3xl", size === "xl" && "sm:max-w-5xl")}>
           <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3 border-b border-border">
             <div>
-              <h2 className="text-[15px] font-semibold">{title}</h2>
+              <h2 id={titleId} className="text-[15px] font-semibold">{title}</h2>
               {subtitle && <p className="text-xs text-fg-3 mt-0.5">{subtitle}</p>}
             </div>
             <button onClick={onClose} className="rounded-md p-1 text-fg-3 hover:bg-surface-2 hover:text-fg" aria-label="Close">

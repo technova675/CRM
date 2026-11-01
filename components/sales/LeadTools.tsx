@@ -92,7 +92,7 @@ export function applyLeadFilters(leads: Lead[], f: LeadFilters, now: number) {
       (!f.followups ||
         (!!l.nextFollowUpAt && !l.optedOut && !["Won", "Lost"].includes(l.status) && (f.followups === "due" ? new Date(l.nextFollowUpAt).getTime() <= now + DAY : new Date(l.nextFollowUpAt).getTime() <= weekEnd))) &&
       (!seg || matchesSegment(l, seg)) &&
-      (!t || `${l.name} ${l.company} ${l.email} ${l.location} ${l.jobTitle} ${l.tags.join(" ")}`.toLowerCase().includes(t)),
+      (!t || `${l.name} ${l.company} ${l.email} ${l.phone} ${l.website??""} ${l.linkedin??""} ${l.instagram??""} ${l.location} ${l.jobTitle} ${l.tags.join(" ")}`.toLowerCase().includes(t)),
   );
 }
 
@@ -182,6 +182,9 @@ export function mergeLeads(primaryId: string, otherIds: string[]) {
     merged.tags = [...new Set([...merged.tags, ...o.tags])];
     merged.services = [...new Set([...merged.services, ...o.services])];
     if (o.notes.trim()) merged.notes = [merged.notes, `— Merged from ${o.name} (${o.email || o.phone || o.id}):\n${o.notes}`].filter(Boolean).join("\n\n");
+    merged.email ||= o.email;
+    merged.jobTitle ||= o.jobTitle;
+    if (o.communicationHistory?.trim()) merged.communicationHistory = [merged.communicationHistory, `Merged from ${o.name}:\n${o.communicationHistory}`].filter(Boolean).join("\n\n");
     merged.phone ||= o.phone;
     merged.website ||= o.website;
     merged.linkedin ||= o.linkedin;
@@ -392,15 +395,15 @@ export function SavedViewsBar({ current, onApply }: { current: LeadFilters; onAp
 }
 
 // ---------------- Custom fields ----------------
-export function CustomFieldInput({ def, value, onChange, disabled }: { def: CustomFieldDef; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+export function CustomFieldInput({ def, value, onChange, disabled, ...accessibility }: { def: CustomFieldDef; value: string; onChange: (v: string) => void; disabled?: boolean; "aria-labelledby"?: string }) {
   if (def.type === "select")
     return (
-      <Select disabled={disabled} value={value} onChange={(e) => onChange(e.target.value)}>
+      <Select {...accessibility} disabled={disabled} value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">—</option>
         {(def.options ?? []).map((o) => <option key={o}>{o}</option>)}
       </Select>
     );
-  return <Input disabled={disabled} type={def.type === "number" ? "number" : "text"} value={value} onChange={(e) => onChange(e.target.value)} />;
+  return <Input {...accessibility} disabled={disabled} type={def.type === "number" ? "number" : "text"} value={value} onChange={(e) => onChange(e.target.value)} />;
 }
 
 // ---------------- Recommended next action ----------------

@@ -1,0 +1,4 @@
+.page { min-width:0; --text-3:var(--text-2); }
+.page button { min-height:44px; }
+.page :is(button,input,select,summary,a):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+@media(prefers-reduced-motion:reduce) { .page :global(.animate-in),.page :global(.animate-slide) { animation:none; } }

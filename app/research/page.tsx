@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import styles from "./research.module.css";
 import { useMemo, useState } from "react";
 import { Brain, CheckCircle2, Clock, Loader2, Settings2, Sparkles } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
@@ -8,9 +9,9 @@ import { can } from "@/lib/permissions";
 import { effectiveScore } from "@/lib/ai/scoring";
 import { cn, pct, relTime } from "@/lib/utils";
 import type { Lead } from "@/lib/types";
-import { AIBadge, Badge, Button, Card, CardHeader, Checkbox, EmptyState, PageHeader, ScorePill, SearchInput, Segmented, Stat, StatusBadge } from "@/components/ui";
+import { AIBadge, Badge, Button, Card, CardHeader, Checkbox, EmptyState, PageHeader, ScorePill, SearchInput, Stat, StatusBadge } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
-import { ResearchLegend, ResearchSections } from "@/components/sales/ResearchView";
+import { ResearchEvidencePanel, ResearchLegend, ResearchSections } from "@/components/sales/ResearchView";
 
 type Queue = "todo" | "running" | "done";
 
@@ -22,7 +23,7 @@ export default function ResearchPage() {
   const threshold = useCRM((s) => s.settings.qualifyThreshold);
   const aiEnabled = useCRM((s) => s.aiEnabled);
   const researchLead = useCRM((s) => s.researchLead);
-  const [queue, setQueue] = useState<Queue>("todo");
+  const [queue, setQueue] = useState<Queue>("done");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(null);
@@ -43,7 +44,7 @@ export default function ResearchPage() {
   const stats = useMemo(() => {
     const done = buckets.done;
     let v = 0, a = 0, r = 0;
-    for (const l of done) for (const s of l.research!.sections) for (const f of s.findings) { if (f.kind === "verified") v++; else if (f.kind === "assumption") a++; else r++; }
+    for (const l of done) for (const s of l.research!.sections) for (const f of s.findings) { if (f.kind === "verified" && l.research?.mode) v++; else if (f.kind === "assumption") a++; else if(f.kind === "recommendation") r++; }
     const total = v + a + r || 1;
     const qualified = done.filter((l) => effectiveScore(l) >= threshold).length;
     return { verifiedPct: (v / total) * 100, assumptions: a, recs: r, qualified, coverage: (done.length / Math.max(1, leads.length)) * 100 };
@@ -54,18 +55,19 @@ export default function ResearchPage() {
     return buckets[queue].filter((l) => !t || `${l.name} ${l.company} ${l.industry}`.toLowerCase().includes(t));
   }, [buckets, queue, q]);
 
-  const summaries = useMemo(() => buckets.done.filter((l) => effectiveScore(l) >= threshold || l.status === "Qualified").slice(0, 30), [buckets, threshold]);
+  const summaries = useMemo(() => buckets.done.slice(0, 30), [buckets]);
 
   const runSelected = async (ids: string[]) => {
     if (!ids.length) return;
     setSel(new Set());
-    toast(`Researching ${ids.length} leads`, aiEnabled ? "Using AI provider + public website" : "Using local research engine", "ai");
+    toast(`Researching ${ids.length} leads`, "Reading public sources and checking evidence", "ai");
     for (const id of ids) await researchLead(id);
-    toast("Research complete", `${ids.length} lead summaries generated`, "ai");
+    const failed=ids.filter(id=>useCRM.getState().leads.find(lead=>lead.id===id)?.research?.status!=="done").length;
+    toast(failed?"Some research could not complete":"Research complete", `${ids.length-failed} assessments ready${failed?` · ${failed} need retry`:""}`,failed?"warning":"ai");
   };
 
   return (
-    <div className="space-y-5">
+    <div className={cn("space-y-5",styles.page)}>
       <PageHeader
         title={<>AI Research <AIBadge>Agent</AIBadge></>}
         description="Analyzes publicly available information about each lead and company, then scores and summarizes it."
@@ -73,21 +75,33 @@ export default function ResearchPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Research coverage" value={pct(stats.coverage, 0)} hint={`${buckets.done.length} of ${leads.length} leads`} icon={<Brain className="size-3.5" />} />
+        <Stat label="Leads assessed" value={`${buckets.done.length} / ${leads.length}`} hint="With a saved assessment" icon={<Brain className="size-3.5" />} />
         <Stat label="In queue" value={buckets.todo.length} hint={`${buckets.running.length} running now`} icon={<Clock className="size-3.5" />} tone="warning" />
-        <Stat label="Qualified by AI" value={stats.qualified} hint={`score ≥ ${threshold}`} icon={<CheckCircle2 className="size-3.5" />} tone="success" />
-        <Stat label="Verified findings" value={pct(stats.verifiedPct, 0)} hint={`${stats.assumptions} assumptions flagged`} icon={<Sparkles className="size-3.5" />} />
+        <Stat label="Meets score threshold" value={stats.qualified} hint={`score ≥ ${threshold}`} icon={<CheckCircle2 className="size-3.5" />} tone="success" />
+        <Stat label="Public-source findings" value={buckets.done.reduce((count,lead)=>count+(lead.research?.mode?lead.research.sections.reduce((n,section)=>n+section.findings.filter(finding=>finding.kind==="verified").length,0):0),0)} hint={`${stats.assumptions} assumptions flagged`} icon={<Sparkles className="size-3.5" />} />
       </div>
+
+      <Card className="p-4">
+        <h2 className="mb-2 text-base font-semibold">Research results and queue</h2>
+        <p className="mb-3 text-sm text-fg-2">Select Research results, then expand a company to read its marketing audit, potential problems, growth opportunities, recommended services and personalized outreach angle.</p>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Research status">
+          {([
+            {value:"done",label:"Research results",count:buckets.done.length},
+            {value:"todo",label:"Needs research",count:buckets.todo.length},
+            {value:"running",label:"Running",count:buckets.running.length},
+          ] as const).map(item=><button key={item.value} type="button" aria-pressed={queue===item.value} onClick={()=>{setQueue(item.value);setSel(new Set());setOpen(null);}} className={cn("rounded-lg border px-4 py-2 text-sm font-medium",queue===item.value?"border-accent bg-accent-soft text-accent-text":"border-border bg-surface text-fg-2 hover:bg-surface-2")}>{item.label} · {item.count}</button>)}
+        </div>
+      </Card>
 
       <Card className="p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-[13px] font-semibold">How to read AI research</p>
-            <p className="text-xs text-fg-3">The agent never invents facts. Every finding is labelled so your team knows what is confirmed.</p>
+            <p className="text-xs text-fg-3">Public evidence is separated from CRM-supplied details, AI inferences and recommendations. Unsupported facts are omitted; missing evidence remains visible.</p>
           </div>
           <span className={cn("inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[11px]", aiEnabled ? "text-success" : "text-fg-3")}>
             <span className={cn("size-1.5 rounded-full", aiEnabled ? "bg-success" : "bg-fg-3")} />
-            {aiEnabled ? "AI provider: fetches public website" : "Local engine: CRM record only"}
+            {aiEnabled ? "Public sources + AI synthesis" : "Public sources · evidence only"}
           </span>
         </div>
         <ResearchLegend />
@@ -96,11 +110,7 @@ export default function ResearchPage() {
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2 min-w-0">
           <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-            <Segmented value={queue} onChange={(v) => { setQueue(v); setSel(new Set()); }} options={[
-              { value: "todo", label: `Not researched · ${buckets.todo.length}` },
-              { value: "running", label: `Running · ${buckets.running.length}` },
-              { value: "done", label: `Done · ${buckets.done.length}` },
-            ]} />
+            <h2 className="text-sm font-semibold">{queue === "done" ? "Research results" : queue === "todo" ? "Needs research" : "Running research"}</h2>
             <SearchInput value={q} onChange={setQ} className="w-full sm:w-56 sm:ml-auto" />
           </div>
           {sel.size > 0 && canWrite && (
@@ -111,10 +121,10 @@ export default function ResearchPage() {
             </div>
           )}
           <div className="max-h-[620px] overflow-y-auto divide-y divide-border">
-            {list.length === 0 && <EmptyState title={queue === "todo" ? "Queue is empty" : queue === "running" ? "Nothing running" : "No research yet"} />}
+            {list.length === 0 && <EmptyState title={queue === "todo" ? "Queue is empty" : queue === "running" ? "Nothing running" : "No research results yet"} description={queue === "done" ? (q ? "No completed research matches your search. Clear the search to see other results." : "Choose Needs research and click Research beside a lead. Completed results will appear here.") : undefined} />}
             {list.slice(0, 150).map((l) => (
               <div key={l.id}>
-                <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-2/60 cursor-pointer" onClick={() => setOpen(open === l.id ? null : l.id)}>
+                <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-2/60 cursor-pointer" onClick={() => setOpen(open === l.id ? null : l.id)} role="button" tabIndex={0} aria-expanded={open === l.id} onKeyDown={event => { if(event.key === "Enter" || event.key === " "){event.preventDefault();setOpen(open === l.id ? null : l.id);} }}>
                   {canWrite && queue !== "running" && <Checkbox checked={sel.has(l.id)} onChange={(v) => setSel((s) => { const n = new Set(s); if (v) n.add(l.id); else n.delete(l.id); return n; })} />}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-medium">{l.company} <span className="font-normal text-fg-3">· {l.name}</span></p>
@@ -122,12 +132,15 @@ export default function ResearchPage() {
                   </div>
                   <StatusBadge status={l.status} className="hidden sm:inline-flex" />
                   {queue === "running" ? <Loader2 className="size-4 animate-spin text-accent" /> : <ScorePill score={effectiveScore(l)} overridden={l.score?.override !== undefined} />}
+                  {l.research?.status==="failed"&&<span className="text-xs text-danger">{l.research.error??"Research failed; retry"}</span>}
+                  {queue === "done" && <span className="shrink-0 text-xs font-medium text-accent-text">{open === l.id ? "Hide results" : "View results"}</span>}
                   {queue === "todo" && canWrite && <Button size="xs" onClick={(e) => { e.stopPropagation(); void runSelected([l.id]); }}>Research</Button>}
                 </div>
                 {open === l.id && l.research?.status === "done" && (
                   <div className="animate-in space-y-3 bg-surface-2/40 px-4 py-4">
                     <p className="text-[13px] leading-relaxed">{l.research.summary}</p>
                     <ResearchSections research={l.research} />
+                    <ResearchEvidencePanel research={l.research} />
                     <Link href={`/leads/${l.id}`} className="text-xs text-accent-text hover:underline">Open lead →</Link>
                   </div>
                 )}
@@ -155,7 +168,7 @@ export default function ResearchPage() {
       </div>
 
       <div>
-        <h2 className="mb-3 text-[15px] font-semibold">AI Lead Summaries <span className="text-fg-3 font-normal">· qualified leads</span></h2>
+        <h2 className="mb-3 text-[15px] font-semibold">AI Company Summaries <span className="text-fg-3 font-normal">· completed assessments</span></h2>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {summaries.map((l) => (
             <Card key={l.id} className="flex flex-col p-4">
@@ -170,9 +183,10 @@ export default function ResearchPage() {
               <div className="mt-3 flex flex-wrap gap-1">{l.research?.recommendedServices.map((s) => <Badge key={s} tone="accent">{s}</Badge>)}</div>
               {l.research?.outreachAngle && <p className="mt-3 rounded-md bg-surface-2 px-2 py-1.5 text-[11px] text-fg-2"><span className="font-semibold">Angle: </span>{l.research.outreachAngle}</p>}
               <p className="mt-auto pt-3 text-[11px] text-fg-3">Generated {relTime(l.research?.generatedAt)}</p>
+              <Button href={`/leads/${l.id}#research-findings`} className="mt-3">View full research</Button>
             </Card>
           ))}
-          {summaries.length === 0 && <Card><EmptyState title="No qualified summaries yet" description="Research leads to generate AI summaries." /></Card>}
+          {summaries.length === 0 && <Card><EmptyState title="No company summaries yet" description="Research leads to generate AI summaries." /></Card>}
         </div>
       </div>
     </div>

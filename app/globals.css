@@ -185,3 +185,35 @@ main .grid > *,
 main .flex > .flex-1 {
   min-width: 0;
 }
+
+/* Re-themes shared components (tables, selects, buttons) inside the dark-blue report dashboard. */
+.report-dark {
+  --surface: #0b2b57;
+  --surface-2: #123c70;
+  --surface-3: #1b4d89;
+  --border: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.28);
+  --text: #eef5ff;
+  --text-2: #c3d6ee;
+  --text-3: #9db8d9;
+  --accent: #3aa9f5;
+  --accent-soft: rgba(76, 195, 255, 0.16);
+  --accent-text: #8fd6ff;
+  --shadow: none;
+  color: var(--text);
+}
+@media print {
+  .report-dark {
+    --surface: #fff;
+    --surface-2: #f1f5f9;
+    --surface-3: #e2e8f0;
+    --border: #cbd5e1;
+    --border-strong: #94a3b8;
+    --text: #0f172a;
+    --text-2: #334155;
+    --text-3: #475569;
+    --accent: #2563eb;
+    --accent-soft: #dbeafe;
+    --accent-text: #1d4ed8;
+  }
+}

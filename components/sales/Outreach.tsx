@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft, Bell, Brain, Check, CheckCheck, ChevronRight, Eye, GitBranch, Lightbulb, MailCheck, MessageSquareReply, Pause, Play, Plus,
+  ArrowLeft, Check, CheckCheck, ChevronRight, Eye, MailCheck, Pause, Play, Plus,
   FlaskConical, Rocket, Search, Send, ShieldOff, Sparkles, Target, Trash2, UserCheck, Workflow, X,
 } from "lucide-react";
 import { useCRM } from "@/lib/store";
@@ -15,6 +15,8 @@ import { cn, fmtDate, pct, relTime, uid } from "@/lib/utils";
 import { AIBadge, Badge, Button, Card, CardHeader, Checkbox, EmptyState, Field, Input, InsightList, Modal, Progress, ScorePill, Segmented, Select, StatusBadge, Textarea, Toggle } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import { INDUSTRIES } from "./LeadForms";
+import { withOptOut, suppressed } from "@/lib/domain/outreach";
+import { DeliveryTracking, useDeliveryStatus } from "./OutreachDelivery";
 
 export function funnel(c: OutreachCampaign) {
   const f: Record<OutreachRecipient["state"], number> = { queued: 0, researching: 0, drafted: 0, approved: 0, sent: 0, replied: 0, stopped: 0, bounced: 0 };
@@ -34,10 +36,10 @@ export const abOf = (c: OutreachCampaign) => (c as ABCampaign).abTest;
 export const variantOf = (r: OutreachRecipient) => (r as ABRecipient).variant;
 
 export const MESSAGE_TEMPLATES: { id: string; label: string; template: string }[] = [
-  { id: "question", label: "Short question", template: "Hi {{first_name}}, quick question — is {{company}} happy with how {{service}} is performing right now?\n\nWe help {{industry}} brands in {{location}} bring acquisition costs down with weekly testing. Worth a 15-minute chat?\n\nTeam Adbibe\n—\nReply \"stop\" and we won't reach out again." },
-  { id: "audit", label: "Free audit offer", template: "Hi {{first_name}},\n\nI'd like to send {{company}} a free 5-point {{service}} audit — what we'd fix first and the expected impact. No deck, no pitch.\n\nShall I put it together this week?\n\nTeam Adbibe\n—\nReply \"stop\" to opt out." },
-  { id: "case", label: "Case-study led", template: "Hi {{first_name}}, we recently helped another {{industry}} brand scale {{service}} profitably — happy to share the short case study and how it could apply to {{company}}.\n\nOpen to a quick look?\n\nTeam Adbibe\n—\nReply \"stop\" to opt out." },
-  { id: "founder", label: "Founder-to-founder", template: "Hi {{first_name}}, founder to founder — {{company}} caught my eye. We run {{service}} for a handful of {{industry}} brands and I think there's a quick win for you ({{angle}}).\n\n15 minutes next week?\n\n—\nReply \"stop\" to opt out." },
+  { id: "question", label: "Short question", template: "Hi {{first_name}}, is {{service}} a current priority for {{company}}? I'd welcome a short conversation about your goals before suggesting any work.\n\nReply stop to opt out." },
+  { id: "audit", label: "Discovery review", template: "Hi {{first_name}}, would a discovery review of {{company}}'s {{service}} priorities be useful? We can first agree on what you want to evaluate.\n\nReply stop to opt out." },
+  { id: "angle", label: "Research-led question", template: "Hi {{first_name}}, {{angle}}\n\nWould it be helpful to compare notes about {{company}}?\n\nReply stop to opt out." },
+  { id: "intro", label: "Simple introduction", template: "Hi {{first_name}}, reaching out from Adbibe to ask whether {{company}} is exploring support with {{service}}. Is this something you'd like to discuss?\n\nReply stop to opt out." },
 ];
 
 // Splits recipients alternately into A (AI-personalised) and B (template) and redrafts B.
@@ -51,7 +53,7 @@ export function setupABTest(campaignId: string, label: string, template: string)
         const variant: Variant = i % 2 === 0 ? "A" : "B";
         const lead = leads.get(r.leadId);
         const redraft = variant === "B" && lead && ["drafted", "approved"].includes(r.state);
-        return { ...r, variant, draft: redraft ? renderStep(template, lead, r.service ?? lead.services[0] ?? "Meta Ads", r.angle ?? lead.research?.outreachAngle ?? "") : r.draft };
+        return redraft ? { ...r, variant, draft: withOptOut(renderStep(template, lead, r.service ?? lead.services[0] ?? "Consulting", r.angle ?? lead.research?.outreachAngle ?? "")), state:"drafted",approvalToken:undefined,approvedAt:undefined,approvedBy:undefined,draftSource:"Personalized variant B template" } : { ...r,variant };
       });
       return { ...c, recipients, abTest: { variantB: { label, template } } } as ABCampaign;
     }),
@@ -75,7 +77,7 @@ export function applyVariantDrafts(campaignId: string) {
             recipients: c.recipients.map((r, i): ABRecipient => {
               const variant = variantOf(r) ?? (i % 2 === 0 ? "A" : "B");
               const lead = leads.get(r.leadId);
-              if (variant === "B" && r.state === "drafted" && lead) return { ...r, variant, draft: renderStep(ab.variantB.template, lead, r.service ?? lead.services[0] ?? "Meta Ads", r.angle ?? "") };
+              if (variant === "B" && r.state === "drafted" && lead) return { ...r, variant, draft: withOptOut(renderStep(ab.variantB.template, lead, r.service ?? lead.services[0] ?? "Consulting", r.angle ?? "")),approvalToken:undefined,approvedAt:undefined,approvedBy:undefined,draftSource:"Personalized variant B template" };
               return { ...r, variant };
             }),
           },
@@ -98,6 +100,8 @@ export function variantStats(c: OutreachCampaign) {
 }
 
 function ABTestCard({ c, canWrite }: { c: OutreachCampaign; canWrite: boolean }) {
+  const customTemplates=useCRM(s=>s.settings.outreachTemplates??[]);
+  const templates=[...MESSAGE_TEMPLATES,...customTemplates];
   const ab = abOf(c);
   const [tplId, setTplId] = useState(MESSAGE_TEMPLATES[0]!.id);
   const [text, setText] = useState(MESSAGE_TEMPLATES[0]!.template);
@@ -112,7 +116,7 @@ function ABTestCard({ c, canWrite }: { c: OutreachCampaign; canWrite: boolean })
         <div className="space-y-2 px-4 pb-4">
           {sentAny && !ab && <p className="text-xs text-warning">Messages were already sent — only unsent drafts switch to variant B.</p>}
           <div className="flex flex-wrap gap-1.5">
-            {MESSAGE_TEMPLATES.map((t) => (
+            {templates.map((t) => (
               <button key={t.id} onClick={() => { setTplId(t.id); setText(t.template); }} className={cn("rounded-md border px-2 py-1 text-xs", tplId === t.id ? "border-accent bg-accent-soft text-accent-text" : "border-border text-fg-2 hover:bg-surface-2")}>{t.label}</button>
             ))}
           </div>
@@ -129,8 +133,8 @@ function ABTestCard({ c, canWrite }: { c: OutreachCampaign; canWrite: boolean })
   const insights = [
     { kind: "data" as const, text: `A: ${st.A.replied}/${st.A.contacted} replied (${pct(st.A.rate)}) · B: ${st.B.replied}/${st.B.contacted} replied (${pct(st.B.rate)})`, source: "Outreach replies" },
     ...(st.A.contacted >= 10 && st.B.contacted >= 10 && Math.abs(st.A.rate - st.B.rate) >= 3
-      ? [{ kind: "recommendation" as const, text: `Variant ${st.A.rate > st.B.rate ? "A (AI-personalised)" : `B (${ab.variantB.label})`} leads by ${Math.abs(st.A.rate - st.B.rate).toFixed(1)} pts — use it for the next batch.` }]
-      : [{ kind: "assumption" as const, text: "Too few sends for a reliable winner — wait for at least 10 contacted per variant." }]),
+        ? [{ kind: "recommendation" as const, text: `Variant ${st.A.rate > st.B.rate ? "A (AI-personalised)" : `B (${ab.variantB.label})`} has an observed reply rate ${Math.abs(st.A.rate - st.B.rate).toFixed(1)} points higher. This is descriptive; no statistical significance has been established.` }]
+      : [{ kind: "assumption" as const, text: "Insufficient evidence to name a winner. Reply rates are descriptive; no statistical significance has been established." }]),
   ];
   return (
     <Card>
@@ -197,8 +201,10 @@ const PRESETS = [
 
 export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; onClose: () => void; presetIds?: string[] }) {
   const leads = useCRM((s) => s.leads);
+  const suppressions=useCRM(s=>s.settings.suppressions);
+  const customTemplates=useCRM(s=>s.settings.outreachTemplates??[]);
+  const templates=[...MESSAGE_TEMPLATES,...customTemplates];
   const sequences = useCRM((s) => s.settings.sequences);
-  const outreachMode = useCRM((s) => s.settings.approvalModes.Outreach);
   const createOutreach = useCRM((s) => s.createOutreach);
   const generateDrafts = useCRM((s) => s.generateDrafts);
   const [name, setName] = useState(() => `Outreach — ${fmtDate(new Date().toISOString())}`);
@@ -207,6 +213,8 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
   const [preset, setPreset] = useState<"100" | "500" | "1000">("100");
   const [statuses, setStatuses] = useState<LeadStatus[]>(["New", "Researching", "Qualified"]);
   const [industry, setIndustry] = useState("All");
+  const [tag,setTag]=useState("");
+  const [companySize,setCompanySize]=useState("All");
   const [minScore, setMinScore] = useState(40);
   const [busy, setBusy] = useState(false);
   const [abTpl, setAbTpl] = useState("");
@@ -216,12 +224,12 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
   const eligible = useMemo(() => {
     if (usePreset) {
       const ids = new Set(presetIds);
-      return leads.filter((l) => ids.has(l.id));
+      return leads.filter((l) => ids.has(l.id)&&!suppressed(l,suppressions));
     }
     return leads
-      .filter((l) => !l.optedOut && statuses.includes(l.status) && (industry === "All" || l.industry === industry) && effectiveScore(l) >= minScore)
+      .filter((l) => !suppressed(l,suppressions) && statuses.includes(l.status) && (industry === "All" || l.industry === industry) && (!tag||l.tags.some(t=>t.toLowerCase().includes(tag.toLowerCase()))) && (companySize==="All"||l.companySize===companySize) && effectiveScore(l) >= minScore)
       .sort((a, b) => effectiveScore(b) - effectiveScore(a));
-  }, [leads, usePreset, presetIds, statuses, industry, minScore]);
+  }, [leads, usePreset, presetIds, statuses, industry, minScore,suppressions,tag,companySize]);
   const n = usePreset ? eligible.length : PRESETS.find((p) => p.value === preset)!.n;
   const selected = eligible.slice(0, n);
   const avg = selected.length ? Math.round(selected.reduce((a, l) => a + effectiveScore(l), 0) / selected.length) : 0;
@@ -231,9 +239,9 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
     setBusy(true);
     const id = createOutreach(name || "Untitled outreach", selected.map((l) => l.id), channel, seqId);
     onClose();
-    toast("AI agent started", `Researching ${selected.length} leads & drafting messages`, "ai");
+    toast("AI agent started", "Preparing up to 10 leads in this batch; remaining leads stay queued", "ai");
     window.dispatchEvent(new CustomEvent("outreach:open", { detail: id }));
-    const tpl = MESSAGE_TEMPLATES.find((t) => t.id === abTpl);
+    const tpl = templates.find((t) => t.id === abTpl);
     if (tpl) setupABTest(id, tpl.label, tpl.template);
     await generateDrafts(id);
     if (tpl) applyVariantDrafts(id);
@@ -241,15 +249,15 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
   };
 
   return (
-    <Modal open={open} onClose={onClose} size="lg" title="New AI outreach campaign" subtitle={`The agent researches each lead, picks a relevant Adbibe service and drafts a personalized first message. Outreach mode: ${outreachMode}.`}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="ai" loading={busy} disabled={!selected.length} icon={<Sparkles className="size-3.5" />} onClick={start}>Research & draft {selected.length} messages</Button></>}>
+    <Modal open={open} onClose={onClose} size="lg" title="New AI outreach campaign" subtitle="Choose a segment and channel. The agent researches and drafts in batches of 10; you review and approve every message."
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="ai" loading={busy} disabled={!selected.length} icon={<Sparkles className="size-3.5" />} onClick={start}>Create campaign & draft first batch</Button></>}>
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Campaign name" className="sm:col-span-3"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Field label="Channel"><Select value={channel} onChange={(e) => setChannel(e.target.value as Channel)}>{CHANNELS.filter((c) => c !== "Phone").map((c) => <option key={c}>{c}</option>)}</Select></Field>
           <Field label="Follow-up sequence" className="sm:col-span-2"><Select value={seqId} onChange={(e) => setSeqId(e.target.value)}>{sequences.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.steps.length} steps</option>)}</Select></Field>
           <Field label="A/B test (optional)" className="sm:col-span-3" hint="Variant A: AI-personalised from research · Variant B: the template you pick. Recipients split 50/50; reply rate tracked per variant.">
-            <Select value={abTpl} onChange={(e) => setAbTpl(e.target.value)}><option value="">No A/B test</option>{MESSAGE_TEMPLATES.map((t) => <option key={t.id} value={t.id}>A vs B: {t.label}</option>)}</Select>
+            <Select value={abTpl} onChange={(e) => setAbTpl(e.target.value)}><option value="">No A/B test</option>{templates.map((t) => <option key={t.id} value={t.id}>A vs B: {t.label}</option>)}</Select>
           </Field>
         </div>
         {usePreset ? (
@@ -262,6 +270,8 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Industry"><Select value={industry} onChange={(e) => setIndustry(e.target.value)}><option value="All">All industries</option>{INDUSTRIES.map((i) => <option key={i}>{i}</option>)}</Select></Field>
+              <Field label="Lead tag"><Input value={tag} onChange={e=>setTag(e.target.value)} placeholder="Any tag"/></Field>
+              <Field label="Company size"><Select value={companySize} onChange={e=>setCompanySize(e.target.value)}>{["All","Unknown","1-10","11-50","51-200","201-1000","1000+"].map(value=><option key={value}>{value}</option>)}</Select></Field>
               <Field label={`Minimum AI score: ${minScore}`}><input type="range" min={0} max={90} step={5} value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} className="w-full accent-[var(--accent)]" /></Field>
             </div>
             <div>
@@ -281,7 +291,7 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
           <div className="rounded-lg bg-surface-2 p-3"><p className="text-[11px] text-fg-3">Avg. score</p><p className="text-lg font-semibold tabular-nums">{avg}</p></div>
         </div>
         {!usePreset && n !== Infinity && eligible.length < n && <p className="text-xs text-warning">Only {eligible.length} leads match — widen filters or import more leads to reach {n}.</p>}
-        <p className="text-[11px] text-fg-3">Opted-out and suppressed contacts are excluded automatically. Nothing is sent until drafts are approved{outreachMode === "Automatic" ? " — Outreach is set to Automatic, so approved drafts send immediately" : ""}.</p>
+        <p className="text-xs text-fg-2">Opted-out and suppressed contacts are excluded. Drafts are generated in batches of 10. Every first message and follow-up needs human approval and a separate send action, regardless of global automation mode.</p>
       </div>
     </Modal>
   );
@@ -289,23 +299,19 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
 
 // ---------------- Campaign detail ----------------
 const AGENT_STEPS = [
-  { label: "Research lead", icon: Search },
-  { label: "Understand company", icon: Brain },
-  { label: "Find opportunity", icon: Lightbulb },
-  { label: "Pick service", icon: Target },
-  { label: "Draft message", icon: Sparkles },
-  { label: "Human review", icon: Eye },
+  { label: "Research", icon: Search },
+  { label: "Personalize", icon: Target },
+  { label: "Generate", icon: Sparkles },
+  { label: "Review", icon: Eye },
+  { label: "Approve", icon: UserCheck },
   { label: "Send", icon: Send },
-  { label: "Track delivery", icon: MailCheck },
-  { label: "Auto follow-ups", icon: Workflow },
-  { label: "Stop on reply", icon: MessageSquareReply },
-  { label: "Move CRM stage", icon: GitBranch },
-  { label: "Notify salesperson", icon: Bell },
+  { label: "Track", icon: MailCheck },
+  { label: "Follow-up review", icon: Workflow },
 ];
 
 function AgentPipeline({ c }: { c: OutreachCampaign }) {
   const f = funnel(c);
-  const counts = [f.total - f.queued, f.total - f.queued - f.researching, f.total - f.queued - f.researching, f.total - f.queued - f.researching, f.drafted + f.approved + f.contacted, f.approved + f.contacted, f.contacted, f.contacted, f.sent, f.replied, f.replied, f.replied];
+  const counts = [f.total-f.queued-f.researching,f.drafted+f.approved+f.contacted,f.drafted+f.approved+f.contacted,f.drafted,f.approved+f.contacted,f.contacted,f.contacted,c.recipients.filter(r=>r.stepIndex>0&&r.state==="drafted"||r.stepIndex>1).length];
   return (
     <div className="flex gap-1.5 overflow-x-auto pb-1">
       {AGENT_STEPS.map((s, i) => {
@@ -331,10 +337,11 @@ function AgentPipeline({ c }: { c: OutreachCampaign }) {
 type RFilter = "drafted" | "approved" | "sent" | "replied" | "stopped" | "all";
 
 export function CampaignDetail({ id, onBack, canWrite }: { id: string; onBack: () => void; canWrite: boolean }) {
+  const deliveryStatus=useDeliveryStatus(id);
+  const [busy,setBusy]=useState(false);
   const camp = useCRM((s) => s.outreach.find((c) => c.id === id));
   const leads = useCRM((s) => s.leads);
   const sequences = useCRM((s) => s.settings.sequences);
-  const modes = useCRM((s) => s.settings.approvalModes);
   const updateDraft = useCRM((s) => s.updateDraft);
   const approveDrafts = useCRM((s) => s.approveDrafts);
   const launch = useCRM((s) => s.launchOutreach);
@@ -363,19 +370,17 @@ export function CampaignDetail({ id, onBack, canWrite }: { id: string; onBack: (
         {canWrite && (
           <div className="flex flex-wrap gap-2">
             {f.queued > 0 && <Button variant="ai" icon={<Sparkles className="size-3.5" />} onClick={async () => { await generateDrafts(camp.id); applyVariantDrafts(camp.id); }}>Draft {f.queued} queued</Button>}
-            {f.approved > 0 && <Button variant="primary" icon={<Rocket className="size-3.5" />} onClick={() => { launch(camp.id); toast("Messages sent", `${f.approved} first messages · follow-ups scheduled`); }}>Send {f.approved} approved</Button>}
+            {f.approved > 0 && <Button variant="primary" loading={busy} disabled={!deliveryStatus.integration.ready||!deliveryStatus.integration.channels.includes(camp.channel)} icon={<Rocket className="size-3.5" />} onClick={async () => {setBusy(true);try{const result=await launch(camp.id);toast("Delivery results",`${result.accepted} accepted by integration · ${result.blocked} blocked or unconfirmed`);await deliveryStatus.refresh();}catch(error){toast("Messages not confirmed",error instanceof Error?error.message:"Check delivery tracking","warning");}finally{setBusy(false);}}}>Send approved batch · up to 10</Button>}
             {camp.status === "Running" && <Button icon={<Pause className="size-3.5" />} onClick={() => setStatus(camp.id, "Paused")}>Pause</Button>}
             {camp.status === "Paused" && <Button icon={<Play className="size-3.5" />} onClick={() => setStatus(camp.id, "Running")}>Resume</Button>}
-            {camp.status === "Running" && <Button icon={<Workflow className="size-3.5" />} onClick={() => { const n = runFollowUps(); toast(n ? `${n} follow-ups sent` : modes["Follow-ups"] !== "Automatic" ? "Follow-ups sent for approval" : "No follow-ups due", undefined, n ? "success" : "info"); }}>Run follow-ups now</Button>}
+            {camp.status === "Running" && <Button icon={<Workflow className="size-3.5" />} onClick={() => { const n = runFollowUps(); toast(n ? `${n} due follow-ups prepared for review` : "No follow-ups due");setFilter("drafted"); }}>Prepare due follow-ups</Button>}
           </div>
         )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs">
-        <span className="text-fg-3">AI safety:</span>
-        <Badge tone={modes.Outreach === "Automatic" ? "warning" : "success"}>Outreach · {modes.Outreach}</Badge>
-        <Badge tone={modes["Follow-ups"] === "Automatic" ? "warning" : "success"}>Follow-ups · {modes["Follow-ups"]}</Badge>
-        <Link href="/settings?tab=ai" className="ml-auto text-accent-text hover:underline">Change approval modes</Link>
+        <Badge tone="success">Human approval required · every touch</Badge>
+        <span>{deliveryStatus.integration.ready?"Delivery adapter configured":"No delivery integration connected — drafts and approvals remain saved"}</span>
       </div>
 
       <Card className="p-3">
@@ -388,13 +393,13 @@ export function CampaignDetail({ id, onBack, canWrite }: { id: string; onBack: (
       <Card>
         <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
           <Segmented value={filter} onChange={(v) => { setFilter(v); setSel(new Set()); }} options={[
-            { value: "drafted", label: `Review · ${f.drafted}` }, { value: "approved", label: `Approved · ${f.approved}` }, { value: "sent", label: `Sent · ${f.sent}` },
+              { value: "drafted", label: `Review · ${f.drafted}` }, { value: "approved", label: `Approved · ${f.approved}` }, { value: "sent", label: `Accepted · ${f.sent}` },
             { value: "replied", label: `Replied · ${f.replied}` }, { value: "stopped", label: `Stopped · ${f.stopped}` }, { value: "all", label: "All" },
           ]} />
           {canWrite && filter === "drafted" && drafted.length > 0 && (
             <div className="ml-auto flex gap-2">
-              {sel.size > 0 && <Button size="xs" icon={<Check className="size-3" />} onClick={() => { approveDrafts(camp.id, [...sel]); setSel(new Set()); toast(`${sel.size} drafts approved`); }}>Approve {sel.size}</Button>}
-              <Button size="xs" variant="primary" icon={<CheckCheck className="size-3" />} onClick={() => { approveDrafts(camp.id, drafted); toast(`${drafted.length} drafts approved`); }}>Approve all</Button>
+              {sel.size > 0 && <Button size="xs" icon={<Check className="size-3" />} loading={busy} onClick={async () => {setBusy(true);try{await approveDrafts(camp.id,[...sel]);setSel(new Set());toast("Eligible drafts approved");}catch(e){toast("Approval failed",e instanceof Error?e.message:"Please retry","warning");}finally{setBusy(false);}}}>Approve {sel.size}</Button>}
+              <Button size="xs" variant="primary" loading={busy} icon={<CheckCheck className="size-3" />} onClick={async () => {setBusy(true);try{await approveDrafts(camp.id,drafted);toast("Eligible drafts approved");}catch(e){toast("Approval failed",e instanceof Error?e.message:"Please retry","warning");}finally{setBusy(false);}}}>Approve all</Button>
             </div>
           )}
         </div>
@@ -403,11 +408,12 @@ export function CampaignDetail({ id, onBack, canWrite }: { id: string; onBack: (
           {rows.slice(0, 100).map((r) => {
             const l = leadMap.get(r.leadId);
             if (!l) return null;
-            return <RecipientRow key={r.leadId} r={r} lead={l} campId={camp.id} canWrite={canWrite} selected={sel.has(r.leadId)} onSelect={(v) => setSel((s) => { const n = new Set(s); if (v) n.add(r.leadId); else n.delete(r.leadId); return n; })} onEdit={(d) => updateDraft(camp.id, r.leadId, d)} onApprove={() => approveDrafts(camp.id, [r.leadId])} />;
+            return <RecipientRow key={r.leadId} r={r} lead={l} campId={camp.id} canWrite={canWrite} selected={sel.has(r.leadId)} onSelect={(v) => setSel((s) => { const n = new Set(s); if (v) n.add(r.leadId); else n.delete(r.leadId); return n; })} onEdit={(d) => updateDraft(camp.id, r.leadId, d)} onApprove={() => {void approveDrafts(camp.id,[r.leadId]).then(()=>toast("Eligible draft approved")).catch(e=>toast("Approval failed",e instanceof Error?e.message:"Please retry","warning"));}} />;
           })}
           {rows.length > 100 && <p className="px-3 py-2 text-xs text-fg-3">Showing first 100 of {rows.length}.</p>}
         </div>
       </Card>
+      <DeliveryTracking campaignId={camp.id}/>
     </div>
   );
 }
@@ -427,11 +433,13 @@ function RecipientRow({ r, lead, canWrite, selected, onSelect, onEdit, onApprove
         <span className="hidden sm:block text-[11px] text-fg-3 w-24 text-right">{r.stopReason ?? (r.lastSentAt ? `step ${r.stepIndex} · ${relTime(r.lastSentAt)}` : "")}</span>
         <Badge tone={r.state === "replied" ? "success" : r.state === "stopped" || r.state === "bounced" ? "danger" : r.state === "approved" ? "accent" : r.state === "drafted" ? "warning" : "neutral"}>{r.state}</Badge>
       </div>
+      {r.error&&<p role="alert" className="mt-2 text-xs text-danger">{r.error}</p>}
+      {r.draftSource&&<p className="mt-2 text-xs text-fg-2">Draft source: {r.draftSource}</p>}
       {expanded && r.draft && (
         <div className="mt-2 ml-0 sm:ml-7 space-y-2">
-          {r.state === "drafted" && canWrite ? (
+          {["drafted","approved"].includes(r.state) && canWrite ? (
             <>
-              <Textarea defaultValue={r.draft} rows={7} onBlur={(e) => e.target.value !== r.draft && onEdit(e.target.value)} />
+              <Textarea key={r.draft} aria-label={`Message draft for ${lead.company}`} defaultValue={r.draft} rows={7} onBlur={(e) => e.target.value !== r.draft && onEdit(e.target.value)} />
               <div className="flex items-center gap-2">
                 <AIBadge>Personalized draft</AIBadge>
                 <Link href={`/leads/${lead.id}`} className="text-xs text-fg-3 hover:text-fg">View research</Link>
@@ -502,25 +510,25 @@ function SequenceEditor({ current, sequences, setId, canWrite }: { current: Sequ
             {([["onReply", "Lead replies"], ["onMeetingBooked", "Meeting is booked"], ["onOptOut", "Lead opts out"], ["onNotInterested", "Marked not interested"], ["onManualPause", "Lead manually paused"]] as const).map(([k, label]) => (
               <div key={k} className="flex items-center justify-between py-1.5 text-[13px]">
                 <span>Stop when {label.toLowerCase()}</span>
-                <Toggle checked={draft.stopRules[k]} label={label} onChange={(v) => canWrite && setDraft({ ...draft, stopRules: { ...draft.stopRules, [k]: v } })} />
+                <Badge tone="success">Always on</Badge>
               </div>
             ))}
           </div>
           <div className="space-y-3 rounded-xl border border-border p-3">
             <p className="text-xs font-semibold text-fg-2">Sending limits</p>
             <div className="flex items-center gap-2 text-[13px]">
-              <span className="w-24 text-fg-3">Send window</span>
+              <span className="w-24 text-fg-3">Window (UTC)</span>
               <Input type="number" min={0} max={23} value={draft.sendWindow.startHour} disabled={!canWrite} className="w-16" onChange={(e) => setDraft({ ...draft, sendWindow: { ...draft.sendWindow, startHour: Number(e.target.value) } })} />
               <span>to</span>
               <Input type="number" min={1} max={24} value={draft.sendWindow.endHour} disabled={!canWrite} className="w-16" onChange={(e) => setDraft({ ...draft, sendWindow: { ...draft.sendWindow, endHour: Number(e.target.value) } })} />
             </div>
             <div className="flex items-center justify-between text-[13px]"><span className="text-fg-3">Weekdays only</span><Toggle checked={draft.sendWindow.weekdaysOnly} onChange={(v) => canWrite && setDraft({ ...draft, sendWindow: { ...draft.sendWindow, weekdaysOnly: v } })} /></div>
-            <div className="flex items-center gap-2 text-[13px]"><span className="w-24 text-fg-3">Daily limit</span><Input type="number" min={1} value={draft.dailyLimit} disabled={!canWrite} className="w-24" onChange={(e) => setDraft({ ...draft, dailyLimit: Number(e.target.value) })} /><span className="text-xs text-fg-3">per mailbox</span></div>
+            <div className="flex items-center gap-2 text-[13px]"><span className="w-24 text-fg-3">Daily limit</span><Input type="number" min={1} max={1000} value={draft.dailyLimit} disabled={!canWrite} className="w-24" onChange={(e) => setDraft({ ...draft, dailyLimit: Number(e.target.value) })} /><span className="text-xs text-fg-3">account-wide cap for this send</span></div>
           </div>
         </div>
         {canWrite && dirty && (
           <div className="flex gap-2">
-            <Button variant="primary" onClick={() => { upsert({ ...draft, steps: [...draft.steps].sort((a, b) => a.dayOffset - b.dayOffset) }); toast("Sequence saved"); }}>Save sequence</Button>
+            <Button variant="primary" disabled={!draft.name.trim()||draft.sendWindow.endHour<=draft.sendWindow.startHour||draft.dailyLimit<1||draft.dailyLimit>1000} onClick={() => { upsert({ ...draft,stopRules:{onReply:true,onMeetingBooked:true,onOptOut:true,onNotInterested:true,onManualPause:true}, steps: [...draft.steps].sort((a, b) => a.dayOffset - b.dayOffset) }); toast("Sequence saved"); }}>Save sequence</Button>
             <Button variant="ghost" onClick={() => setDraft(current)}>Discard</Button>
           </div>
         )}

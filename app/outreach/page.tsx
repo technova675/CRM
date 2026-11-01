@@ -8,6 +8,8 @@ import { can } from "@/lib/permissions";
 import { pct } from "@/lib/utils";
 import { AIBadge, Button, PageHeader, Stat, Tabs } from "@/components/ui";
 import { CampaignDetail, CampaignList, funnel, NewCampaignModal, SequenceBuilder, SuppressionCard, useOpenCampaignEvents } from "@/components/sales/Outreach";
+import { ChannelConnections, TemplateLibrary } from "@/components/sales/OutreachDelivery";
+import styles from "./outreach.module.css";
 
 function OutreachInner() {
   const router = useRouter();
@@ -15,7 +17,7 @@ function OutreachInner() {
   const me = useMe();
   const canWrite = can(me.role, "outreach", "write");
   const outreach = useCRM((s) => s.outreach);
-  const [tab, setTab] = useState<"campaigns" | "sequences">("campaigns");
+  const [tab, setTab] = useState<"campaigns" | "sequences" | "templates" | "channels">("campaigns");
   const [newOpen, setNewOpen] = useState(() => params.get("new") === "1" && canWrite);
   const openId = params.get("c");
   const presetIds = useMemo(() => params.get("leads")?.split(",").filter(Boolean), [params]);
@@ -29,13 +31,13 @@ function OutreachInner() {
     return { contacted, replied, pending, leads, rate: contacted ? (replied / contacted) * 100 : 0 };
   }, [outreach]);
 
-  if (openId) return <CampaignDetail key={openId} id={openId} canWrite={canWrite} onBack={() => router.push("/outreach")} />;
+  if (openId) return <div className={styles.page}><CampaignDetail key={openId} id={openId} canWrite={canWrite} onBack={() => router.push("/outreach")} /></div>;
 
   return (
-    <div className="space-y-5">
+    <div className={`space-y-5 ${styles.page}`}>
       <PageHeader
         title={<>Outreach <AIBadge>Agent</AIBadge></>}
-        description="AI researches each lead, picks the right Adbibe service and drafts a personal message — you review, it sends and follows up."
+        description="Research → Personalize → Generate → Review → Approve → Send → Track → Follow-up. Every outbound message needs human approval."
         actions={canWrite && <Button variant="ai" icon={<Plus className="size-3.5" />} onClick={() => setNewOpen(true)}>New outreach campaign</Button>}
       />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -44,17 +46,17 @@ function OutreachInner() {
         <Stat label="Reply rate" value={pct(totals.rate)} hint={`${totals.replied} replies`} icon={<MessageSquareReply className="size-3.5" />} tone="success" />
         <Stat label="Awaiting approval" value={totals.pending} hint="drafts to review" icon={<ShieldCheck className="size-3.5" />} tone="warning" />
       </div>
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: "campaigns", label: "Campaigns", count: outreach.length }, { value: "sequences", label: "Sequences & compliance" }]} />
+      <div className={styles.tabs}><Tabs value={tab} onChange={setTab} tabs={[{ value: "campaigns", label: "Campaigns", count: outreach.length }, {value:"templates",label:"Templates"}, { value: "sequences", label: "Follow-ups & suppression" }, {value:"channels",label:"Channel connections"}]} /></div>
       {tab === "campaigns" ? (
         <CampaignList onOpen={open} />
-      ) : (
+      ) : tab === "templates" ? <TemplateLibrary canWrite={canWrite}/> : tab === "channels" ? <ChannelConnections/> : (
         <div className="grid gap-4 xl:grid-cols-3">
           <div className="xl:col-span-2"><SequenceBuilder canWrite={canWrite} /></div>
           <div className="space-y-4">
             <SuppressionCard canWrite={canWrite} />
             <div className="rounded-xl border border-border bg-surface p-4 text-xs text-fg-3">
               <p className="mb-1 flex items-center gap-1.5 text-[13px] font-semibold text-fg"><Sparkles className="size-3.5 text-accent" /> Deliverability tips</p>
-              Keep daily limits under 150 per mailbox, warm up new domains, and always include an opt-out line. Replies containing “stop” or “unsubscribe” are suppressed automatically.
+              Use approved provider capabilities and include an opt-out line. Due follow-ups are prepared for human review; they are never sent automatically. Connected providers must report replies and opt-outs through the tracking webhook.
             </div>
           </div>
         </div>

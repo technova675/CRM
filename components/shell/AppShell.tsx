@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Bell, ChevronDown, ChevronsUpDown, Lock, Menu, Moon, Search, Sparkles, Sun, X } from "lucide-react";
+import { Bell, ChevronDown, LogOut, Lock, Menu, Moon, Search, Sparkles, Sun, X } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can, moduleFromPath, MODULE_LABEL, ROLE_LABEL, setPermissionOverrides } from "@/lib/permissions";
 import { cn, relTime } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { Avatar, Button, EmptyState, Kbd } from "@/components/ui";
 import { CLIENT_LABELS, NAV, NAV_GROUPS, type NavGroup } from "./nav";
 import { useUI } from "./ui-state";
 import { Toaster } from "./toast";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { CommandPalette } from "./CommandPalette";
 import { AssistantPanel } from "./AssistantPanel";
 
@@ -122,52 +123,17 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </div>
       <div className="mt-auto">
-        <UserSwitcher />
+        <AccountMenu />
       </div>
     </nav>
   );
 }
 
-function UserSwitcher() {
-  const me = useMe();
-  const team = useCRM((s) => s.team);
-  const setUser = useCRM((s) => s.setCurrentUser);
-  const [open, setOpen] = useState(false);
-  const router = useRouter();
-  return (
-    <div className="relative">
-      {open && (
-        <div className="animate-in absolute bottom-full mb-2 left-0 right-0 rounded-xl border border-border bg-surface p-1 shadow-pop z-20">
-          <p className="px-2 py-1.5 text-[11px] text-fg-3">Switch user (demo RBAC)</p>
-          {team.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => {
-                setUser(t.id);
-                setOpen(false);
-                router.push("/dashboard");
-              }}
-              className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-2", t.id === me.id && "bg-surface-2")}
-            >
-              <Avatar name={t.name} color={t.avatarColor} size={22} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px]">{t.name}</span>
-                <span className="block text-[11px] text-fg-3">{ROLE_LABEL[t.role]}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-2 py-2 text-left hover:bg-surface-2 shadow-card">
-        <Avatar name={me.name} color={me.avatarColor} size={26} />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-medium">{me.name}</span>
-          <span className="block text-[11px] text-fg-3">{ROLE_LABEL[me.role]}</span>
-        </span>
-        <ChevronsUpDown className="size-3.5 text-fg-3" />
-      </button>
-    </div>
-  );
+function AccountMenu() {
+  const { user, signOut } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <div className="rounded-xl border border-border bg-surface p-3 shadow-card"><div className="flex min-w-0 items-center gap-2"><Avatar name={user?.email ?? "Account"} size={28} /><div className="min-w-0"><p className="truncate text-xs font-medium" title={user?.email}>{user?.email}</p><p className="mt-1 text-[11px] text-fg-2">Signed-in account</p></div></div><Button className="mt-3 w-full" icon={<LogOut size={14} aria-hidden="true" />} loading={busy} onClick={async () => { setBusy(true); setError(""); try { await signOut(); } catch { setError("Could not sign out. Please retry."); } finally { setBusy(false); } }}>Sign out</Button>{error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}</div>;
 }
 
 function Notifications() {
@@ -284,7 +250,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Storage can be blocked (private mode, embedded frames); fall back to in-memory demo data.
     void Promise.resolve()
-      .then(() => useCRM.persist.rehydrate())
+      .then(() => useCRM.persist.hasHydrated() ? undefined : useCRM.persist.rehydrate())
       .catch(() => undefined)
       .then(() => {
         refreshOverdue();

@@ -1,0 +1,5 @@
+.page { min-width:0; --text-3:var(--text-2); }
+.page button { min-height:44px; }
+.page :is(button,input,select,textarea,a):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.tabs > div { flex-wrap:wrap; overflow:visible; row-gap:4px; }
+@media(prefers-reduced-motion:reduce) { .page :global(.animate-in),.page :global(.animate-slide) { animation:none; } }

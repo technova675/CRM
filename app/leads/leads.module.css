@@ -1,0 +1,9 @@
+.workspace { min-width:0; padding-bottom:48px; }
+.workspace button { min-height:40px; }
+.filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:10px; align-items:center; border-bottom:1px solid var(--border); padding:16px; }
+.filters > div:first-child { grid-column:span 2; width:auto; }
+.filters select, .filters > input { width:100%; min-height:40px; }
+.filters > span:last-child { grid-column:1/-1; justify-self:end; }
+.workspace :is(button,select,input,textarea):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+@media(max-width:639px) { .filters { grid-template-columns:repeat(2,minmax(0,1fr)); padding:12px; gap:8px; } .filters select,.filters > input { min-width:0; } .workspace button { min-height:44px; } }
+@media(prefers-reduced-motion:reduce) { .workspace * { animation:none!important; transition:none!important; } }

@@ -57,9 +57,9 @@ const evaluators: Record<string, Eval> = {
       : { ratio: 0.1, reason: "No website on record" },
   social: (l) =>
     l.instagram && l.linkedin
-      ? { ratio: 1, reason: "Active on both Instagram and LinkedIn (per record)" }
+      ? { ratio: 1, reason: "Instagram and LinkedIn links supplied in CRM; activity not verified" }
       : l.instagram || l.linkedin
-        ? { ratio: 0.6, reason: "Present on one social network" }
+        ? { ratio: 0.6, reason: "One social profile link supplied in CRM; activity not verified" }
         : { ratio: 0.1, reason: "No social profiles on record" },
   budget: (l) => {
     const big = ["51-200", "201-1000", "1000+"].includes(l.companySize);

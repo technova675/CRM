@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import styles from "./leads.module.css";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Copy, Download, Filter, Globe, Briefcase as Linkedin, Plus, Send, Sparkles, Trash2, Upload, Users, X } from "lucide-react";
@@ -67,7 +68,7 @@ function LeadsInner() {
 
   // Page resets to 0 whenever the filter set changes.
   const filterKey = JSON.stringify(f);
-  const page = pageState.key === filterKey ? pageState.page : 0;
+  const page = Math.min(pageState.key === filterKey ? pageState.page : 0, Math.max(0, Math.ceil(filtered.length / PAGE) - 1));
   const setPage = (fn: (p: number) => number) => setPageState({ key: filterKey, page: fn(page) });
   const pageRows = filtered.slice(page * PAGE, page * PAGE + PAGE);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
@@ -88,6 +89,7 @@ function LeadsInner() {
     const rows = (ids.length ? leads.filter((l) => sel.has(l.id)) : filtered).map((l) => ({
       name: l.name, company: l.company, job_title: l.jobTitle, email: l.email, phone: l.phone, linkedin: l.linkedin ?? "", instagram: l.instagram ?? "",
       website: l.website ?? "", location: l.location, industry: l.industry, company_size: l.companySize, source: l.source, status: l.status,
+      notes: l.notes, communication_history: l.communicationHistory ?? "", ai_research: l.research?.summary ?? "",
       score: effectiveScore(l), owner: team.find((t) => t.id === l.ownerId)?.name ?? "", services: l.services.join("; "), tags: l.tags.join("; "), deal_value: l.dealValue ?? "", created: l.createdAt.slice(0, 10),
       ...Object.fromEntries(customDefs.map((d) => [d.key, l.customFields?.[d.key] ?? ""])),
     }));
@@ -96,12 +98,13 @@ function LeadsInner() {
   const sellers = team.filter((t) => ["admin", "sales"].includes(t.role));
 
   return (
-    <div>
+    <div className={styles.workspace}>
       <PageHeader
-        title="Leads"
-        description={`${leads.length.toLocaleString()} leads · centralized database with AI research & scoring`}
+        title="Leads & CRM"
+        description={`${leads.length.toLocaleString()} leads · account library · contacts, pipeline, communication and AI research`}
         actions={
           <>
+            <Button href="/settings?tab=fields">Custom fields</Button>
             <Button icon={<Download className="size-3.5" />} onClick={exportCSV}>Export</Button>
             {canWrite && <Button icon={<Upload className="size-3.5" />} onClick={() => setImportOpen(true)}>Import</Button>}
             {canWrite && <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => setAddOpen(true)}>Add lead</Button>}
@@ -109,12 +112,13 @@ function LeadsInner() {
         }
       />
 
+      <div className="mb-5 rounded-xl border border-border bg-surface p-4 text-sm"><p className="font-semibold">New → Researching → Qualified → Contacted → Replied → Meeting → Proposal → Negotiation → Won / Lost</p><p className="mt-2 text-xs leading-6 text-fg-2">Your account library syncs across laptops. Use the stage filters below or <Link className="text-accent-text underline" href="/pipeline">open the pipeline board</Link> to move leads through the sales process.</p></div>
       <SavedViewsBar current={f} onApply={(nf) => setF(nf)} />
       {showDups && <DuplicatesPanel leads={leads} canWrite={canWrite} onClose={() => setShowDups(false)} />}
 
       <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
         {(["All", ...LEAD_STATUSES] as const).map((s) => (
-          <button key={s} onClick={() => setFilter("status", s)} className={cn("flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 h-7 text-xs font-medium transition", status === s ? "border-fg bg-fg text-bg" : "border-border bg-surface text-fg-2 hover:bg-surface-2")}>
+          <button key={s} aria-pressed={status === s} onClick={() => setFilter("status", s)} className={cn("flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 h-7 text-xs font-medium transition", status === s ? "border-fg bg-fg text-bg" : "border-border bg-surface text-fg-2 hover:bg-surface-2")}>
             {s}
             <span className={cn("tabular-nums", status === s ? "opacity-70" : "text-fg-3")}>{counts[s] ?? 0}</span>
           </button>
@@ -122,15 +126,15 @@ function LeadsInner() {
       </div>
 
       <Card>
-        <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
+        <div className={styles.filters}>
           <SearchInput value={q} onChange={(v) => setFilter("q", v)} placeholder="Search name, company, email, city, tag…" className="w-full sm:w-72" />
-          <Select value={f.source} onChange={(e) => setFilter("source", e.target.value)} className="w-auto"><option value="All">All sources</option>{LEAD_SOURCES.map((s) => <option key={s}>{s}</option>)}</Select>
-          <Select value={f.industry} onChange={(e) => setFilter("industry", e.target.value)} className="w-auto"><option value="All">All industries</option>{INDUSTRIES.map((s) => <option key={s}>{s}</option>)}</Select>
-          <Select value={f.owner} onChange={(e) => setFilter("owner", e.target.value)} className="w-auto"><option value="All">All owners</option>{team.filter((t) => t.role !== "client").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select>
-          <Select value={f.tier} onChange={(e) => setFilter("tier", e.target.value)} className="w-auto"><option value="All">All scores</option>{["Hot", "Warm", "Cool", "Cold"].map((s) => <option key={s}>{s}</option>)}</Select>
-          <Select value={f.tag} onChange={(e) => setFilter("tag", e.target.value)} className="w-auto"><option value="All">All tags</option>{allTags.map((t) => <option key={t} value={t}>#{t}</option>)}</Select>
-          <Input value={f.location} onChange={(e) => setFilter("location", e.target.value)} placeholder="Location" className="w-28" />
-          <Select value={f.followups} onChange={(e) => setFilter("followups", e.target.value)} className="w-auto"><option value="">Any follow-up</option><option value="due">Follow-up due</option><option value="week">Follow-up this week</option></Select>
+          <Select aria-label="Lead source filter" value={f.source} onChange={(e) => setFilter("source", e.target.value)} className="w-auto"><option value="All">All sources</option>{LEAD_SOURCES.map((s) => <option key={s}>{s}</option>)}</Select>
+          <Select aria-label="Industry filter" value={f.industry} onChange={(e) => setFilter("industry", e.target.value)} className="w-auto"><option value="All">All industries</option>{[...new Set([...INDUSTRIES,...leads.map(lead => lead.industry)])].sort().map((s) => <option key={s}>{s}</option>)}</Select>
+          <Select aria-label="Assigned salesperson filter" value={f.owner} onChange={(e) => setFilter("owner", e.target.value)} className="w-auto"><option value="All">All owners</option>{team.filter((t) => t.role !== "client").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select>
+          <Select aria-label="Lead score filter" value={f.tier} onChange={(e) => setFilter("tier", e.target.value)} className="w-auto"><option value="All">All scores</option>{["Hot", "Warm", "Cool", "Cold"].map((s) => <option key={s}>{s}</option>)}</Select>
+          <Select aria-label="Tag filter" value={f.tag} onChange={(e) => setFilter("tag", e.target.value)} className="w-auto"><option value="All">All tags</option>{allTags.map((t) => <option key={t} value={t}>#{t}</option>)}</Select>
+          <Input aria-label="Location filter" value={f.location} onChange={(e) => setFilter("location", e.target.value)} placeholder="Location" className="w-28" />
+          <Select aria-label="Follow-up filter" value={f.followups} onChange={(e) => setFilter("followups", e.target.value)} className="w-auto"><option value="">Any follow-up</option><option value="due">Follow-up due</option><option value="week">Follow-up this week</option></Select>
           <Button size="sm" variant={segment ? "primary" : "secondary"} icon={<Filter className="size-3.5" />} onClick={() => setSegOpen(true)}>Segment</Button>
           <Button size="sm" variant={showDups ? "primary" : "secondary"} icon={<Copy className="size-3.5" />} onClick={() => setShowDups((v) => !v)}>Duplicates{dupCount > 0 && <Badge tone="warning" className="ml-0.5">{dupCount}</Badge>}</Button>
           {customDefs.length > 0 && (
@@ -209,7 +213,7 @@ function LeadsInner() {
                   <Td>
                     {l.research?.status === "running" ? <AIBadge>Researching</AIBadge> : <ScorePill score={effectiveScore(l)} overridden={l.score?.override !== undefined} />}
                   </Td>
-                  <Td className="hidden lg:table-cell text-fg-2">{l.source}{l.dealValue ? <span className="block text-[11px] text-fg-3">{compactMoney(l.dealValue)}</span> : null}</Td>
+                  <Td className="hidden lg:table-cell text-fg-2">{l.source}{l.dealValue != null ? <span className="block text-[11px] text-fg-3">{compactMoney(l.dealValue)}</span> : null}</Td>
                   <Td className="hidden xl:table-cell">
                     <div className="flex max-w-56 flex-wrap gap-1">{l.services.slice(0, 2).map((s) => <span key={s} className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-fg-2">{s}</span>)}{l.services.length > 2 && <span className="text-[11px] text-fg-3">+{l.services.length - 2}</span>}</div>
                   </Td>
@@ -232,7 +236,7 @@ function LeadsInner() {
           </div>
         )}
       </Card>
-      <p className="mt-2 text-[11px] text-fg-3">Last lead added {fmtShort(leads[0]?.createdAt)}. Tip: select leads to research them with AI or send them into an outreach campaign.</p>
+      <p className="mt-2 text-[11px] text-fg-3">{leads.length ? `Last lead added ${fmtShort(leads[0].createdAt)}.` : "Your CRM is ready for its first lead."} Tip: select leads to research them with AI or send them into an outreach campaign.</p>
 
       {segOpen && <SegmentBuilder open leads={leads} initial={segment} onClose={() => setSegOpen(false)} onApply={(sg) => setFilter("segment", sg ? JSON.stringify(sg) : "")} />}
       <AddLeadModal open={addOpen} onClose={() => { setAddOpen(false); if (params.get("new")) router.replace("/leads"); }} />

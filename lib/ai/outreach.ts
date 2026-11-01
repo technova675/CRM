@@ -4,46 +4,22 @@ import { outreachAngle, recommendServices } from "./research";
 
 // Short, specific hooks per service — used to make drafts read like a human wrote them.
 const HOOKS: Record<Service, string> = {
-  "Meta Ads": "tightening Meta ad creative + audience structure usually cuts CPA by 20–30% within a month",
-  "Google Ads": "a lot of search budget in this space leaks to broad-match terms that never convert",
-  "LinkedIn Ads": "LinkedIn lead-gen forms with tight job-title targeting usually beat cold outbound on cost per meeting",
-  Programmatic: "programmatic lets you reach in-market buyers at a fraction of premium placements",
-  "Retail Media": "sponsored listings on Amazon tend to be the cheapest incremental sales once reviews are in place",
-  "Quick Commerce": "Blinkit and Zepto ads can move trial fast in metros when the listing and offer are right",
-  SEO: "a handful of high-intent pages can bring steady inbound without paying per click",
-  "Social Media": "a consistent content system tends to lift inbound DMs more than one-off viral posts",
-  "Influencer Marketing": "micro-creators in your niche often outperform big names on cost per sale",
-  "AI Automation": "automating lead follow-up alone typically recovers 15–25% of leads that go cold",
-  "Video Production": "a steady pipeline of short-form video usually lowers CPMs and keeps creative fatigue in check",
-  "Brand Strategy": "a sharper positioning line makes every ad and post work harder",
-  Consulting: "an outside audit usually surfaces 2–3 quick wins in the first week",
+  "Meta Ads": "a creative and measurement review", "Google Ads": "a search-intent and conversion review", "LinkedIn Ads": "a B2B audience and lead-quality review",
+  Programmatic: "a channel-fit and measurement discussion", "Retail Media": "a product-listing and retail campaign review", "Quick Commerce": "a listing and local-demand review",
+  SEO: "a search-discovery and content review", "Social Media": "a content and community discussion", "Influencer Marketing": "a creator-fit and measurement discussion",
+  "AI Automation": "a review of repetitive sales and marketing work", "Video Production": "a video-content and audience discussion", "Brand Strategy": "a positioning and customer-message discussion", Consulting: "a short discovery conversation",
 };
 
 export function personalizeFirstMessage(lead: Lead, channel: Channel, service?: Service): { body: string; angle: string; service: Service } {
-  const services = lead.research?.recommendedServices?.length ? lead.research.recommendedServices : recommendServices(lead);
-  const svc = service ?? services[0]!;
-  const angle = lead.research?.outreachAngle ?? outreachAngle(lead, services);
-  const fn = firstName(lead.name);
-  const hook = HOOKS[svc];
-
-  const opener = lead.website
-    ? `I was looking at ${lead.company}'s site`
-    : lead.instagram
-      ? `I came across ${lead.company} on Instagram`
-      : `I came across ${lead.company} while looking at ${lead.industry.toLowerCase()} brands in ${lead.location}`;
-
-  if (channel === "LinkedIn" || channel === "WhatsApp" || channel === "Instagram") {
-    return {
-      service: svc,
-      angle,
-      body: `Hi ${fn} — ${opener.toLowerCase().replace(/^i /, "I ")} and had a quick thought: ${hook}. Happy to share 2–3 specific ideas for ${lead.company} if useful?`,
-    };
-  }
-  return {
-    service: svc,
-    angle,
-    body: `Hi ${fn},\n\n${opener} and noticed an opportunity on the ${svc} side — ${hook}.\n\nFor a ${lead.industry.toLowerCase()} brand like ${lead.company}, I'd start with a short audit and share what we'd change first. No pitch deck, just specifics.\n\nWorth a 15-minute look next week?\n\nBest,\nTeam Adbibe\n\n—\nReply "stop" and we won't reach out again.`,
-  };
+  const services=lead.research?.recommendedServices?.length?lead.research.recommendedServices:recommendServices(lead);
+  const svc=service??services[0]??"Consulting";
+  const angle=lead.research?.outreachAngle??outreachAngle(lead,services);
+  const fact=lead.research?.mode?lead.research.sections.flatMap(section=>section.findings).find(finding=>finding.kind==="verified"&&finding.evidenceQuote&&/^https?:\/\//i.test(finding.source??"")):undefined;
+  const context=fact?`A public source includes “${fact.evidenceQuote}” (${fact.source}). `:"";
+  const question=`Would ${HOOKS[svc]} be useful for ${lead.company}'s current priorities?`;
+  const body=[`Hi ${firstName(lead.name)},`,`${context}${question}`,"If this is relevant, I'd be glad to compare notes and understand your goals before suggesting any work."];
+  if(channel==="Email")body.push("Best,\nTeam Adbibe\n\nReply stop and we will not follow up.");
+  return {body:body.join(channel==="Email"?"\n\n":" "),angle,service:svc};
 }
 
 export function renderStep(template: string, lead: Lead, service: Service, angle: string) {

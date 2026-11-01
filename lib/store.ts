@@ -1,6 +1,8 @@
 "use client";
 
 import { create } from "zustand";
+import { flushCRMChanges } from "./crmSync";
+import { emailKey, phoneKey } from "./domain/leadImport";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type {
   Activity,
@@ -49,7 +51,7 @@ import type { Access, Module } from "./permissions";
 import type { AgentReportContent } from "./ai/reporting";
 import type { ImportedMetricRow } from "./domain/metricsImport";
 import { DEFAULT_CRITERIA, scoreLead } from "./ai/scoring";
-import { runLocalResearch } from "./ai/research";
+import { suppressed, destination, dueFollowUp, withOptOut } from "./domain/outreach";
 import { classifyReply, DEFAULT_SEQUENCE, isOptOut, personalizeFirstMessage, renderStep } from "./ai/outreach";
 import { DAY, money, uid } from "./utils";
 
@@ -60,6 +62,7 @@ export interface Settings {
   onboardingTemplates: OnboardingTemplate[];
   sequences: Sequence[];
   suppressions: Suppression[];
+  outreachTemplates: import("./types").OutreachTemplate[];
   agencyName: string;
   currency: "INR";
   notificationPrefs: NotificationPrefs;
@@ -102,6 +105,7 @@ const DEFAULT_SETTINGS: Settings = {
     { service: "Influencer Marketing", steps: ["Define creator brief", "Shortlist creators", "Negotiate & contract", "Content approvals"] },
   ],
   sequences: [DEFAULT_SEQUENCE],
+  outreachTemplates: [],
   suppressions: [
     { value: "competitor-agency.com", reason: "Competitor domain", addedAt: new Date(Date.now() - 30 * DAY).toISOString() },
   ],
@@ -119,7 +123,7 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 type NewLead = Omit<Lead, "id" | "createdAt" | "status" | "score" | "research" | "tags" | "notes" | "services"> &
-  Partial<Pick<Lead, "status" | "tags" | "notes" | "services">>;
+  Partial<Pick<Lead, "status" | "tags" | "notes" | "services" | "research">> & { initialScore?: number };
 
 export interface CRMState extends SeedData {
   currentUserId: string;
@@ -196,8 +200,8 @@ export interface CRMState extends SeedData {
   createOutreach: (name: string, leadIds: string[], channel: Channel, sequenceId?: string) => string;
   generateDrafts: (campaignId: string) => Promise<void>;
   updateDraft: (campaignId: string, leadId: string, draft: string) => void;
-  approveDrafts: (campaignId: string, leadIds: string[]) => void;
-  launchOutreach: (campaignId: string) => void;
+  approveDrafts: (campaignId: string, leadIds: string[]) => Promise<void>;
+  launchOutreach: (campaignId: string) => Promise<{accepted:number;blocked:number}>;
   setOutreachStatus: (campaignId: string, status: OutreachCampaign["status"]) => void;
   runFollowUps: () => number;
 
@@ -256,9 +260,11 @@ const now = () => new Date().toISOString();
 const short = (v: unknown) => (v === undefined ? "—" : typeof v === "object" ? JSON.stringify(v).slice(0, 120) : String(v).slice(0, 120));
 
 const STATUS_TO_STAGE: Partial<Record<LeadStatus, DealStage>> = {
+  New: "New",
+  Researching: "Researching",
   Qualified: "Qualified",
   Contacted: "Contacted",
-  Replied: "Contacted",
+  Replied: "Replied",
   Meeting: "Meeting",
   Proposal: "Proposal",
   Negotiation: "Negotiation",
@@ -266,7 +272,9 @@ const STATUS_TO_STAGE: Partial<Record<LeadStatus, DealStage>> = {
   Lost: "Lost",
 };
 const STAGE_TO_STATUS: Record<DealStage, LeadStatus> = {
-  "New Lead": "New",
+  "New": "New",
+  Researching: "Researching",
+  Replied: "Replied",
   Qualified: "Qualified",
   Contacted: "Contacted",
   Meeting: "Meeting",
@@ -275,21 +283,18 @@ const STAGE_TO_STATUS: Record<DealStage, LeadStatus> = {
   Won: "Won",
   Lost: "Lost",
 };
-const STAGE_PROB: Record<DealStage, number> = { "New Lead": 10, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
+const STAGE_PROB: Record<DealStage, number> = { "New": 10, Researching: 15, Replied: 35, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
 
-async function callResearchAPI(lead: Lead) {
-  try {
-    const res = await fetch("/api/ai/research", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ lead }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.research as Lead["research"] | null;
-  } catch {
-    return null;
-  }
+async function callResearchAPI(lead: Lead): Promise<NonNullable<Lead["research"]>> {
+  await flushCRMChanges();
+  const response = await fetch("/api/ai/research", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({leadId:lead.id}), signal:AbortSignal.timeout(110000) });
+  const data=await response.json();
+  if(!response.ok||!data.research)throw new Error(data.error??"Public research could not complete. Please retry.");
+  return data.research;
+}
+
+function dealForLead(lead: Lead): Deal {
+  return { id:uid("d"),createdAt:now(),title:`${lead.company} — ${lead.services[0] ?? "Lead opportunity"}`,leadId:lead.id,company:lead.company,value:lead.dealValue??0,services:lead.services,probability:STAGE_PROB[lead.status],expectedClose:new Date(Date.now()+30*DAY).toISOString(),ownerId:lead.ownerId,stage:lead.status,notes:"",paymentStatus:"Pending" };
 }
 
 export const useCRM = create<CRMState>()(
@@ -305,9 +310,7 @@ export const useCRM = create<CRMState>()(
       const me = () => get().currentUserId;
       const mode = (k: AIActionKind) => get().settings.approvalModes[k];
       const isSuppressed = (l: Lead) => {
-        const sup = get().settings.suppressions;
-        const domain = l.email.split("@")[1] ?? "";
-        return l.optedOut || sup.some((s) => s.value === l.email || s.value === domain || s.value === l.phone);
+        return suppressed(l, get().settings.suppressions);
       };
 
       return {
@@ -323,21 +326,27 @@ export const useCRM = create<CRMState>()(
         log,
         notify,
         markNotificationsRead: () => set((s) => ({ notifications: s.notifications.map((n) => ({ ...n, read: true })) })),
-        resetDemo: () => set({ ...buildSeed(), settings: DEFAULT_SETTINGS, reports: [], currentUserId: "u_admin" }),
+        resetDemo: () => set((state) => {
+          const cloud = /^[a-f0-9-]{36}$/i.test(state.currentUserId);
+          return { ...buildSeed(), settings: cloud ? { ...DEFAULT_SETTINGS, leadCustomFields: state.settings.leadCustomFields } : DEFAULT_SETTINGS, reports: [], currentUserId: cloud ? state.currentUserId : "u_admin",
+            ...(cloud ? Object.fromEntries(["leads","deals","conversations","messages","activities","team","savedViews"].map(key => [key,state[key as "leads"]])) : {}) };
+        }),
 
         // ---------------- Leads ----------------
         addLead: (input) => {
+          const { initialScore, ...fields } = input;
           const lead: Lead = {
             tags: [],
             notes: "",
             services: [],
-            ...input,
+            ...fields,
             id: uid("l"),
             createdAt: now(),
             status: input.status ?? "New",
           };
           lead.score = scoreLead(lead, get().settings.scoringCriteria);
-          set((s) => ({ leads: [lead, ...s.leads] }));
+          if (initialScore !== undefined) { lead.score.override = initialScore; lead.score.overrideReason = "Score entered when lead was added"; }
+          set((s) => ({ leads: [lead, ...s.leads], deals: [dealForLead(lead), ...s.deals] }));
           log({ actor: "human", actorId: me(), entity: "lead", entityId: lead.id, action: "Added lead", detail: `${lead.name} · ${lead.company}` });
           // Trigger: "New lead added" automation → research + score
           const auto = get().automations.find((a) => a.enabled && a.nodes[0]?.config.event === "lead.created");
@@ -348,34 +357,45 @@ export const useCRM = create<CRMState>()(
           return lead;
         },
         importLeads: (rows) => {
-          const existing = new Set(get().leads.map((l) => l.email.toLowerCase()));
+          const existing = new Set(get().leads.map((l) => emailKey(l.email)).filter(Boolean));
+          const phones = new Set(get().leads.map((l) => phoneKey(l.phone)).filter(Boolean));
           const criteria = get().settings.scoringCriteria;
           const fresh: Lead[] = [];
           let skipped = 0;
           for (const r of rows) {
-            const key = (r.email || "").toLowerCase();
-            if (!r.name || (key && existing.has(key))) {
+            const key = emailKey(r.email || "");
+            const phone = phoneKey(r.phone || "");
+            if (!r.name.trim() || !r.company.trim() || (key && existing.has(key)) || (phone && phones.has(phone))) {
               skipped++;
               continue;
             }
-            existing.add(key);
-            const lead: Lead = { tags: ["imported"], notes: "", services: [], ...r, id: uid("l"), createdAt: now(), status: r.status ?? "New" };
+            if (key) existing.add(key); if (phone) phones.add(phone);
+            const { initialScore, ...fields } = r;
+            const lead: Lead = { tags: ["imported"], notes: "", services: [], ...fields, id: uid("l"), createdAt: now(), status: r.status ?? "New" };
             lead.score = scoreLead(lead, criteria);
+            if (initialScore !== undefined) { lead.score.override = initialScore; lead.score.overrideReason = "Imported score"; }
             fresh.push(lead);
           }
-          set((s) => ({ leads: [...fresh, ...s.leads] }));
-          log({ actor: "human", actorId: me(), entity: "lead", action: "Imported leads", detail: `${fresh.length} added, ${skipped} skipped (duplicates / missing name)` });
+          set((s) => ({ leads: [...fresh, ...s.leads], deals: [...fresh.map(dealForLead), ...s.deals] }));
+          log({ actor: "human", actorId: me(), entity: "lead", action: "Imported leads", detail: `${fresh.length} added, ${skipped} skipped (duplicates / missing name or company)` });
           return { added: fresh.length, skipped };
         },
-        updateLead: (id, patch) => set((s) => ({ leads: s.leads.map((l) => (l.id === id ? { ...l, ...patch } : l)) })),
+        updateLead: (id, patch) => {
+          set((s) => ({ leads: s.leads.map((l) => (l.id === id ? { ...l, ...patch } : l)), deals: s.deals.map(deal => deal.leadId !== id ? deal : { ...deal,
+            ...(patch.ownerId !== undefined ? {ownerId:patch.ownerId}:{}), ...(patch.company !== undefined ? {company:patch.company}:{}), ...(patch.services !== undefined ? {services:patch.services}:{}), ...(Object.hasOwn(patch,"dealValue") ? {value:patch.dealValue??0}:{}),
+          }) }));
+          if (patch.status) get().setLeadStatus(id,patch.status);
+        },
         deleteLeads: (ids) => {
           const set_ = new Set(ids);
-          set((s) => ({ leads: s.leads.filter((l) => !set_.has(l.id)) }));
+          const conversationIds = new Set(get().conversations.filter(conversation => conversation.leadId && set_.has(conversation.leadId)).map(conversation => conversation.id));
+          set((s) => ({ leads: s.leads.filter((l) => !set_.has(l.id)), deals:s.deals.filter(deal => !deal.leadId || !set_.has(deal.leadId)), conversations:s.conversations.filter(conversation => !conversationIds.has(conversation.id)), messages:s.messages.filter(message => !conversationIds.has(message.conversationId)) }));
           log({ actor: "human", actorId: me(), entity: "lead", action: "Deleted leads", detail: `${ids.length} lead(s)` });
         },
         setLeadStatus: (id, status, actor = "human") => {
           const lead = get().leads.find((l) => l.id === id);
-          if (!lead || lead.status === status) return;
+          if (!lead) return;
+          if (lead.status === status && get().deals.some(deal => deal.leadId === id && deal.stage === status)) return;
           set((s) => ({ leads: s.leads.map((l) => (l.id === id ? { ...l, status } : l)) }));
           log({ actor, actorId: actor === "human" ? me() : undefined, entity: "lead", entityId: id, action: `Status → ${status}`, detail: lead.company });
           // Keep pipeline in sync: create or move the lead's deal.
@@ -389,7 +409,7 @@ export const useCRM = create<CRMState>()(
               title: `${lead.company} — ${lead.services[0] ?? "Growth retainer"}`,
               leadId: id,
               company: lead.company,
-              value: 150000,
+              value: lead.dealValue ?? 0,
               services: lead.services.length ? lead.services : lead.research?.recommendedServices ?? ["Meta Ads"],
               probability: STAGE_PROB[stage],
               expectedClose: new Date(Date.now() + 30 * DAY).toISOString(),
@@ -405,29 +425,33 @@ export const useCRM = create<CRMState>()(
           if (!lead) return;
           set((s) => ({
             leads: s.leads.map((l) =>
-              l.id === id ? { ...l, status: l.status === "New" ? "Researching" : l.status, research: { status: "running", sections: [], recommendedServices: [] } } : l,
+              l.id === id ? { ...l, status: l.status === "New" ? "Researching" : l.status, research: { ...l.research, status: "running", startedAt: now(), error: undefined, sections: l.research?.sections ?? [], recommendedServices: l.research?.recommendedServices ?? [] } } : l,
             ),
           }));
-          const remote = get().aiEnabled ? await callResearchAPI(lead) : null;
-          if (!remote) await new Promise((r) => setTimeout(r, 900)); // make local mode feel like a job
-          const research = remote ?? runLocalResearch(lead);
+          const account = get().currentUserId;
+          const currentLead=get().leads.find(item=>item.id===id);
+          if(currentLead)get().setLeadStatus(id,currentLead.status,"ai");
+          let research: NonNullable<Lead["research"]>;
+          try { research=await callResearchAPI(lead); }
+          catch(error) {
+            if(get().currentUserId===account)set(state=>({leads:state.leads.map(item=>item.id===id?{...item,research:{...item.research,status:"failed",error:error instanceof Error?error.message:"Public research could not complete",sections:item.research?.sections??[],recommendedServices:item.research?.recommendedServices??[]}}:item)}));
+            return;
+          }
+          if (get().currentUserId !== account || !get().leads.some(item => item.id === id)) return;
           const criteria = get().settings.scoringCriteria;
           set((s) => ({
             leads: s.leads.map((l) => {
               if (l.id !== id) return l;
-              const next = { ...l, research, services: l.services.length ? l.services : research.recommendedServices.slice(0, 2) };
+              const next = { ...l, research };
               next.score = scoreLead(next, criteria);
               const qualified = (next.score.override ?? next.score.value) >= get().settings.qualifyThreshold;
-              if (l.status === "New" || l.status === "Researching") next.status = qualified ? "Qualified" : "Researching";
+              if ((l.status === "New" || l.status === "Researching") && research.mode === "public_ai") next.status = qualified ? "Qualified" : "Researching";
               return next;
             }),
           }));
           const updated = get().leads.find((l) => l.id === id)!;
-          log({ actor: "ai", entity: "lead", entityId: id, action: "Researched & scored lead", detail: `${updated.company} — score ${updated.score?.value}${remote ? " (AI provider)" : " (local engine)"}` });
-          if (updated.status === "Qualified") {
-            const deal = get().deals.find((d) => d.leadId === id);
-            if (!deal) get().setLeadStatus(id, "Qualified", "ai");
-          }
+          log({ actor: "ai", entity: "lead", entityId: id, action: "Researched & scored lead", detail: `${updated.company} — score ${updated.score?.value}${research.mode === "public_ai" ? " (public sources + AI)" : " (evidence only)"}` });
+          get().setLeadStatus(id, updated.status, "ai");
         },
         rescoreLeads: (ids) => {
           const criteria = get().settings.scoringCriteria;
@@ -541,7 +565,7 @@ export const useCRM = create<CRMState>()(
           log({ actor: "human", actorId: me(), entity: "proposal", entityId: id, action: `Proposal ${status}`, detail: p.title });
           const deal = get().deals.find((d) => d.id === p.dealId);
           if (!deal) return;
-          if (status === "Sent" && ["New Lead", "Qualified", "Contacted", "Meeting"].includes(deal.stage)) get().moveDeal(deal.id, "Proposal");
+          if (status === "Sent" && ["New", "Qualified", "Contacted", "Meeting"].includes(deal.stage)) get().moveDeal(deal.id, "Proposal");
           if (status === "Accepted") get().moveDeal(deal.id, "Won");
           if (status === "Rejected") get().moveDeal(deal.id, "Lost");
         },
@@ -761,7 +785,7 @@ export const useCRM = create<CRMState>()(
         // ---------------- Outreach ----------------
         createOutreach: (name, leadIds, channel, sequenceId = "seq_default") => {
           const leads = get().leads;
-          const recipients = leadIds
+          const recipients = [...new Set(leadIds)]
             .map((id) => leads.find((l) => l.id === id))
             .filter((l): l is Lead => !!l)
             .map((l) => ({ leadId: l.id, state: isSuppressed(l) ? ("stopped" as const) : ("queued" as const), stepIndex: 0, stopReason: isSuppressed(l) ? "Suppressed / opted out" : undefined }));
@@ -771,127 +795,99 @@ export const useCRM = create<CRMState>()(
           return id;
         },
         generateDrafts: async (campaignId) => {
-          const camp = get().outreach.find((c) => c.id === campaignId);
-          if (!camp) return;
-          const queued = camp.recipients.filter((r) => r.state === "queued").map((r) => r.leadId);
-          // Research any un-researched leads first (batched to keep the UI responsive).
-          set((s) => ({ outreach: s.outreach.map((c) => (c.id === campaignId ? { ...c, status: "Review", recipients: c.recipients.map((r) => (r.state === "queued" ? { ...r, state: "researching" } : r)) } : c)) }));
-          await new Promise((r) => setTimeout(r, 600));
-          const criteria = get().settings.scoringCriteria;
-          const queuedSet = new Set(queued);
-          set((s) => {
-            const leads = s.leads.map((l) => {
-              if (!queuedSet.has(l.id) || l.research?.status === "done") return l;
-              const next = { ...l, research: runLocalResearch(l) };
-              next.score = scoreLead(next, criteria);
-              return next;
-            });
-            const byId = new Map(leads.map((l) => [l.id, l]));
-            return {
-              leads,
-              outreach: s.outreach.map((c) =>
-                c.id !== campaignId
-                  ? c
-                  : {
-                      ...c,
-                      recipients: c.recipients.map((r) => {
-                        if (r.state !== "researching") return r;
-                        const lead = byId.get(r.leadId)!;
-                        const d = personalizeFirstMessage(lead, c.channel);
-                        return { ...r, state: "drafted", draft: d.body, angle: d.angle, service: d.service };
-                      }),
-                    },
-              ),
-            };
-          });
-          log({ actor: "ai", entity: "outreach", entityId: campaignId, action: "Researched leads & drafted messages", detail: `${queued.length} personalized drafts ready for review` });
-          if (mode("Outreach") === "Automatic") {
-            get().approveDrafts(campaignId, queued);
-            get().launchOutreach(campaignId);
-          } else {
-            notify({ title: `${queued.length} drafts ready for review`, body: camp.name, href: `/outreach?c=${campaignId}`, kind: "ai" });
+          const account = me(), campaign = get().outreach.find(c => c.id === campaignId);
+          if (!campaign) return;
+          const ids = campaign.recipients.filter(r => r.state === "queued").slice(0, 10).map(r => r.leadId);
+          set(s => ({outreach:s.outreach.map(c=>c.id===campaignId?{...c,status:"Review"}:c)}));
+          for (const leadId of ids) {
+            if (me() !== account) return;
+            let lead=get().leads.find(l=>l.id===leadId);
+            const current=get().outreach.find(c=>c.id===campaignId);
+            if (!lead || !current || current.status==="Paused") break;
+            if(isSuppressed(lead)||!destination(lead,current.channel)){
+              set(s=>({outreach:s.outreach.map(c=>c.id===campaignId?{...c,recipients:c.recipients.map(r=>r.leadId===leadId?{...r,state:"stopped",stopReason:"Suppressed or missing channel address"}:r)}:c)}));continue;
+            }
+            set(s=>({outreach:s.outreach.map(c=>c.id===campaignId?{...c,recipients:c.recipients.map(r=>r.leadId===leadId?{...r,state:"researching",draftStartedAt:now(),error:undefined}:r)}:c)}));
+            try {
+              if(lead.research?.status!=="done") await get().researchLead(leadId);
+              if(me()!==account)return;
+              lead=get().leads.find(l=>l.id===leadId); if(!lead)continue;
+              const personalized=personalizeFirstMessage(lead,current.channel);
+              await flushCRMChanges();
+              const response=await fetch("/api/ai/draft",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({leadId,channel:current.channel,kind:"first"}),signal:AbortSignal.timeout(60000)});
+              const data=await response.json();if(!response.ok)throw new Error(data.error??"Draft generation failed");
+              if(me()!==account)return;
+              set(s=>({outreach:s.outreach.map(c=>c.id===campaignId?{...c,recipients:c.recipients.map(r=>r.leadId===leadId?{...r,state:"drafted",draft:withOptOut(data.text),angle:personalized.angle,service:personalized.service,draftSource:data.source,approvalToken:undefined,approvedAt:undefined,approvedBy:undefined}:r)}:c)}));
+            }catch(error){
+              if(me()!==account)return;
+              set(s=>({outreach:s.outreach.map(c=>c.id===campaignId?{...c,recipients:c.recipients.map(r=>r.leadId===leadId?{...r,state:"queued",error:error instanceof Error?error.message:"Could not generate draft"}:r)}:c)}));
+            }
           }
+          log({actor:"ai",entity:"outreach",entityId:campaignId,action:"Prepared outreach drafts for human review",detail:"Public research and AI personalization; unavailable evidence stays explicit. No messages sent."});
+          notify({title:"Outreach drafts ready to review",body:campaign.name,href:`/outreach?c=${campaignId}`,kind:"ai"});
         },
         updateDraft: (campaignId, leadId, draft) =>
-          set((s) => ({ outreach: s.outreach.map((c) => (c.id === campaignId ? { ...c, recipients: c.recipients.map((r) => (r.leadId === leadId ? { ...r, draft } : r)) } : c)) })),
-        approveDrafts: (campaignId, leadIds) => {
-          const ids = new Set(leadIds);
-          set((s) => ({
-            outreach: s.outreach.map((c) => (c.id === campaignId ? { ...c, recipients: c.recipients.map((r) => (ids.has(r.leadId) && r.state === "drafted" ? { ...r, state: "approved" } : r)) } : c)),
-          }));
-          log({ actor: "human", actorId: me(), entity: "outreach", entityId: campaignId, action: "Approved drafts", detail: `${leadIds.length} message(s)` });
+          set(s=>({outreach:s.outreach.map(c=>c.id===campaignId?{...c,recipients:c.recipients.map(r=>r.leadId===leadId&&["drafted","approved"].includes(r.state)?{...r,draft,state:"drafted",approvalToken:undefined,approvedAt:undefined,approvedBy:undefined}:r)}:c)})),
+        approveDrafts: async (campaignId,leadIds) => {
+          const account=me();
+          await flushCRMChanges();
+          let count=0;
+          for(let i=0;i<leadIds.length;i+=100){
+            const response=await fetch("/api/outreach/approve",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({campaignId,leadIds:leadIds.slice(i,i+100)}),signal:AbortSignal.timeout(30000)});
+            const data=await response.json();if(!response.ok)throw new Error(data.error??"Approval failed");
+            if(me()!==account)return;
+            const approvals=new Map<string,{approvalToken:string;approvedAt:string;approvedBy:string}>(data.approvals.map((a:{leadId:string})=>[a.leadId,a]));
+            count+=approvals.size;
+            set(s=>({outreach:s.outreach.map(c=>c.id===campaignId?{...c,recipients:c.recipients.map(r=>approvals.has(r.leadId)&&r.state==="drafted"?{...r,...approvals.get(r.leadId),state:"approved"}:r)}:c)}));
+          }
+          await flushCRMChanges();
+          log({actor:"human",actorId:account,entity:"outreach",entityId:campaignId,action:"Approved current message content",detail:`${count} drafts; edits or destination changes require new approval`});
         },
-        launchOutreach: (campaignId) => {
-          const camp = get().outreach.find((c) => c.id === campaignId);
-          if (!camp) return;
-          const approved = camp.recipients.filter((r) => r.state === "approved");
-          const ts = now();
-          const seq = get().settings.sequences.find((s) => s.id === camp.sequenceId) ?? DEFAULT_SEQUENCE;
-          const nextOffset = seq.steps[1]?.dayOffset ?? 3;
-          const leadsById = new Map(get().leads.map((l) => [l.id, l]));
-          const newConvs: SeedData["conversations"] = [];
-          const newMsgs: Message[] = [];
-          approved.forEach((r) => {
-            const lead = leadsById.get(r.leadId);
-            if (!lead) return;
-            const cid = uid("cv");
-            newConvs.push({ id: cid, leadId: lead.id, channel: camp.channel, ownerId: lead.ownerId, campaignId, status: "waiting", handledBy: "ai", unread: 0, lastMessageAt: ts, subject: camp.channel === "Email" ? `Quick idea for ${lead.company}` : undefined });
-            newMsgs.push({ id: uid("msg"), conversationId: cid, direction: "outbound", channel: camp.channel, body: r.draft ?? "", sentAt: ts, author: "ai", status: "sent" });
-          });
-          const approvedIds = new Set(approved.map((r) => r.leadId));
-          set((s) => ({
-            conversations: [...newConvs, ...s.conversations],
-            messages: [...s.messages, ...newMsgs],
-            leads: s.leads.map((l) =>
-              approvedIds.has(l.id)
-                ? { ...l, status: ["New", "Researching", "Qualified"].includes(l.status) ? "Contacted" : l.status, lastContactedAt: ts, nextFollowUpAt: new Date(Date.now() + nextOffset * DAY).toISOString() }
-                : l,
-            ),
-            outreach: s.outreach.map((c) =>
-              c.id === campaignId ? { ...c, status: "Running", recipients: c.recipients.map((r) => (r.state === "approved" ? { ...r, state: "sent", stepIndex: 1, lastSentAt: ts } : r)) } : c,
-            ),
-          }));
-          log({ actor: "ai", entity: "outreach", entityId: campaignId, action: "Sent first messages", detail: `${approved.length} via ${camp.channel} · follow-ups scheduled` });
+        launchOutreach: async (campaignId) => {
+          const account=me();await flushCRMChanges();
+          const response=await fetch("/api/outreach/send",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({campaignId}),signal:AbortSignal.timeout(120000)});
+          const data=await response.json();if(!response.ok)throw new Error(data.error??"Delivery could not complete");
+          if(me()!==account)return {accepted:0,blocked:0};
+          let accepted=0,blocked=0;
+          for(const result of data.results){
+            const campaign=get().outreach.find(c=>c.id===campaignId),recipient=campaign?.recipients.find(r=>r.leadId===result.leadId),lead=get().leads.find(l=>l.id===result.leadId);
+            if(!campaign||!recipient||!lead)continue;
+            if(result.status!=="accepted"||!result.delivery){blocked++;set(s=>({outreach:s.outreach.map(c=>c.id===campaignId?{...c,recipients:c.recipients.map(r=>r.leadId===lead.id?{...r,error:result.error??`Delivery ${result.status}; verify integration status before retrying`}:r)}:c)}));continue;}
+            accepted++;
+            const ts=result.delivery.created_at,channel=result.delivery.channel;
+            const existing=get().conversations.find(c=>c.campaignId===campaignId&&c.leadId===lead.id&&c.channel===channel),cid=existing?.id??uid("cv");
+            set(s=>({
+              conversations:existing?s.conversations:[{id:cid,leadId:lead.id,channel,ownerId:lead.ownerId,campaignId,status:"waiting",handledBy:"human",unread:0,lastMessageAt:ts},...s.conversations],
+              messages:s.messages.some(m=>m.id===result.delivery.id)?s.messages:[...s.messages,{id:result.delivery.id,conversationId:cid,direction:"outbound",channel,body:recipient.draft??"",sentAt:ts,author:"ai",status:"sent"}],
+              leads:s.leads.map(l=>l.id===lead.id?{...l,status:["New","Researching","Qualified"].includes(l.status)?"Contacted":l.status,lastContactedAt:ts}:l),
+              outreach:s.outreach.map(c=>c.id===campaignId?{...c,status:"Running",recipients:c.recipients.map(r=>r.leadId===lead.id?{...r,state:"sent",stepIndex:result.delivery.step_index+1,lastSentAt:ts,deliveryId:result.delivery.id,error:undefined,approvalToken:undefined}:r)}:c),
+            }));
+          }
+          await flushCRMChanges();
+          log({actor:"api",entity:"outreach",entityId:campaignId,action:"Delivery integration results",detail:`${accepted} accepted by integration; ${blocked} blocked or unconfirmed. Acceptance is not a delivery receipt.`});
+          return {accepted,blocked};
         },
-        setOutreachStatus: (campaignId, status) => {
-          set((s) => ({ outreach: s.outreach.map((c) => (c.id === campaignId ? { ...c, status } : c)) }));
-          log({ actor: "human", actorId: me(), entity: "outreach", entityId: campaignId, action: `Outreach ${status}` });
+        setOutreachStatus: (campaignId,status) => {
+          set(s=>({outreach:s.outreach.map(c=>c.id===campaignId?{...c,status}:c)}));
+          log({actor:"human",actorId:me(),entity:"outreach",entityId:campaignId,action:`Outreach ${status}`});
         },
         runFollowUps: () => {
-          // Processes every running sequence: sends the next step to recipients who haven't replied.
-          let sent = 0;
-          const leadsById = new Map(get().leads.map((l) => [l.id, l]));
-          const needsApproval = mode("Follow-ups") !== "Automatic";
-          const newMsgs: Message[] = [];
-          const outreach = get().outreach.map((c) => {
-            if (c.status !== "Running") return c;
-            const seq = get().settings.sequences.find((s) => s.id === c.sequenceId) ?? DEFAULT_SEQUENCE;
-            return {
-              ...c,
-              recipients: c.recipients.map((r) => {
-                if (r.state !== "sent") return r;
-                const lead = leadsById.get(r.leadId);
-                if (!lead || isSuppressed(lead)) return { ...r, state: "stopped" as const, stopReason: "Suppressed / opted out" };
-                const step = seq.steps[r.stepIndex];
-                if (!step) return { ...r, state: "stopped" as const, stopReason: "Sequence completed" };
-                if (needsApproval) return r;
-                const conv = get().conversations.find((cv) => cv.leadId === lead.id && cv.campaignId === c.id) ?? get().conversations.find((cv) => cv.leadId === lead.id);
-                if (conv) {
-                  newMsgs.push({ id: uid("msg"), conversationId: conv.id, direction: "outbound", channel: step.channel, body: renderStep(step.template, lead, r.service ?? "Meta Ads", r.angle ?? ""), sentAt: now(), author: "ai", status: "sent" });
-                }
-                sent++;
-                return { ...r, stepIndex: r.stepIndex + 1, lastSentAt: now() };
-              }),
-            };
-          });
-          if (needsApproval) {
-            const due = get().outreach.flatMap((c) => (c.status === "Running" ? c.recipients.filter((r) => r.state === "sent") : [])).length;
-            if (due) get().requestApproval({ kind: "Follow-ups", title: `Send ${due} scheduled follow-ups`, detail: "Follow-ups are set to require approval." });
-            return 0;
-          }
-          set((s) => ({ outreach, messages: [...s.messages, ...newMsgs] }));
-          if (sent) log({ actor: "ai", entity: "outreach", action: "Sent follow-ups", detail: `${sent} follow-up(s) across running sequences` });
-          return sent;
+          let drafted=0;
+          set(s=>({outreach:s.outreach.map(c=>{
+            if(c.status!=="Running")return c;
+            const sequence=s.settings.sequences.find(seq=>seq.id===c.sequenceId);if(!sequence)return c;
+            return {...c,recipients:c.recipients.map(r=>{
+              if(r.state!=="sent")return r;
+              const lead=s.leads.find(l=>l.id===r.leadId);
+              if(!lead||isSuppressed(lead)||["Meeting","Won","Lost","Replied"].includes(lead.status))return {...r,state:"stopped",stopReason:"Reply, meeting, opt-out or inactive lead"};
+              if(!sequence.steps[r.stepIndex])return {...r,state:"stopped",stopReason:"Sequence completed"};
+              if(!dueFollowUp(r,sequence,new Date()))return r;
+              const step=sequence.steps[r.stepIndex];drafted++;
+              return {...r,state:"drafted",draft:withOptOut(renderStep(step.template,lead,r.service??"Consulting",r.angle??"")),draftSource:"Personalized sequence template · human review required",approvalToken:undefined,approvedAt:undefined,approvedBy:undefined};
+            })};
+          })}));
+          if(drafted)log({actor:"system",entity:"outreach",action:"Prepared due follow-ups for review",detail:`${drafted} drafts; no automatic sends`});
+          return drafted;
         },
 
         // ---------------- Automations ----------------
