@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {createTestAccount,TestBrowser} from './reportAuthFixture.mjs';
+let account,other;
+try{
+ account=await createTestAccount();other=await createTestAccount();const a=new TestBrowser(),b=new TestBrowser();await a.signIn(account);await b.signIn(other);let library=await(await a.request('/api/crm/library')).json(),at=new Date().toISOString();
+ const client={id:'campaign-client',company:'Campaign Example',industry:'Other',location:'Pune',contacts:[],services:['Meta Ads'],retainer:0,contractStart:'',contractEnd:'',accountManagerId:account.id,health:'Healthy',onboarding:[],createdAt:at,documents:[]};
+ const creative={id:'campaign-creative',clientId:client.id,title:'Launch creative',type:'Image',platform:'Meta',format:'1:1',status:'Draft',versions:[],comments:[],ownerId:account.id,tags:[],aiGenerated:false,createdAt:at,updatedAt:at};
+ library.data.clients=[client];library.data.creatives=[creative];
+ const campaign={id:'campaign-test',name:'Cross-channel launch',clientId:client.id,service:'Meta Ads',channels:['Meta Ads','Google Ads','Ecommerce'],campaignType:'Ecommerce',platform:'Meta / Google / store',objective:'Product sales',goals:'Acquire new customers profitably',audience:'Product category shoppers',budget:0,budgetPeriod:'Total',startDate:at,endDate:new Date(Date.now()+30*86400000).toISOString(),ownerId:account.id,teamIds:[account.id],status:'Planning',kpis:[{label:'ROAS',target:3,actual:0,measurementRecorded:false}],creativeIds:[creative.id],metrics:[],influencerIds:[],landingPage:'https://example.com/shop',tracking:'GA4 purchase + UTMs',trackingStatus:'Configured',createdAt:at,updatedAt:at};
+ library.data.campaigns=[campaign];library.data.creatives[0].campaignId=campaign.id;
+ async function put(data=library.data){return a.request('/api/crm/library',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({revision:library.revision,operationId:crypto.randomUUID(),data})});}
+ let response=await put();assert.equal(response.status,200,JSON.stringify(await response.clone().json()));library=await(await a.request('/api/crm/library')).json();
+ const laptop=new TestBrowser();await laptop.signIn(account);const shared=(await(await laptop.request('/api/crm/library')).json()).data;assert.equal(shared.campaigns[0].name,campaign.name);assert.equal(shared.creatives[0].campaignId,campaign.id);assert.equal(shared.campaigns[0].kpis[0].measurementRecorded,false);assert.equal((await(await b.request('/api/crm/library')).json()).data.campaigns.length,0);
+ for(const patch of [{budget:-1},{endDate:'2020-01-01'},{landingPage:'javascript:alert(1)'},{ownerId:other.id},{creativeIds:['foreign-creative']},{clientId:'foreign-client'},{trackingStatus:'Verified'}]){const data=structuredClone(library.data);data.campaigns[0]={...data.campaigns[0],...patch};response=await put(data);assert.equal(response.status,400,JSON.stringify(patch));}
+ library.data.campaigns[0]={...library.data.campaigns[0],budget:75000,budgetPeriod:'Monthly',trackingStatus:'Verified',trackingVerifiedAt:at,trackingVerifiedBy:account.id,kpis:[{label:'ROAS',target:3,actual:2.5,measurementRecorded:true}]};response=await put();assert.equal(response.status,200,JSON.stringify(await response.clone().json()));
+ assert.equal((await new TestBrowser().request('/api/crm/library')).status,401);assert.equal((await a.request('/api/crm/library',{method:'PUT',headers:{origin:'https://unrelated.example'}})).status,403);
+ console.log('PASS: full campaign persistence, creative links, zero budget, tracking, unmeasured/measured KPIs, same-login laptop sharing, account isolation and invalid-field/reference rejection.');
+}finally{if(account)await account.remove();if(other)await other.remove();}

@@ -255,6 +255,13 @@ export interface Proposal {
   deliverables?: string[];
   timeline?: { phase: string; weeks: string; detail: string }[];
   viewedAt?: string;
+  durationMonths?: number;
+  terms?: string[];
+  generationSource?: string;
+  clientSnapshot?: {company:string;contactName?:string;industry?:string;location?:string;website?:string};
+  workflowHistory?: {status:ProposalStatus;at:string;actorId:string;source:"manual"}[];
+  approvedBy?: string;
+  approvedAt?: string;
 }
 
 export interface OnboardingStep {
@@ -272,6 +279,7 @@ export interface ClientContact {
 }
 
 export interface Client {
+  creativeIntelligence?: CreativeIntelligenceReport[];
   id: ID;
   company: string;
   industry: string;
@@ -288,9 +296,22 @@ export interface Client {
   onboarding: OnboardingStep[];
   createdAt: string;
   lastReportAt?: string;
-  documents: { name: string; kind: string; addedAt: string }[];
+  documents: { name: string; kind: string; addedAt: string; url?:string }[];
+  contracts?: {id:string;title:string;status:"Draft"|"Active"|"Expired"|"Ended";startsAt?:string;endsAt?:string;value?:number;documentUrl?:string;notes?:string}[];
+  reportCompanyId?: string;
+  onboardingWorkspace?: ClientOnboarding;
   monthlyAdSpend?: number; // client media spend managed by Adbibe (₹/mo)
   upsellNotes?: string;
+}
+
+export interface ClientOnboarding {
+ version:1; startedAt:string;updatedAt:string;
+ welcome:{to:string;subject:string;body:string;status:"Draft"|"Approved"|"Sent externally";approvedAt?:string;approvedBy?:string;sentAt?:string;sentBy?:string;deliveryNote?:string};
+ form:{company:string;website:string;contactName:string;contactEmail:string;contactPhone:string;goals:string;audience:string;products:string;brandVoice:string;competitors:string;marketing:string;budget:string;launchDate:string;trackingNotes:string;status:"Draft"|"Submitted";submittedAt?:string;submittedBy?:string};
+ assets:{id:string;name:string;category:string;required:boolean;url:string;status:"Requested"|"Received"|"Approved";notes:string;reviewedAt?:string;reviewedBy?:string;file?:{id:string;name:string;type:string;size:number;sha256:string;uploadedAt:string}}[];
+ access:{id:string;platform:string;accountId:string;requestTo:string;status:"Not requested"|"Requested"|"Granted"|"Verified"|"Not required";notes:string;verifiedAt?:string;verifiedBy?:string}[];
+ assignments:{id:string;responsibility:string;memberId?:string}[];
+ history:{id:string;at:string;actorId:string;action:string}[];
 }
 
 export type CampaignStatus = "Planning" | "Active" | "Paused" | "Completed";
@@ -299,6 +320,8 @@ export interface CampaignKPI {
   target: number;
   actual: number;
   unit?: string;
+  direction?: "higher" | "lower";
+  measurementRecorded?: boolean;
 }
 export interface DailyMetric {
   date: string;
@@ -311,6 +334,8 @@ export interface DailyMetric {
   revenue: number;
 }
 export interface Campaign {
+  creatorMatch?: import("./domain/influencerWorkspace").CreatorMatchReport;
+  performanceRows?: MediaMetricRow[];
   id: ID;
   name: string;
   clientId: ID;
@@ -333,6 +358,14 @@ export interface Campaign {
   creativeIds?: ID[];
   adAccountId?: string;
   dataSource?: "upload"; // metrics came from an Excel/CSV upload rather than a connected platform
+  goals?: string;
+  channels?: string[];
+  budgetPeriod?: "Monthly" | "Total";
+  trackingStatus?: "Not configured" | "Configured" | "Verified";
+  trackingVerifiedAt?: string;
+  trackingVerifiedBy?: ID;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export const CAMPAIGN_TYPES = ["Lead Generation", "Brand Awareness", "Conversion", "Retargeting", "Ecommerce", "App Installs", "Traffic"] as const;
@@ -384,6 +417,7 @@ export interface Task {
   attachments?: { name: string; addedAt: string }[];
   recurring?: "none" | "daily" | "weekly" | "monthly";
   projectId?: ID;
+  onboardingKey?: string;
 }
 export type TaskRelatedType = "lead" | "deal" | "client" | "campaign" | "creative" | "seo" | "influencer" | "social" | "video" | "strategy";
 
@@ -413,6 +447,13 @@ export interface Invoice {
 }
 
 export interface Influencer {
+  crmVersion?: 2;
+  updatedAt?: string;
+  profileUrl?: string;
+  phone?: string;
+  audienceNotes?: string;
+  pricingNotes?: string;
+  profileData?: {followers:number|null;engagement:number|null;pricePerPost:number|null;performanceScore:number|null;source:string;sourceUrl:string;observedOn:string};
   id: ID;
   name: string;
   instagram?: string;
@@ -436,6 +477,17 @@ export interface Influencer {
 export const INFLUENCER_STAGES = ["Shortlisted", "Outreach", "Negotiation", "Contracted", "Content Submitted", "Approved", "Live", "Paid"] as const;
 export type InfluencerStage = (typeof INFLUENCER_STAGES)[number];
 export interface InfluencerEngagement {
+  crmVersion?: 2;
+  negotiation?: string;
+  feeKnown?: boolean;
+  amountPaid?: number | null;
+  paymentReference?: string;
+  paymentDue?: string;
+  outreachLog?: {id:string;at:string;channel:string;status:"Draft"|"Contacted"|"Replied"|"Declined";body:string}[];
+  outreachDraft?: {body:string;source:string;at:string};
+  contentApproval?: {url:string;at:string;by:string};
+  liveUrl?: string;
+  performanceSnapshot?: {start:string;end:string;source:string;views:number|null;engagements:number|null;clicks:number|null;sales:number|null;revenue:number|null};
   id: ID;
   influencerId: ID;
   campaignId: ID;
@@ -564,6 +616,7 @@ export interface OnboardingTemplate {
 }
 
 export interface ApprovalRequest {
+  reviewUpdatedAt?: string;
   id: ID;
   kind: AIActionKind;
   title: string;
@@ -677,6 +730,10 @@ export type RecommendationCategory =
   | "Winner" | "Loser" | "Fatigue" | "Scaling" | "Budget" | "Audience" | "Creative" | "Funnel" | "Landing Page"
   | "Upsell" | "Retention" | "SEO" | "Social" | "Finance" | "Anomaly";
 export interface Recommendation {
+  mediaPlan?: {signature:string;fingerprint:string;campaignId:string;rangeStart:string;rangeEnd:string;action:"budget_change"|"create_task";budget?:number;source:string};
+  mediaApprovedAt?: string;
+  mediaApprovedBy?: ID;
+  mediaExecution?: {at:string;actorId:ID;kind:"internal_budget"|"task";taskId?:string;note:string};
   id: ID;
   agent: AgentId;
   clientId?: ID;
@@ -697,6 +754,10 @@ export interface Recommendation {
   createdAt: string;
   resolvedAt?: string;
   resolvedBy?: ID;
+}
+export interface MediaMetricRow {
+ id:string;date:string;platform:string;adId?:string;adName?:string;source:"CSV import"|"Platform sync";importedAt:string;
+ spend:number|null;impressions:number|null;reach:number|null;clicks:number|null;leads:number|null;conversions:number|null;revenue:number|null;frequency?:number|null;
 }
 
 // ---------- Marketing strategy ----------
@@ -743,6 +804,10 @@ export interface StrategyDoc {
   updatedAt: string;
   approvedBy?: ID;
   approvedAt?: string;
+  generationSource?: string;
+  generatedAt?: string;
+  generationInputs?: StrategyInputs;
+  reviewHistory?: {status: "Draft" | "In Review" | "Approved"; at: string; actorId: ID; note?: string}[];
 }
 
 // ---------- Creative ----------
@@ -750,6 +815,7 @@ export const CREATIVE_STATUSES = ["Draft", "Internal Review", "Client Review", "
 export type CreativeStatus = (typeof CREATIVE_STATUSES)[number];
 export type CreativeType = "Image" | "Video" | "Carousel" | "Copy" | "Ad" | "Landing Page" | "Campaign";
 export interface CreativeVersion {
+  storyboard?: string[];
   v: number;
   note: string;
   createdAt: string;
@@ -770,6 +836,8 @@ export interface CreativeComment {
   internal?: boolean; // hidden from the client portal
 }
 export interface Creative {
+  performanceLinks?: {campaignId:ID;platform:string;adId:string}[];
+  fromConceptId?: ID;
   id: ID;
   clientId: ID;
   campaignId?: ID;
@@ -790,6 +858,12 @@ export interface Creative {
   updatedAt: string;
 }
 export interface CreativeConcept {
+  batchId?: string;
+  generationSource?: string;
+  brief?: {brand:string;product:string;audience:string;offer:string;platform:string;objective:string;existing:string};
+  existingCreativeIds?: ID[];
+  reviewedAt?: string;
+  reviewedBy?: ID;
   id: ID;
   clientId: ID;
   kind: "Video" | "Static" | "UGC" | "Carousel";
@@ -804,6 +878,11 @@ export interface CreativeConcept {
   rationale: InsightItem[];
   createdAt: string;
   savedAsCreativeId?: ID;
+}
+export interface CreativeIntelligenceReport {
+ id:ID;clientId:ID;createdAt:string;start:string;end:string;source:string;creativeIds:ID[];
+ sections:{key:string;title:string;observations:{kind:"record"|"inference"|"unavailable";text:string;evidence:string[]}[];recommendations:string[]}[];
+ limits:string[];
 }
 
 // ---------- AI Video Editor ----------
@@ -892,6 +971,19 @@ export interface SocialPost {
   metrics?: { reach: number; impressions: number; likes: number; comments: number; shares: number; saves: number; er: number };
   creativeId?: ID;
   createdAt: string;
+  workflowVersion?: 2;
+  mediaUrls?: string[];
+  brief?: string;
+  strategyId?: ID;
+  contentPlan?: string;
+  generationSource?: string;
+  updatedAt?: string;
+  review?: { digest: string; at: string; source: string; score: number; notes: string[] };
+  humanApproval?: { digest: string; at: string; by: ID };
+  scheduleTimezone?: string;
+  delivery?: { key: string; status: "pending" | "accepted" | "unknown"; providerId?: string; url?: string; at: string };
+  publication?: { url: string; source: "Human recorded"; by: ID; at: string };
+  analytics?: { source: "Human entered"; recordedAt: string; start: string; end: string; reach: number | null; impressions: number | null; likes: number | null; comments: number | null; shares: number | null; saves: number | null };
 }
 
 // ---------- SEO ----------
@@ -926,6 +1018,7 @@ export interface ContentBrief {
   createdAt: string;
 }
 export interface SeoProject {
+  workspace?: import("./domain/seoWorkspace").SeoWorkspaceData;
   id: ID;
   clientId: ID;
   domain: string;

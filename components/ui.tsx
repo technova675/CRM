@@ -228,7 +228,7 @@ export function MemberAvatar({ id, size = 22, showName }: { id?: string; size?: 
   const m = useCRM((s) => s.team.find((t) => t.id === id));
   if (!m) return <span className="text-fg-3 text-xs">Unassigned</span>;
   return (
-    <span className="inline-flex items-center gap-1.5 min-w-0">
+    <span className="inline-flex max-w-full items-center gap-1.5 min-w-0" title={m.name}>
       <Avatar name={m.name} color={m.avatarColor} size={size} />
       {showName && <span className="truncate text-[13px] text-fg-2">{m.name.split(" ")[0]}</span>}
     </span>
@@ -284,16 +284,26 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
   );
 }
 export function Drawer({ open, onClose, title, subtitle, children, footer, width = 560 }: { open: boolean; onClose: () => void; title: ReactNode; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; width?: number }) {
+  const titleId=useId();
+  const dialogRef=useRef<HTMLElement>(null);
+  useEffect(()=>{
+    if(!open)return;
+    const previous=document.activeElement instanceof HTMLElement?document.activeElement:null,node=dialogRef.current;if(!node)return;
+    const controls=()=>Array.from(node.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')).filter(element=>element.getClientRects().length>0);
+    (controls()[0]??node).focus();
+    const trap=(event:KeyboardEvent)=>{if(event.key!=="Tab")return;const elements=controls(),first=elements[0],last=elements.at(-1);if(!first){event.preventDefault();node.focus();}else if(event.shiftKey&&(document.activeElement===first||document.activeElement===node)){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}};
+    node.addEventListener("keydown",trap);return()=>{node.removeEventListener("keydown",trap);if(previous?.isConnected)previous.focus();};
+  },[open]);
   useEsc(open, onClose);
   if (!open) return null;
   return (
     <Portal>
       <div className="fixed inset-0 z-50">
         <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-        <aside className="animate-slide absolute right-0 top-0 h-full w-full flex flex-col border-l border-border bg-surface shadow-pop" style={{ maxWidth: width }}>
+        <aside ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="animate-slide absolute right-0 top-0 h-full w-full flex flex-col border-l border-border bg-surface shadow-pop" style={{ maxWidth: width }}>
           <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3 border-b border-border">
             <div className="min-w-0">
-              <h2 className="text-[15px] font-semibold truncate">{title}</h2>
+              <h2 id={titleId} className="text-[15px] font-semibold truncate">{title}</h2>
               {subtitle && <div className="text-xs text-fg-3 mt-0.5">{subtitle}</div>}
             </div>
             <button onClick={onClose} className="rounded-md p-1 text-fg-3 hover:bg-surface-2 hover:text-fg" aria-label="Close">

@@ -27,10 +27,10 @@ function PostChip({ p, writable, onOpen, clientName }: { p: SocialPost; writable
       onDragStart={(e) => e.dataTransfer.setData("text/post", p.id)}
       onClick={() => onOpen(p)}
       title={`${clientName(p.clientId)} · ${p.stage} · ${p.hook}`}
-      className={cn("w-full flex items-center gap-1 rounded-md border border-border border-l-2 bg-surface px-1 py-0.5 text-left text-[11px] hover:bg-surface-2", TONE_BORDER[STAGE_TONE[p.stage]], drag && "cursor-grab active:cursor-grabbing")}
+      className={cn("w-full min-h-11 flex items-center gap-1 rounded-md border border-border border-l-2 bg-surface px-1 py-1 text-left text-xs hover:bg-surface-2", TONE_BORDER[STAGE_TONE[p.stage]], drag && "cursor-grab active:cursor-grabbing")}
     >
       <PlatformChip platform={p.platform} />
-      <span className="truncate flex-1 text-fg-2">{at ? new Date(at).toLocaleTimeString("en-IN", { hour: "numeric" }).replace(" ", "") : ""} {p.format}</span>
+      <span className="truncate flex-1 text-fg-2">{at ? new Date(at).toLocaleTimeString("en-IN", { hour: "numeric" }).replace(" ", "") : ""} {p.title} · {p.format}</span>
     </button>
   );
 }
@@ -67,6 +67,7 @@ export function SocialCalendar({ posts, month, onMonth, onOpen, writable, client
 
   const onDrop = (e: React.DragEvent, d: Date) => {
     e.preventDefault();
+    if (!writable) return;
     setOver(null);
     const id = e.dataTransfer.getData("text/post");
     const p = posts.find((x) => x.id === id);
@@ -77,16 +78,21 @@ export function SocialCalendar({ posts, month, onMonth, onOpen, writable, client
     <Card>
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border">
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="xs" aria-label="Previous month" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} icon={<ChevronLeft className="size-3.5" />} />
-          <Button variant="ghost" size="xs" aria-label="Next month" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} icon={<ChevronRight className="size-3.5" />} />
+          <Button className="min-h-11 min-w-11" variant="ghost" size="xs" aria-label="Previous month" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} icon={<ChevronLeft className="size-3.5" />} />
+          <Button className="min-h-11 min-w-11" variant="ghost" size="xs" aria-label="Next month" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} icon={<ChevronRight className="size-3.5" />} />
           <span className="text-[13px] font-semibold ml-1">{month.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</span>
         </div>
         <div className="flex items-center gap-2">
           {writable && <span className="hidden sm:inline text-[11px] text-fg-3">Drag a post to another day to reschedule</span>}
-          <Button size="xs" onClick={() => onMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>Today</Button>
+          <Button className="min-h-11" size="xs" onClick={() => onMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>Today</Button>
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="space-y-4 p-3 md:hidden" aria-label="Monthly content agenda">
+        <p className="text-sm font-semibold">Content agenda</p>
+        {days.filter(d=>d.getMonth()===month.getMonth()&&byDay.has(key(d))).map(d=><section key={key(d)}><h3 className="mb-2 text-xs font-medium text-fg-2">{d.toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"short"})}</h3><div className="space-y-2">{byDay.get(key(d))!.map(p=><PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName}/>)}</div></section>)}
+        {!days.some(d=>d.getMonth()===month.getMonth()&&byDay.has(key(d)))&&<p className="text-sm text-fg-2">No dated content this month. Open an unscheduled idea below to plan a post.</p>}
+      </div>
+      <div className="hidden overflow-x-auto md:block">
         <div className="min-w-[720px]">
           <div className="grid grid-cols-7 border-b border-border">
             {DOW.map((d) => <div key={d} className="px-2 py-1.5 text-[11px] font-medium text-fg-3">{d}</div>)}
@@ -106,7 +112,7 @@ export function SocialCalendar({ posts, month, onMonth, onOpen, writable, client
                 >
                   <div className={cn("text-[11px] tabular-nums px-0.5", inMonth ? "text-fg-2" : "text-fg-3", today === k && "font-semibold text-accent-text")}>{d.getDate()}</div>
                   {list.slice(0, 4).map((p) => <PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName} />)}
-                  {list.length > 4 && <p className="text-[10px] text-fg-3 px-1">+{list.length - 4} more</p>}
+                  {list.length > 4 && <details><summary className="min-h-11 cursor-pointer px-1 text-xs text-fg-2">+{list.length - 4} more</summary>{list.slice(4).map(p=><PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName}/>)}</details>}
                 </div>
               );
             })}

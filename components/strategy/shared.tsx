@@ -33,7 +33,7 @@ export function EditableText({ value, onSave, disabled, multiline, className, pl
         tabIndex={disabled ? undefined : 0}
         onClick={() => !disabled && setDraft(value)}
         onKeyDown={(e) => !disabled && e.key === "Enter" && setDraft(value)}
-        className={cn("min-w-0 whitespace-pre-wrap", !disabled && "cursor-text rounded hover:bg-surface-2 hover:outline hover:outline-1 hover:outline-border", !value && "text-fg-3", className)}
+        className={cn("min-w-0 whitespace-pre-wrap break-words focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent", !disabled && "cursor-text rounded hover:bg-surface-2 hover:outline hover:outline-1 hover:outline-border", !value && "text-fg-3", className)}
         title={disabled ? undefined : "Click to edit"}
       >
         {value || placeholder}
@@ -55,6 +55,7 @@ export function EditableText({ value, onSave, disabled, multiline, className, pl
         commit();
       }
     },
+    "aria-label":"Edit strategy text",
     className: cn("w-full rounded-md border border-accent bg-surface px-1.5 py-0.5 text-[13px] text-fg outline-none ring-3 ring-[var(--ring)]", className),
   };
   return multiline ? <textarea {...common} rows={3} onChange={(e) => setDraft(e.target.value)} /> : <input {...common} onChange={(e) => setDraft(e.target.value)} />;
@@ -76,7 +77,7 @@ export function EditableInsights({ items, onChange, disabled }: { items: Insight
             {it.source && <span className="ml-1 text-[11px] text-fg-3">· {it.source}</span>}
           </span>
           {!disabled && (
-            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-fg-3 hover:text-danger mt-0.5" aria-label="Remove line">
+            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 text-fg-3 hover:text-danger mt-0.5" aria-label="Remove line">
               <Trash2 className="size-3.5" />
             </button>
           )}
@@ -93,11 +94,14 @@ export function EditableInsights({ items, onChange, disabled }: { items: Insight
   );
 }
 
-export function SectionCard({ title, subtitle, action, children, className }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
+export function SectionCard({ id,title, subtitle, action, children, className }: { id?:string;title: ReactNode; subtitle?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <Card className={className}>
-      <CardHeader title={title} subtitle={subtitle} action={action} />
+    <Card id={id} className={className}>
+      <CardHeader className="flex-wrap [&>div:first-child]:min-w-40" title={title} subtitle={subtitle} action={action} />
       <div className="px-4 pb-4">{children}</div>
     </Card>
   );
 }
+
+
+

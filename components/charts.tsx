@@ -26,7 +26,7 @@ function Tip({ active, payload, label, fmt }: { active?: boolean; payload?: { na
 
 const axis = { tickLine: false, axisLine: false, fontSize: 11 } as const;
 
-export function AreaTrend({ data, x, series, height = 220, fmt, tickFmt, stacked }: { data: Row[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; tickFmt?: Fmt; stacked?: boolean }) {
+export function AreaTrend({ data, x, series, height = 220, fmt, tickFmt, stacked }: { data: Record<string,string|number|null>[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; tickFmt?: Fmt; stacked?: boolean }) {
   const gradientId = useId();
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -51,7 +51,7 @@ export function AreaTrend({ data, x, series, height = 220, fmt, tickFmt, stacked
   );
 }
 
-export function Bars({ data, x, series, height = 220, fmt, tickFmt, horizontal, stacked }: { data: Row[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; tickFmt?: Fmt; horizontal?: boolean; stacked?: boolean }) {
+export function Bars({ data, x, series, height = 220, fmt, tickFmt, horizontal, stacked }: { data: Record<string,string|number|null>[]; x: string; series: { key: string; label: string; color?: string }[]; height?: number; fmt?: Fmt; tickFmt?: Fmt; horizontal?: boolean; stacked?: boolean }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} layout={horizontal ? "vertical" : "horizontal"} margin={{ top: 8, right: 8, left: horizontal ? 8 : -12, bottom: 0 }} barCategoryGap="22%">
@@ -171,3 +171,4 @@ export function totals(rows: ReturnType<typeof aggregateMetrics>) {
     roas: t.spend ? t.revenue / t.spend : 0,
   };
 }
+

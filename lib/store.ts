@@ -3,6 +3,11 @@
 import { create } from "zustand";
 import { flushCRMChanges } from "./crmSync";
 import { emailKey, phoneKey } from "./domain/leadImport";
+import {ensureWonOnboarding} from "./domain/pipeline";
+import {canTransitionProposal} from "./domain/proposal";
+import {initializeClientOnboarding,applyOnboarding} from "./domain/onboarding";
+import {strategyReviewIssues} from "./domain/strategy";
+import {campaignSchema} from "./domain/campaign";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type {
   Activity,
@@ -63,6 +68,7 @@ export interface Settings {
   sequences: Sequence[];
   suppressions: Suppression[];
   outreachTemplates: import("./types").OutreachTemplate[];
+  proposalPriceBook: import("./ai/proposal").PriceBookEntry[];
   agencyName: string;
   currency: "INR";
   notificationPrefs: NotificationPrefs;
@@ -106,6 +112,7 @@ const DEFAULT_SETTINGS: Settings = {
   ],
   sequences: [DEFAULT_SEQUENCE],
   outreachTemplates: [],
+  proposalPriceBook: [],
   suppressions: [
     { value: "competitor-agency.com", reason: "Competitor domain", addedAt: new Date(Date.now() - 30 * DAY).toISOString() },
   ],
@@ -126,6 +133,7 @@ type NewLead = Omit<Lead, "id" | "createdAt" | "status" | "score" | "research" |
   Partial<Pick<Lead, "status" | "tags" | "notes" | "services" | "research">> & { initialScore?: number };
 
 export interface CRMState extends SeedData {
+  marketingAutomations:import("./domain/marketingAutomation").MarketingWorkflow[];
   currentUserId: string;
   settings: Settings;
   reports: GeneratedReport[];
@@ -168,9 +176,11 @@ export interface CRMState extends SeedData {
   updateClient: (id: string, patch: Partial<Client>) => void;
   toggleOnboardingStep: (clientId: string, key: string) => void;
   createClientFromDeal: (dealId: string) => string | undefined;
+  initializeOnboarding:(clientId:string)=>void;
+  updateOnboarding:(clientId:string,patch:Partial<import("./types").ClientOnboarding>,action:string)=>void;
 
   // Campaigns
-  addCampaign: (c: Omit<Campaign, "id" | "metrics" | "kpis" | "influencerIds"> & Partial<Pick<Campaign, "kpis" | "influencerIds">>) => void;
+  addCampaign: (c: Omit<Campaign, "id" | "metrics" | "kpis" | "influencerIds"> & Partial<Pick<Campaign, "kpis" | "influencerIds">>) => Campaign;
   updateCampaign: (id: string, patch: Partial<Campaign>) => void;
 
   // Tasks
@@ -315,6 +325,7 @@ export const useCRM = create<CRMState>()(
 
       return {
         ...buildSeed(),
+        marketingAutomations:[],
         currentUserId: "u_admin",
         settings: DEFAULT_SETTINGS,
         reports: [],
@@ -350,7 +361,7 @@ export const useCRM = create<CRMState>()(
           log({ actor: "human", actorId: me(), entity: "lead", entityId: lead.id, action: "Added lead", detail: `${lead.name} · ${lead.company}` });
           // Trigger: "New lead added" automation → research + score
           const auto = get().automations.find((a) => a.enabled && a.nodes[0]?.config.event === "lead.created");
-          if (auto) {
+          if (auto && !/^[a-f0-9-]{36}$/i.test(me())) {
             set((s) => ({ automations: s.automations.map((a) => (a.id === auto.id ? { ...a, runs: a.runs + 1, lastRunAt: now() } : a)) }));
             void get().researchLead(lead.id);
           }
@@ -410,7 +421,7 @@ export const useCRM = create<CRMState>()(
               leadId: id,
               company: lead.company,
               value: lead.dealValue ?? 0,
-              services: lead.services.length ? lead.services : lead.research?.recommendedServices ?? ["Meta Ads"],
+              services: lead.services,
               probability: STAGE_PROB[stage],
               expectedClose: new Date(Date.now() + 30 * DAY).toISOString(),
               ownerId: lead.ownerId,
@@ -486,12 +497,21 @@ export const useCRM = create<CRMState>()(
           const deal: Deal = { ...d, id: uid("d"), createdAt: now() };
           set((s) => ({ deals: [deal, ...s.deals] }));
           log({ actor: "human", actorId: me(), entity: "deal", entityId: deal.id, action: "Created deal", detail: deal.title });
+          if(deal.stage==="Won")get().createClientFromDeal(deal.id);
           return deal;
         },
-        updateDeal: (id, patch) => set((s) => ({ deals: s.deals.map((d) => (d.id === id ? { ...d, ...patch } : d)) })),
+        updateDeal: (id, patch) => {
+          const deal=get().deals.find(d=>d.id===id);if(!deal)return;
+          const {stage,...fields}=patch;
+          set(s=>({deals:s.deals.map(d=>d.id===id?{...d,...fields}:d)}));
+          const changes=Object.keys(fields).filter(key=>JSON.stringify(deal[key as keyof Deal])!==JSON.stringify(fields[key as keyof typeof fields]));
+          if(changes.length)log({actor:"human",actorId:me(),entity:"deal",entityId:id,action:"Updated deal details",detail:changes.join(", ")});
+          if(stage)get().moveDeal(id,stage);
+        },
         moveDeal: (id, stage) => {
           const deal = get().deals.find((d) => d.id === id);
-          if (!deal || deal.stage === stage) return;
+          if (!deal) return;
+          if(deal.stage===stage){if(stage==="Won")get().createClientFromDeal(id);return;}
           set((s) => ({ deals: s.deals.map((d) => (d.id === id ? { ...d, stage, probability: STAGE_PROB[stage] } : d)) }));
           log({ actor: "human", actorId: me(), entity: "deal", entityId: id, action: `Moved to ${stage}`, detail: deal.title, before: deal.stage, after: stage });
           if (deal.leadId) {
@@ -557,11 +577,15 @@ export const useCRM = create<CRMState>()(
           log({ actor: "human", actorId: me(), entity: "proposal", entityId: proposal.id, action: "Created proposal", detail: proposal.title });
           return proposal;
         },
-        updateProposal: (id, patch) => set((s) => ({ proposals: s.proposals.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
+        updateProposal: (id, patch) => {
+          const content=["title","lines","discoveryNotes","strategySummary","deliverables","timeline","terms","durationMonths","expiresAt","clientSnapshot"];
+          const changed=Object.keys(patch).some(key=>content.includes(key));
+          set(s=>({proposals:s.proposals.map(p=>p.id===id?{...p,...patch,...(changed?{status:"Draft" as const,approval:"Awaiting" as const,approvedAt:undefined,approvedBy:undefined}:{})}:p),approvals:changed?s.approvals.map(a=>a.status==="pending"&&a.ref?.type==="proposal"&&a.ref.id===id?{...a,status:"rejected",resolvedAt:now(),resolvedBy:me()}:a):s.approvals}));
+        },
         setProposalStatus: (id, status) => {
           const p = get().proposals.find((x) => x.id === id);
-          if (!p) return;
-          set((s) => ({ proposals: s.proposals.map((x) => (x.id === id ? { ...x, status, sentAt: status === "Sent" ? now() : x.sentAt } : x)) }));
+          if (!p||!canTransitionProposal(p,status)) return;
+          set((s) => ({ proposals: s.proposals.map((x) => (x.id === id ? { ...x, status, sentAt: status === "Sent" ? now() : x.sentAt,viewedAt:status==="Viewed"?now():x.viewedAt,workflowHistory:[...(x.workflowHistory??[]),{status,at:now(),actorId:me(),source:"manual" as const}] } : x)) }));
           log({ actor: "human", actorId: me(), entity: "proposal", entityId: id, action: `Proposal ${status}`, detail: p.title });
           const deal = get().deals.find((d) => d.id === p.dealId);
           if (!deal) return;
@@ -582,83 +606,35 @@ export const useCRM = create<CRMState>()(
         toggleOnboardingStep: (clientId, key) =>
           set((s) => ({
             clients: s.clients.map((c) =>
-              c.id === clientId ? { ...c, onboarding: c.onboarding.map((o) => (o.key === key ? { ...o, done: !o.done, doneAt: !o.done ? now() : undefined } : o)) } : c,
+                c.id === clientId ? { ...c, onboarding: c.onboarding.map((o) => (o.key === key&&!key.startsWith("obw_") ? { ...o, done: !o.done, doneAt: !o.done ? now() : undefined } : o)) } : c,
             ),
           })),
+        initializeOnboarding:(clientId)=>{const result=initializeClientOnboarding(get(),clientId,now());if(result.changed){set(result.data);log({actor:"human",actorId:me(),entity:"client",entityId:clientId,action:"Initialized onboarding workspace"});}},
+        updateOnboarding:(clientId,patch,action)=>{
+          const workspace=get().clients.find(c=>c.id===clientId)?.onboardingWorkspace;if(!workspace)return;
+          const at=now(),next={...workspace,...patch,updatedAt:at,history:[{id:uid("ob"),at,actorId:me(),action},...workspace.history].slice(0,100)};
+          set(applyOnboarding(get(),clientId,next,at));log({actor:"human",actorId:me(),entity:"client",entityId:clientId,action});
+        },
         createClientFromDeal: (dealId) => {
-          const deal = get().deals.find((d) => d.id === dealId);
-          if (!deal) return;
-          const lead = deal.leadId ? get().leads.find((l) => l.id === deal.leadId) : undefined;
-          const existing = get().clients.find((c) => c.company === deal.company);
-          if (existing) {
-            set((s) => ({ deals: s.deals.map((d) => (d.id === dealId ? { ...d, clientId: existing.id } : d)) }));
-            return existing.id;
-          }
-          const { settings } = get();
-          // Onboarding = default checklist + service-specific steps.
-          const base = settings.onboardingTemplates.find((t) => t.service === "Default")?.steps ?? [];
-          const extra = deal.services.flatMap((svc) => settings.onboardingTemplates.find((t) => t.service === svc)?.steps ?? []);
-          const steps = [...base.slice(0, 6), ...extra, ...base.slice(6)];
-          const am = get().team.find((t) => t.role === "account_manager")?.id ?? "u_admin";
-          const client: Client = {
-            id: uid("c"),
-            company: deal.company,
-            industry: lead?.industry ?? "—",
-            website: lead?.website,
-            location: lead?.location ?? "—",
-            contacts: lead ? [{ name: lead.name, email: lead.email, phone: lead.phone, role: lead.jobTitle }] : [],
-            services: deal.services,
-            retainer: Math.round(deal.value / 12 / 1000) * 1000 || deal.value,
-            contractStart: now(),
-            contractEnd: new Date(Date.now() + 365 * DAY).toISOString(),
-            accountManagerId: am,
-            health: "Healthy",
-            fromDealId: dealId,
-            onboarding: steps.map((label, i) => ({ key: `ob_${i}`, label, done: i === 0 })),
-            createdAt: now(),
-            documents: deal.proposalId ? [{ name: "Accepted proposal.pdf", kind: "Proposal", addedAt: now() }] : [],
-          };
-          set((s) => ({
-            clients: [client, ...s.clients],
-            deals: s.deals.map((d) => (d.id === dealId ? { ...d, clientId: client.id } : d)),
-            automations: s.automations.map((a) => (a.nodes[0]?.config.event === "deal.won" ? { ...a, runs: a.runs + 1, lastRunAt: now() } : a)),
-          }));
-          // Onboarding automation: internal setup tasks per service.
-          const setupTasks = [
-            { title: `Kick-off call — ${client.company}`, priority: "High" as const, days: 2 },
-            { title: `Collect ad account access — ${client.company}`, priority: "High" as const, days: 3 },
-            ...deal.services.map((s) => ({ title: `Set up ${s} — ${client.company}`, priority: "Medium" as const, days: 7 })),
-          ];
-          setupTasks.forEach((t) =>
-            get().addTask({ title: t.title, description: "Created by onboarding automation", assigneeId: am, priority: t.priority, dueDate: new Date(Date.now() + t.days * DAY).toISOString(), status: "Todo", related: { type: "client", id: client.id }, createdBy: "automation" }),
-          );
-          // Workspace: client knowledge base (AI memory) + onboarding project.
-          set((s) => ({
-            knowledge: [
-              { id: client.id, clientId: client.id, brandVoice: "", toneWords: [], products: [], audience: lead?.research?.sections.find((x) => x.key === "audience")?.findings[0]?.text ?? "", competitors: [], approvedMessaging: [], rejectedConcepts: [], preferences: [], guidelines: "", history: lead?.research?.summary ? [`Pre-sale research: ${lead.research.summary}`] : [], updatedAt: now() },
-              ...s.knowledge,
-            ],
-            projects: [{ id: uid("prj"), name: `${client.company} — Onboarding & launch`, clientId: client.id, ownerId: am, status: "Active", startDate: now(), dueDate: new Date(Date.now() + 21 * DAY).toISOString(), createdAt: now() }, ...s.projects],
-          }));
-          const welcome = `Welcome email to ${client.contacts[0]?.name ?? client.company}`;
-          if (mode("Client communication") === "Automatic") {
-            log({ actor: "ai", agent: "client_success", entity: "client", entityId: client.id, action: "Sent welcome email + onboarding form", detail: client.company });
-          } else {
-            get().requestApproval({ kind: "Client communication", title: welcome, detail: `${client.company} — welcome note with onboarding form link, access checklist and kickoff slots`, ref: { type: "client", id: client.id }, agent: "client_success" });
-          }
-          log({ actor: "system", entity: "client", entityId: client.id, action: "Client created from won deal", detail: `${client.company} · onboarding started (${steps.length} steps)` });
-          return client.id;
+          const state=get(),deal=state.deals.find(d=>d.id===dealId);
+          if(!deal||deal.stage!=="Won")return;
+          const result=ensureWonOnboarding(state,state.settings.onboardingTemplates,now(),me());
+          if(result.changed)set(result.data);
+          return get().deals.find(d=>d.id===dealId)?.clientId;
         },
 
         // ---------------- Campaigns ----------------
         addCampaign: (c) => {
-          const campaign: Campaign = { kpis: [], influencerIds: [], ...c, id: uid("cmp"), metrics: [] };
-          set((s) => ({ campaigns: [campaign, ...s.campaigns] }));
+          const campaign: Campaign = { kpis: [], influencerIds: [], ...c, id: uid("cmp"), metrics: [],createdAt:now(),updatedAt:now() };
+          campaignSchema.parse(campaign);
+          set((s) => ({ campaigns: [campaign, ...s.campaigns],creatives:s.creatives.map(cr=>campaign.creativeIds?.includes(cr.id)&&cr.clientId===campaign.clientId?{...cr,campaignId:campaign.id}:cr) }));
           log({ actor: "human", actorId: me(), entity: "campaign", entityId: campaign.id, action: "Created campaign", detail: campaign.name });
+          return campaign;
         },
         updateCampaign: (id, patch) => {
           const c = get().campaigns.find((x) => x.id === id);
-          set((s) => ({ campaigns: s.campaigns.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+          if(!c)return;const next={...c,...patch,updatedAt:now()};campaignSchema.parse(next);
+          set((s) => ({ campaigns: s.campaigns.map((x) => (x.id === id ? next : x)),creatives:patch.creativeIds?s.creatives.map(cr=>patch.creativeIds!.includes(cr.id)&&cr.clientId===next.clientId?{...cr,campaignId:id}:cr.campaignId===id?{...cr,campaignId:undefined}:cr):s.creatives }));
           if (c && patch.status && patch.status !== c.status) log({ actor: "human", actorId: me(), entity: "campaign", entityId: id, action: `Campaign ${patch.status}`, detail: c.name, before: c.status, after: patch.status });
           if (c && patch.budget !== undefined && patch.budget !== c.budget) log({ actor: "human", actorId: me(), entity: "campaign", entityId: id, action: "Changed budget", detail: c.name, before: money(c.budget), after: money(patch.budget) });
         },
@@ -924,6 +900,9 @@ export const useCRM = create<CRMState>()(
         resolveApproval: (id, approve) => {
           const ap = get().approvals.find((a) => a.id === id);
           if (!ap) return;
+          if(ap.ref?.type==="recommendation"&&get().recommendations.find(r=>r.id===ap.ref!.id)?.mediaPlan){get().notify({title:"Review this action in Performance Marketing",body:"Media actions require server-verified approval and explicit execution.",kind:"info",href:"/performance"});return;}
+          if(ap.ref?.type==="campaign"&&approve&&ap.payload&&"previousBudget" in ap.payload){const campaign=get().campaigns.find(c=>c.id===ap.ref!.id);if(!campaign||campaign.budget!==ap.payload.previousBudget||(campaign.budgetPeriod??"Monthly")!==ap.payload.previousBudgetPeriod){get().notify({title:"Campaign budget changed",body:"Open the campaign and submit a fresh budget request before approving.",kind:"warning",href:`/campaigns?c=${ap.ref.id}`});return;}}
+          if(ap.ref?.type==="strategy"&&approve){const doc=get().strategies.find(d=>d.id===ap.ref!.id);if(!doc||doc.status!=="In Review"||!ap.reviewUpdatedAt||ap.reviewUpdatedAt!==doc.updatedAt||strategyReviewIssues(doc).length){get().notify({title:"Strategy needs a fresh review",body:"The strategy changed or has incomplete inputs/budget. Open Marketing Strategy and resubmit it.",kind:"warning",href:`/strategy?id=${ap.ref.id}`});return;}const at=now();set(s=>({strategies:s.strategies.map(d=>d.id===doc.id?{...d,status:"Approved",approvedAt:at,approvedBy:me(),updatedAt:at,reviewHistory:[...(d.reviewHistory??[]),{status:"Approved" as const,at,actorId:me()}].slice(-100)}:d)}));}
           set((s) => ({ approvals: s.approvals.map((a) => (a.id === id ? { ...a, status: approve ? "approved" : "rejected", resolvedBy: me(), resolvedAt: now() } : a)) }));
           log({ actor: "human", actorId: me(), entity: "automation", entityId: id, action: approve ? "Approved AI action" : "Rejected AI action", detail: ap.title });
           // Linked recommendation follows the approval decision.
@@ -934,7 +913,7 @@ export const useCRM = create<CRMState>()(
             if (ap.ref?.type === "report") set((s) => ({ reports: s.reports.map((r) => (r.id === ap.ref!.id ? { ...r, status: "Rejected" } : r)) }));
             return;
           }
-          if (ap.apply) {
+          if (ap.apply&&ap.ref?.type!=="strategy") {
             const { collection, id: targetId, patch } = ap.apply;
             const before = (get()[collection] as { id: string }[]).find((x) => x.id === targetId) as Record<string, unknown> | undefined;
             set((s) => ({ [collection]: (s[collection] as { id: string }[]).map((x) => (x.id === targetId ? { ...x, ...patch } : x)) }) as Partial<CRMState>);
@@ -1073,6 +1052,7 @@ export const useCRM = create<CRMState>()(
         },
         actOnRecommendation: (id, decision) => {
           const r = get().recommendations.find((x) => x.id === id);
+          if(r?.mediaPlan){get().notify({title:"Use the media review workflow",body:"Open Performance Marketing to review and execute this action.",kind:"info",href:"/performance"});return;}
           if (!r || r.status === "Executed" || r.status === "Dismissed") return;
           const resolve = (status: Recommendation["status"]) => set((s) => ({ recommendations: s.recommendations.map((x) => (x.id === id ? { ...x, status, resolvedAt: now(), resolvedBy: me() } : x)) }));
           if (decision === "dismiss") {

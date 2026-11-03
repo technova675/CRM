@@ -2,79 +2,41 @@
 
 // Strategy workflow actions built on the generic store helpers (no store changes needed).
 import { useCRM } from "@/lib/store";
-import { callAgent, runAgentJob } from "@/lib/ai/client";
-import { campaignDraftsFromStrategy, generateStrategy, performanceSnapshot } from "@/lib/ai/strategy";
+import {flushCRMChanges} from "@/lib/crmSync";
+import {strategyReviewIssues} from "@/lib/domain/strategy";
+import {toast} from "@/components/shell/toast";
+import { campaignDraftsFromStrategy } from "@/lib/ai/strategy";
 import type { StrategyDoc, StrategyInputs } from "@/lib/types";
-import { DAY, uid } from "@/lib/utils";
+import { DAY } from "@/lib/utils";
 
 const now = () => new Date().toISOString();
 
-export async function generateStrategyDoc(o: { inputs: StrategyInputs; clientId?: string; existing?: StrategyDoc }): Promise<StrategyDoc | null> {
-  const s = useCRM.getState();
-  const client = s.clients.find((c) => c.id === o.clientId);
-  const campaigns = s.campaigns.filter((c) => c.clientId === o.clientId);
-  const knowledge = s.knowledge.find((k) => k.clientId === o.clientId);
-  const name = client?.company ?? (o.inputs.business.split(" — ")[0] || "Prospect");
-  const doc = await runAgentJob({
-    agent: "strategy",
-    title: `${o.existing ? `Regenerated strategy v${o.existing.version + 1}` : "Generated marketing strategy"} — ${name}`,
-    input: `Budget ₹${o.inputs.monthlyBudget.toLocaleString("en-IN")}/mo · ${o.inputs.geography} · ${o.inputs.goals}`,
-    clientId: o.clientId,
-    minDelayMs: 1100,
-    local: async () => {
-      const d = generateStrategy({
-        inputs: o.inputs,
-        industry: client?.industry,
-        company: name,
-        clientId: o.clientId,
-        leadId: o.existing?.leadId,
-        campaigns,
-        knowledge,
-        ownerId: o.existing?.ownerId ?? s.currentUserId,
-        id: o.existing?.id ?? uid("str"),
-        version: o.existing ? o.existing.version + 1 : 1,
-      });
-      // LLM mode: commentary only (summary + extra tagged insights); structure stays from the local engine.
-      const llm = await callAgent(
-        "strategy",
-        "Write a 2-4 sentence executive summary and up to 5 strategic insights for this marketing strategy. Tag each insight data/assumption/recommendation.",
-        { inputs: o.inputs, budget: d.budget, kpis: d.kpis, funnel: d.funnel, performance: performanceSnapshot(campaigns) },
-        { format: "insights", clientId: o.clientId },
-      );
-      if (llm?.summary) d.summary = llm.summary;
-      if (llm?.insights?.length) d.sections[0]!.items.push(...llm.insights.slice(0, 5).map((i) => ({ ...i, source: i.source ?? "AI provider" })));
-      return d;
-    },
-  });
-  if (!doc) return null;
-  if (o.existing) {
-    doc.createdAt = o.existing.createdAt;
-    doc.title = o.existing.title;
-  }
-  s.upsert("strategies", doc);
-  s.log({ actor: "ai", agent: "strategy", entity: "strategy", entityId: doc.id, action: o.existing ? `Regenerated strategy (v${doc.version})` : "Generated strategy", detail: doc.title });
-  const mode = s.modeFor("Strategy documents");
-  if (mode === "Manual") {
-    s.addTask({ title: `Review AI strategy — ${name}`, description: "The Strategy Agent drafted a strategy. Review, edit and submit for approval.", assigneeId: s.team.find((t) => t.role === "creative_strategist")?.id ?? s.currentUserId, priority: "Medium", dueDate: new Date(Date.now() + 2 * DAY).toISOString(), status: "Todo", related: { type: "strategy", id: doc.id }, createdBy: "ai" });
-  } else if (mode === "Automatic") {
-    s.patch("strategies", doc.id, { status: "In Review" });
-    s.log({ actor: "ai", agent: "strategy", entity: "strategy", entityId: doc.id, action: "Submitted strategy for review", detail: doc.title });
-  }
-  return useCRM.getState().strategies.find((x) => x.id === doc.id) ?? doc;
+export async function generateStrategyDoc(o: { inputs: StrategyInputs; clientId?: string; existing?: StrategyDoc; mode?: "ai"|"structured" }): Promise<StrategyDoc> {
+  await flushCRMChanges();
+  const response=await fetch("/api/ai/strategy",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({inputs:o.inputs,clientId:o.clientId,existingId:o.existing?.id,mode:o.mode??"ai"}),signal:AbortSignal.timeout(110000)});
+  const result=await response.json();if(!response.ok)throw new Error(result.error??"Could not generate strategy. Your inputs are preserved.");
+  const s=useCRM.getState(),latest=s.strategies.find(d=>d.id===o.existing?.id);
+  if(o.existing&&latest?.updatedAt!==o.existing.updatedAt)throw new Error("This strategy changed during generation. Reload it before regenerating.");
+  const doc=result.doc as StrategyDoc;
+  if(o.existing)backToDraft(o.existing);
+  useCRM.getState().upsert("strategies",doc);
+  useCRM.getState().log({actor:"ai",agent:"strategy",entity:"strategy",entityId:doc.id,action:o.existing?`Regenerated strategy v${doc.version}`:"Generated strategy",detail:doc.generationSource});
+  await flushCRMChanges();return doc;
 }
-
 // Applies an edit; editing an approved doc resets it to Draft (approval must be re-granted).
 export function updateStrategy(doc: StrategyDoc, patch: Partial<StrategyDoc>): boolean {
   const s = useCRM.getState();
-  const reset = doc.status === "Approved";
+  const reset = doc.status !== "Draft";
+  if(reset)backToDraft(doc);
   s.patch("strategies", doc.id, { ...patch, updatedAt: now(), ...(reset ? { status: "Draft", approvedAt: undefined, approvedBy: undefined } : {}) });
   if (reset) s.log({ actor: "human", actorId: s.currentUserId, entity: "strategy", entityId: doc.id, action: "Edited approved strategy — approval reset", detail: doc.title, before: "Approved", after: "Draft" });
   return reset;
 }
 
-export function submitForReview(doc: StrategyDoc): "approval" | "review" {
+export function submitForReview(doc: StrategyDoc): "approval" | "review" | "invalid" {
+  const issues=strategyReviewIssues(doc);if(issues.length){toast("Complete the strategy",issues.join(" "),"warning");return "invalid";}
   const s = useCRM.getState();
-  s.patch("strategies", doc.id, { status: "In Review", updatedAt: now() }, { entity: "strategy", action: "Submitted strategy for review" });
+  const at=now();s.patch("strategies", doc.id, { status: "In Review", updatedAt: at,reviewHistory:[...(doc.reviewHistory??[]),{status:"In Review" as const,at,actorId:s.currentUserId}].slice(-100) }, { entity: "strategy", action: "Submitted strategy for review" });
   if (s.modeFor("Strategy documents") === "Approval Required") {
     s.requestApproval({
       kind: "Strategy documents",
@@ -82,7 +44,7 @@ export function submitForReview(doc: StrategyDoc): "approval" | "review" {
       detail: doc.summary,
       ref: { type: "strategy", id: doc.id },
       agent: "strategy",
-      apply: { collection: "strategies", id: doc.id, patch: { status: "Approved", approvedAt: now() } },
+      reviewUpdatedAt:at,
     });
     return "approval";
   }
@@ -90,28 +52,33 @@ export function submitForReview(doc: StrategyDoc): "approval" | "review" {
   return "review";
 }
 
-export function approveStrategy(doc: StrategyDoc) {
+export async function approveStrategy(doc: StrategyDoc) {
+  await flushCRMChanges();
+  doc=useCRM.getState().strategies.find(d=>d.id===doc.id)??doc;
+  const issues=strategyReviewIssues(doc);if(doc.status!=="In Review"||issues.length){toast("Strategy cannot be approved",issues.join(" ")||"Submit it for review first.","warning");return false;}
   const s = useCRM.getState();
   // Close any pending approval for this doc so the queue stays clean.
   s.approvals.filter((a) => a.status === "pending" && a.ref?.type === "strategy" && a.ref.id === doc.id).forEach((a) => s.resolveApproval(a.id, true));
-  s.patch("strategies", doc.id, { status: "Approved", approvedAt: now(), approvedBy: s.currentUserId, updatedAt: now() }, { entity: "strategy", action: "Approved strategy" });
+  if(useCRM.getState().strategies.find(d=>d.id===doc.id)?.status!=="Approved"){const at=now();s.patch("strategies", doc.id, { status: "Approved", approvedAt: at, approvedBy: s.currentUserId, updatedAt: at,reviewHistory:[...(doc.reviewHistory??[]),{status:"Approved" as const,at,actorId:s.currentUserId}].slice(-100) }, { entity: "strategy", action: "Approved strategy" });}
+  await flushCRMChanges();
+  return true;
 }
 
 export function backToDraft(doc: StrategyDoc) {
   const s = useCRM.getState();
   s.approvals.filter((a) => a.status === "pending" && a.ref?.type === "strategy" && a.ref.id === doc.id).forEach((a) => s.resolveApproval(a.id, false));
-  s.patch("strategies", doc.id, { status: "Draft", approvedAt: undefined, approvedBy: undefined, updatedAt: now() }, { entity: "strategy", action: "Moved strategy back to draft" });
+  const at=now();s.patch("strategies", doc.id, { status: "Draft", approvedAt: undefined, approvedBy: undefined, updatedAt: at,reviewHistory:[...(doc.reviewHistory??[]),{status:"Draft" as const,at,actorId:s.currentUserId}].slice(-100) }, { entity: "strategy", action: "Moved strategy back to draft" });
 }
 
 export function createCampaignsFromStrategy(doc: StrategyDoc): { created: number; skipped: number } {
   const s = useCRM.getState();
   const client = s.clients.find((c) => c.id === doc.clientId);
-  if (!client) return { created: 0, skipped: 0 };
+  if (!client||doc.status!=="Approved"||strategyReviewIssues(doc).length) return { created: 0, skipped: 0 };
   let created = 0;
   let skipped = 0;
   campaignDraftsFromStrategy(doc).forEach((d) => {
     const name = `${client.company} · ${d.channel} (Strategy v${doc.version})`;
-    if (s.campaigns.some((c) => c.name === name)) {
+    if (s.campaigns.some((c) => c.clientId===client.id&&c.name === name)) {
       skipped++;
       return;
     }
@@ -136,3 +103,5 @@ export function createCampaignsFromStrategy(doc: StrategyDoc): { created: number
   if (created) s.log({ actor: "human", actorId: s.currentUserId, entity: "strategy", entityId: doc.id, action: "Created campaigns from strategy", detail: `${created} Planning campaign(s) · ${client.company}` });
   return { created, skipped };
 }
+
+

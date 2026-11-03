@@ -150,6 +150,7 @@ export function CreativeDrawer({ creative: c, onClose, clientMode, writable }: {
                 {version.headline && <p><span className="text-fg-3">Headline: </span>{version.headline}</p>}
                 {version.body && <p className="whitespace-pre-line"><span className="text-fg-3">Copy / script: </span>{version.body}</p>}
                 {version.cta && <p><span className="text-fg-3">CTA: </span>{version.cta}</p>}
+                {!!version.storyboard?.length&&<div><p className="mb-1 text-fg-3">Storyboard / production frames</p><ol className="list-inside list-decimal space-y-1">{version.storyboard.map((frame,i)=><li key={i}>{frame}</li>)}</ol></div>}
                 {c.angle && <p><span className="text-fg-3">Angle: </span>{c.angle}</p>}
                 {c.hook && <p><span className="text-fg-3">Hook: </span>{c.hook}</p>}
                 {!clientMode && campaign && <p><span className="text-fg-3">Campaign: </span><Link href={`/campaigns?c=${campaign.id}`} className="text-accent-text hover:underline">{campaign.name}</Link></p>}

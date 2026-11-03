@@ -108,6 +108,7 @@ export function buildProposal(input: ProposalInput): GeneratedProposal {
     const p = priceFor(input.priceBook, s);
     if (p.setup > 0) lines.push({ service: s, description: `${s} — setup & onboarding`, price: p.setup, billing: "one-time" });
     if (p.monthly > 0) lines.push({ service: s, description: `${s} — ${SCOPE[s][0]?.toLowerCase() ?? "management"} and ongoing management`, price: p.monthly, billing: "monthly" });
+    if(p.setup===0&&p.monthly===0)lines.push({service:s,description:`${s} — pricing requires confirmation`,price:0,billing:"one-time"});
   }
   const deliverables = [...new Set(services.flatMap((s) => DELIVERABLES[s] ?? []))];
   deliverables.push("Monthly performance report with insights & next-month plan");
@@ -178,25 +179,14 @@ export function composeProposalDoc(p: Proposal, ctx: { company: string; industry
   const monthly = p.lines.filter((l) => l.billing === "monthly");
   const oneTimeTotal = oneTime.reduce((a, l) => a + l.price, 0);
   const monthlyTotal = monthly.reduce((a, l) => a + l.price, 0);
-  const who = ctx.contactName ? `${ctx.contactName.split(" ")[0]} and the ${ctx.company} team` : `the ${ctx.company} team`;
 
   return {
-    executiveSummary:
-      `${ctx.agencyName} proposes a ${services.length > 1 ? `${services.length}-service` : services[0]} engagement for ${ctx.company}${ctx.industry && ctx.industry !== "—" ? ` (${ctx.industry})` : ""}. ` +
-      (p.strategySummary ? `${p.strategySummary} ` : "") +
-      `We will work with ${who} on ${objectives[0]!.charAt(0).toLowerCase()}${objectives[0]!.slice(1)}, reporting progress every week.`,
+    executiveSummary:p.strategySummary||`${ctx.agencyName} proposes a ${services.join(", ")} engagement for ${ctx.company}. Scope, timing and commercial terms require review.`,
     objectives,
     scope: services.map((s) => ({ service: s, items: SCOPE[s] ?? [] })),
     deliverables: p.deliverables?.length ? p.deliverables : [...new Set(services.flatMap((s) => DELIVERABLES[s] ?? []))],
     timeline: p.timeline?.length ? p.timeline : buildTimeline(services),
     investment: { oneTime, monthly, oneTimeTotal, monthlyTotal, firstMonth: oneTimeTotal + monthlyTotal },
-    terms: [
-      "Prices are in INR and exclude 18% GST.",
-      "Media spend and creator / influencer fees are billed at actuals and paid directly to platforms or creators.",
-      "Monthly fees are invoiced in advance; one-time fees are invoiced 50% on signing and 50% on delivery.",
-      "Minimum term of 3 months for retainers, then month-to-month with 30 days' notice.",
-      "Client provides timely access to ad accounts, analytics and brand assets; timelines start once access is granted.",
-      `This proposal is valid until ${new Date(p.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}.`,
-    ],
+    terms:p.terms?.length?p.terms:["Commercial terms, taxes, payment schedule and exclusions must be confirmed before acceptance.",`Proposed duration: ${p.durationMonths??12} months.`,`Valid until ${p.expiresAt.slice(0,10)}.`],
   };
 }

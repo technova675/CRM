@@ -7,6 +7,7 @@ import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import { Button, EmptyState, StatusBadge } from "@/components/ui";
 import { ProposalDocument } from "@/components/proposals/ProposalDocument";
+import {ProposalDownload} from "@/components/proposals/ProposalDownload";
 
 // Printable, branded proposal. "Download PDF" uses the browser's print-to-PDF;
 // the print stylesheet below hides the app shell (sidebar + header) and all controls.
@@ -48,7 +49,7 @@ export default function ProposalPrintPage() {
         <Link href={`/proposals?p=${proposal.id}`} className="inline-flex items-center gap-1 text-xs text-fg-3 hover:text-fg"><ArrowLeft className="size-3" /> Proposals</Link>
         <StatusBadge status={proposal.status} />
         {proposal.approval !== "Approved" && proposal.status !== "Accepted" && <span className="text-xs text-warning">Not yet approved internally — draft copy</span>}
-        <Button variant="primary" className="ml-auto" icon={<Printer className="size-3.5" />} onClick={() => window.print()}>Download PDF</Button>
+        <ProposalDownload id={proposal.id}/><Button variant="primary" className="ml-auto" icon={<Printer className="size-3.5" />} onClick={() => window.print()}>Print / Save as PDF</Button>
       </div>
       <ProposalDocument
         proposal={proposal}

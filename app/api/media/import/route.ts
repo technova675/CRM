@@ -1,0 +1,12 @@
+import {z} from "zod";
+import {createHash} from "node:crypto";
+import {reportIdentity,sameOrigin} from "@/lib/auth/server";
+import {boundedJSON} from "@/lib/outreachServer";
+import {mutateMedia} from "@/lib/mediaServer";
+import {mediaMetricSchema,MEDIA_PLATFORMS} from "@/lib/domain/performance";
+export const maxDuration=60;
+const schema=z.object({operationId:z.string().uuid(),campaignId:z.string().min(1).max(150),platform:z.enum(MEDIA_PLATFORMS),rows:z.array(mediaMetricSchema.omit({id:true,platform:true,source:true,importedAt:true})).min(1).max(3000)});
+export async function POST(req:Request){if(!sameOrigin(req))return Response.json({error:"Request origin is not allowed."},{status:403});try{const user=await reportIdentity(req),parsed=schema.safeParse(await boundedJSON(req,2000000));if(!parsed.success)return Response.json({error:"Check dates, ad identifiers and non-negative metric values. Missing metrics must be null.",issues:parsed.error.issues.slice(0,3).map(i=>i.path.join(".")+": "+i.message)},{status:400});const input=parsed.data,at=new Date().toISOString(),seen=new Set<string>();for(const row of input.rows){const key=`${row.date}|${row.adId?`ad:${row.adId}`:"campaign"}`;if(seen.has(key))return Response.json({error:"The import contains duplicate rows for the same date/ad. Combine them before importing."},{status:400});seen.add(key);}
+ const result=await mutateMedia(user.userId,input.operationId,data=>{const campaign=data.campaigns.find(c=>c.id===input.campaignId);if(!campaign)throw new Error("Campaign not found in this account.");const map=new Map((campaign.performanceRows??[]).map(r=>[r.id,r]));for(const row of input.rows){const id=createHash("sha256").update(`${input.campaignId}|${input.platform}|${row.date}|${row.adId?`ad:${row.adId}`:"campaign"}`).digest("hex");map.set(id,{...row,id,platform:input.platform,source:"CSV import",importedAt:at});}if(map.size>10000)throw new Error("A campaign supports up to 10,000 dated performance rows.");campaign.performanceRows=[...map.values()];campaign.updatedAt=at;return data;});return Response.json({revision:result.revision,imported:input.rows.length},{headers:{"Cache-Control":"private, no-store"}});
+ }catch(error){const {dbError}=await import("@/lib/db");if((error as Error).message?.includes("account")||(error as Error).message?.includes("rows")||(error as Error).message?.includes("limit"))return Response.json({error:(error as Error).message},{status:400});return dbError(error);}}
+

@@ -76,8 +76,8 @@ function CreativeInner() {
           onChange={(t) => nav({ tab: t === "approvals" ? undefined : t })}
           tabs={[
             { value: "approvals", label: "Approvals", count: creatives.filter((c) => c.status !== "Archived").length },
-            { value: "concepts", label: "AI concepts" },
-            { value: "intelligence", label: "Creative intelligence" },
+            { value: "concepts", label: "AI strategy" },
+            { value: "intelligence", label: "Intelligence" },
           ]}
         />
       </div>
@@ -107,3 +107,5 @@ export default function CreativePage() {
     </Suspense>
   );
 }
+
+

@@ -1,0 +1,7 @@
+// Explicitly started server worker. Never logs credentials or message bodies.
+const base=process.env.AUTOMATION_WORKER_BASE_URL||'http://localhost:3012',secret=process.env.AUTOMATION_WORKER_SECRET,owners=(process.env.AUTOMATION_WORKER_OWNER_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
+if(!secret||!owners.length)throw new Error('Configure the automation worker secret and allowed owner IDs first.');
+const server=new URL(base);if(!['http:','https:'].includes(server.protocol)||server.username||server.password)throw new Error('Use a plain server URL without embedded credentials.');
+let stopped=false;process.on('SIGINT',()=>{stopped=true;});process.on('SIGTERM',()=>{stopped=true;});
+console.log('Automation worker started. Processing configured account libraries; approval gates remain enforced.');
+while(!stopped){for(const ownerId of owners){if(stopped)break;try{const response=await fetch(new URL('/api/automations/tick',server),{method:'POST',headers:{Authorization:`Bearer ${secret}`,'Content-Type':'application/json'},body:JSON.stringify({ownerId}),signal:AbortSignal.timeout(115000),redirect:'error'});if(!response.ok)console.error('Automation tick failed with HTTP '+response.status);else{const result=await response.json();if(result.queued||result.processed)console.log('Automation tick: queued '+result.queued+', advanced '+(result.processed?'one run':'none'));}}catch{console.error('Automation tick could not reach the server; the next pass will retry safe checkpoints.');}}if(!stopped)await new Promise(resolve=>setTimeout(resolve,15000));}

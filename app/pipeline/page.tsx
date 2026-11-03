@@ -6,11 +6,13 @@ import Link from "next/link";
 import { ArrowRightLeft, CalendarClock, FileText, KanbanSquare, PartyPopper, Plus, Sparkles, TrendingUp, Trophy, Wallet, X } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
-import { DEAL_STAGES, PROPOSAL_STATUSES, SERVICES, type Deal, type DealStage, type ProposalStatus, type Service } from "@/lib/types";
+import { PROPOSAL_STATUSES, SERVICES, type Deal, type DealStage, type ProposalStatus, type Service } from "@/lib/types";
+import {PIPELINE_STAGES,pipelineLabel,pipelineStage} from "@/lib/domain/pipeline";
 import { cn, compactMoney, fmtDate, fmtShort, money, pct, sum } from "@/lib/utils";
 import { Badge, Button, Card, EmptyState, Field, Input, MemberAvatar, Modal, PageHeader, SearchInput, Segmented, Select, Stat, StatusBadge, Table, Td, Th } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import { DealDrawer, ServicePicker } from "@/components/deals/DealDrawer";
+import styles from "./pipeline.module.css";
 
 const STAGE_DOT: Record<DealStage, string> = {
   "New": "bg-info",
@@ -29,7 +31,7 @@ function MoveMenu({ deal, onMove }: { deal: Deal; onMove: (s: DealStage) => void
   const [open, setOpen] = useState(false);
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
-      <button onClick={() => setOpen((o) => !o)} className="grid size-6 place-items-center rounded-md text-fg-3 hover:bg-surface-2 hover:text-fg" aria-label="Move deal to stage" title="Move to…">
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="grid size-10 place-items-center rounded-md text-fg-3 hover:bg-surface-2 hover:text-fg" aria-label={`Move ${deal.company} to stage`} title="Move to…">
         <ArrowRightLeft className="size-3.5" />
       </button>
       {open && (
@@ -37,7 +39,7 @@ function MoveMenu({ deal, onMove }: { deal: Deal; onMove: (s: DealStage) => void
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
           <div className="animate-in absolute right-0 top-7 z-30 w-40 rounded-lg border border-border bg-surface p-1 shadow-pop">
             <p className="px-2 py-1 text-[11px] text-fg-3">Move to</p>
-            {DEAL_STAGES.filter((s) => s !== deal.stage).map((s) => (
+            {PIPELINE_STAGES.filter((s) => s !== pipelineStage(deal.stage)).map((s) => (
               <button
                 key={s}
                 onClick={() => {
@@ -47,7 +49,7 @@ function MoveMenu({ deal, onMove }: { deal: Deal; onMove: (s: DealStage) => void
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-surface-2"
               >
                 <span className={cn("size-1.5 rounded-full", STAGE_DOT[s])} />
-                {s}
+                {pipelineLabel(s)}
               </button>
             ))}
           </div>
@@ -67,7 +69,8 @@ function DealCard({ deal, canWrite, onOpen, onMove }: { deal: Deal; canWrite: bo
         e.dataTransfer.effectAllowed = "move";
       }}
       onClick={onOpen}
-      onKeyDown={(e) => e.key === "Enter" && onOpen()}
+      onKeyDown={(e) => {if(e.target===e.currentTarget&&(e.key==="Enter"||e.key===" ")){e.preventDefault();onOpen();}}}
+      aria-label={`Open deal: ${deal.company}`}
       tabIndex={0}
       role="button"
       className="group cursor-pointer rounded-lg border border-border bg-surface p-3 shadow-card transition hover:border-border-strong hover:shadow-pop active:cursor-grabbing"
@@ -133,9 +136,9 @@ function NewDealModal({ open, onClose }: { open: boolean; onClose: () => void })
           </Button>
           <Button
             variant="primary"
-            disabled={!name}
+            disabled={!name.trim()||!Number.isFinite(value)||value<0||!close||!owner}
             onClick={() => {
-              addDeal({ title: `${name} — ${services[0] ?? "Growth retainer"}`, company: name, leadId: leadId || undefined, value, services, probability: PROB[stage], expectedClose: new Date(`${close}T12:00:00`).toISOString(), ownerId: owner, stage, notes: "", paymentStatus: "Pending" });
+              addDeal({ title: `${name} — ${services[0] ?? "Opportunity"}`, company: name.trim(), leadId: leadId || undefined, value, services, probability: PROB[stage], expectedClose: new Date(`${close}T12:00:00`).toISOString(), ownerId: owner, stage, notes: "", paymentStatus: "Pending" });
               toast("Deal created", name);
               onClose();
             }}
@@ -167,8 +170,8 @@ function NewDealModal({ open, onClose }: { open: boolean; onClose: () => void })
         </Field>
         <Field label="Stage">
           <Select value={stage} onChange={(e) => setStage(e.target.value as DealStage)}>
-            {DEAL_STAGES.filter((s) => s !== "Won" && s !== "Lost").map((s) => (
-              <option key={s}>{s}</option>
+            {PIPELINE_STAGES.filter((s) => s !== "Won" && s !== "Lost").map((s) => (
+              <option key={s} value={s}>{pipelineLabel(s)}</option>
             ))}
           </Select>
         </Field>
@@ -315,10 +318,10 @@ function PipelineInner() {
   };
 
   return (
-    <div>
+    <div className={styles.page}>
       <PageHeader
         title="Pipeline"
-        description="Drag deals between stages. Moving a deal to Won creates the client and starts onboarding."
+        description="Lead → Qualified → Meeting → Proposal → Negotiation → Won / Lost. Drag a card or use its move menu; Won starts client onboarding."
         actions={
           <>
             <Segmented
@@ -378,9 +381,9 @@ function PipelineInner() {
             </Select>
           </div>
           <div className="-mx-4 overflow-x-auto px-4 pb-4 lg:-mx-6 lg:px-6">
-            <div className="flex gap-3" style={{ minWidth: DEAL_STAGES.length * 272 }}>
-              {DEAL_STAGES.map((stage) => {
-                const col = filtered.filter((d) => d.stage === stage).sort((a, b) => b.value - a.value);
+            <div className="flex gap-3" style={{ minWidth: PIPELINE_STAGES.length * 272 }}>
+              {PIPELINE_STAGES.map((stage) => {
+                const col = filtered.filter((d) => pipelineStage(d.stage) === stage).sort((a, b) => b.value - a.value);
                 const total = sum(col.map((d) => d.value));
                 const weighted = sum(col.map((d) => (d.value * d.probability) / 100));
                 return (
@@ -397,14 +400,14 @@ function PipelineInner() {
                       setDragOver(null);
                       const id = e.dataTransfer.getData("text/deal");
                       const deal = deals.find((d) => d.id === id);
-                      if (deal) handleMove(deal, stage);
+                      if (canWrite&&deal) handleMove(deal, stage);
                     }}
                     className={cn("flex w-64 shrink-0 flex-col rounded-xl border bg-surface-2/60 transition", dragOver === stage ? "border-accent bg-accent-soft/60" : "border-border")}
                   >
                     <div className="px-3 pt-3 pb-2">
                       <div className="flex items-center gap-2">
                         <span className={cn("size-2 rounded-full", STAGE_DOT[stage])} />
-                        <span className="text-[13px] font-semibold">{stage}</span>
+                        <h2 className="text-[13px] font-semibold">{pipelineLabel(stage)}</h2>
                         <span className="rounded-full bg-surface-3 px-1.5 text-[11px] tabular-nums text-fg-2">{col.length}</span>
                       </div>
                       <p className="mt-1 text-[11px] text-fg-3 tabular-nums">

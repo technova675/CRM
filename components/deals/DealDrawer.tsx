@@ -5,15 +5,17 @@ import { useMemo } from "react";
 import { ExternalLink, FileText, PartyPopper, Sparkles } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
-import { DEAL_STAGES, SERVICES, type Deal, type PaymentStatus, type Service } from "@/lib/types";
+import { SERVICES, type Deal, type PaymentStatus, type Service } from "@/lib/types";
+import {PIPELINE_STAGES,pipelineLabel,pipelineStage} from "@/lib/domain/pipeline";
 import { cn, fmtDate, money, relTime, sum } from "@/lib/utils";
 import { Button, Drawer, Field, Input, Select, StatusBadge, Textarea } from "@/components/ui";
 import { ProposalWorkflow } from "@/components/proposals/ProposalWorkflow";
 import { toast } from "@/components/shell/toast";
+import styles from "./dealDrawer.module.css";
 
-export function ServicePicker({ value, onChange, disabled }: { value: Service[]; onChange: (v: Service[]) => void; disabled?: boolean }) {
+export function ServicePicker({ value, onChange, disabled, "aria-labelledby":labelledBy }: { value: Service[]; onChange: (v: Service[]) => void; disabled?: boolean; "aria-labelledby"?:string }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div role="group" aria-labelledby={labelledBy} className="flex flex-wrap gap-1.5">
       {SERVICES.map((s) => {
         const on = value.includes(s);
         return (
@@ -104,7 +106,7 @@ export function DealDrawer({ dealId, onClose }: { dealId: string | null; onClose
         </span>
       }
     >
-      <div className="space-y-6">
+      <div className={`space-y-6 ${styles.content}`}>
         {deal.stage === "Won" && deal.clientId && (
           <Link href={`/onboarding?client=${deal.clientId}`} className="flex items-center gap-2 rounded-xl border border-success/40 bg-success-soft px-3 py-2.5 text-[13px] text-success hover:opacity-90">
             <PartyPopper className="size-4" /> Deal won — client onboarding has started. <span className="ml-auto font-medium">Open onboarding →</span>
@@ -114,20 +116,20 @@ export function DealDrawer({ dealId, onClose }: { dealId: string | null; onClose
           <Field label="Stage">
             <Select
               disabled={!canWrite}
-              value={deal.stage}
+              value={pipelineStage(deal.stage)}
               onChange={(e) => {
                 const stage = e.target.value as Deal["stage"];
                 moveDeal(deal.id, stage);
                 if (stage === "Won") toast("Deal won 🎉", "Client profile created — onboarding started (see the link in this drawer).");
               }}
             >
-              {DEAL_STAGES.map((s) => (
-                <option key={s}>{s}</option>
+              {PIPELINE_STAGES.map((s) => (
+                <option key={s} value={s}>{pipelineLabel(s)}</option>
               ))}
             </Select>
           </Field>
           <Field label="Estimated value (₹)">
-            <Input disabled={!canWrite} type="number" value={deal.value} onChange={(e) => up({ value: Number(e.target.value) })} />
+            <Input disabled={!canWrite} type="number" min={0} value={deal.value} onChange={(e) => {const value=Number(e.target.value);if(Number.isFinite(value)&&value>=0)up({value});}} />
           </Field>
           <Field label={`Probability — ${deal.probability}%`}>
             <input disabled={!canWrite} type="range" min={0} max={100} step={5} value={deal.probability} onChange={(e) => up({ probability: Number(e.target.value) })} className="w-full accent-[var(--accent)]" />
@@ -135,7 +137,7 @@ export function DealDrawer({ dealId, onClose }: { dealId: string | null; onClose
           <Field label="Expected close">
             <Input disabled={!canWrite} type="date" value={toDateInput(deal.expectedClose)} onChange={(e) => e.target.value && up({ expectedClose: fromDateInput(e.target.value) })} />
           </Field>
-          <Field label="Assigned to">
+          <Field label="Owner">
             <Select disabled={!canWrite} value={deal.ownerId} onChange={(e) => up({ ownerId: e.target.value })}>
               {team
                 .filter((t) => t.role !== "client")
@@ -162,7 +164,7 @@ export function DealDrawer({ dealId, onClose }: { dealId: string | null; onClose
             <ServicePicker disabled={!canWrite} value={deal.services} onChange={(services) => up({ services })} />
           </Field>
           <Field label="Notes" className="col-span-2">
-            <Textarea disabled={!canWrite} value={deal.notes} onChange={(e) => up({ notes: e.target.value })} placeholder="Context, objections, next steps…" />
+            <Textarea key={deal.id} aria-label="Deal notes" disabled={!canWrite} defaultValue={deal.notes} onBlur={(e) => {if(e.target.value!==deal.notes)up({notes:e.target.value});}} placeholder="Context, objections, next steps…" />
           </Field>
         </section>
 

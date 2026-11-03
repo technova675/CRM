@@ -1,259 +1,51 @@
 "use client";
-
-import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
-import { Gauge, ListChecks, Sparkles, Target } from "lucide-react";
-import { useCRM, useMe } from "@/lib/store";
-import { can } from "@/lib/permissions";
-import type { Recommendation } from "@/lib/types";
-import { runAgentJob } from "@/lib/ai/client";
-import { AD_PLATFORMS, PLATFORM_LABEL, SERVICE_PLATFORM, analyzeAds, analyzeMedia, change, derive, sumStats, type AdPlatform } from "@/lib/ai/media";
-import { compact, compactMoney, money, pct, uid } from "@/lib/utils";
-import { AIBadge, Badge, Button, Card, CardHeader, Drawer, EmptyState, InsightLegend, PageHeader, Readonly, Select, Tabs } from "@/components/ui";
-import { toast } from "@/components/shell/toast";
-import { AdsTable } from "./AdsTable";
-import { BudgetPacing } from "./BudgetPacing";
-import { MetricTile, ModePanel, PlatformStatusGrid, RecommendationCard, useConnectedKeys } from "./shared";
-
-type QueueTab = "New" | "Awaiting Approval" | "Executed" | "Dismissed";
-const RANK = { High: 0, Medium: 1, Low: 2 } as const;
-const MEDIA_AGENTS = new Set(["media", "analytics"]);
-
-export function PerformanceView() {
-  const me = useMe();
-  const router = useRouter();
-  const params = useSearchParams();
-  const ads = useCRM((s) => s.ads);
-  const campaigns = useCRM((s) => s.campaigns);
-  const clients = useCRM((s) => s.clients);
-  const recommendations = useCRM((s) => s.recommendations);
-  const addRecommendations = useCRM((s) => s.addRecommendations);
-  const connected = useConnectedKeys();
-  const writable = can(me.role, "performance", "write") && me.role !== "client";
-
-  const isClient = me.role === "client";
-  const clientId = isClient ? me.clientId ?? "none" : params.get("client") ?? "All";
-  const platform = (params.get("platform") ?? "All") as AdPlatform | "All";
-  const campaignId = params.get("campaign") ?? "All";
-  const setParam = (k: string, v: string) => {
-    const next = new URLSearchParams(params.toString());
-    if (v === "All") next.delete(k);
-    else next.set(k, v);
-    if (k === "client") next.delete("campaign");
-    const qs = next.toString();
-    router.replace(qs ? `/performance?${qs}` : "/performance", { scroll: false });
-  };
-
-  const [tab, setTab] = useState<QueueTab>("New");
-  const [running, setRunning] = useState(false);
-  const [focus, setFocus] = useState<string | null>(null);
-
-  const campaignById = useMemo(() => new Map(campaigns.map((c) => [c.id, c])), [campaigns]);
-  const clientName = useMemo(() => new Map(clients.map((c) => [c.id, c.company])), [clients]);
-  const visibleClients = useMemo(() => (isClient ? clients.filter((c) => c.id === me.clientId) : clients), [clients, isClient, me.clientId]);
-
-  // Analyse all ads (campaign averages need every ad in the campaign), then filter.
-  const allAnalyses = useMemo(() => analyzeAds(ads), [ads]);
-  const analyses = useMemo(
-    () =>
-      allAnalyses.filter(
-        ({ ad }) => (clientId === "All" || ad.clientId === clientId) && (platform === "All" || ad.platform === platform) && (campaignId === "All" || ad.campaignId === campaignId),
-      ),
-    [allAnalyses, clientId, platform, campaignId],
-  );
-  const scopeAds = useMemo(() => analyses.map((a) => a.ad), [analyses]);
-
-  const kpi = useMemo(() => {
-    const prev = derive(sumStats(scopeAds.map((a) => a.prev)));
-    const curr = derive(sumStats(scopeAds.map((a) => a.curr)));
-    const reach = scopeAds.reduce((s, a) => s + (a.frequency ? a.curr.impressions / a.frequency : 0), 0);
-    return { prev, curr, reach };
-  }, [scopeAds]);
-
-  const campaignOptions = useMemo(() => {
-    const ids = new Set(ads.filter((a) => (clientId === "All" || a.clientId === clientId) && (platform === "All" || a.platform === platform)).map((a) => a.campaignId));
-    return campaigns.filter((c) => ids.has(c.id));
-  }, [ads, campaigns, clientId, platform]);
-
-  const scopedCampaigns = useMemo(
-    () =>
-      campaigns.filter((c) => {
-        if (clientId !== "All" && c.clientId !== clientId) return false;
-        if (campaignId !== "All" && c.id !== campaignId) return false;
-        const p = SERVICE_PLATFORM[c.service];
-        if (platform !== "All" && p !== platform) return false;
-        return !!p; // paid-media campaigns only
-      }),
-    [campaigns, clientId, campaignId, platform],
-  );
-
-  const recs = useMemo(() => {
-    return recommendations.filter((r) => {
-      if (!MEDIA_AGENTS.has(r.agent)) return false;
-      if (clientId !== "All" && r.clientId !== clientId) return false;
-      if (campaignId !== "All" && r.campaignId !== campaignId) return false;
-      if (platform !== "All") {
-        const c = r.campaignId ? campaignById.get(r.campaignId) : undefined;
-        const p = r.adId ? ads.find((a) => a.id === r.adId)?.platform : c ? SERVICE_PLATFORM[c.service] : undefined;
-        if (p !== platform) return false;
-      }
-      return true;
-    });
-  }, [recommendations, clientId, campaignId, platform, campaignById, ads]);
-
-  const byTab = useMemo(() => {
-    const m: Record<QueueTab, Recommendation[]> = { New: [], "Awaiting Approval": [], Executed: [], Dismissed: [] };
-    for (const r of recs) {
-      if (r.status === "New") m.New.push(r);
-      else if (r.status === "Awaiting Approval") m["Awaiting Approval"].push(r);
-      else if (r.status === "Dismissed") m.Dismissed.push(r);
-      else m.Executed.push(r);
-    }
-    m.New.sort((a, b) => RANK[a.priority] - RANK[b.priority] || b.createdAt.localeCompare(a.createdAt));
-    m.Executed.sort((a, b) => (b.resolvedAt ?? "").localeCompare(a.resolvedAt ?? ""));
-    m.Dismissed.sort((a, b) => (b.resolvedAt ?? "").localeCompare(a.resolvedAt ?? ""));
-    return m;
-  }, [recs]);
-  const today = byTab.New.slice(0, 6);
-  const focused = recommendations.find((r) => r.id === focus);
-
-  const adCounts = useMemo(() => {
-    const m: Partial<Record<AdPlatform, number>> = {};
-    ads.forEach((a) => {
-      if (clientId === "All" || a.clientId === clientId) m[a.platform] = (m[a.platform] ?? 0) + 1;
-    });
-    return m;
-  }, [ads, clientId]);
-
-  const runAudit = async () => {
-    setRunning(true);
-    const before = useCRM.getState().recommendations.length;
-    const out = await runAgentJob({
-      agent: "media",
-      title: `Media audit — ${scopeAds.length} ads${clientId !== "All" ? ` · ${clientName.get(clientId)}` : ""}`,
-      clientId: clientId !== "All" ? clientId : undefined,
-      local: () => analyzeMedia(scopeAds, campaigns, clients, { idPrefix: `${uid("rec")}_`, connectedPlatforms: connected }),
-    });
-    setRunning(false);
-    if (!out) return;
-    addRecommendations(out);
-    const fresh = useCRM.getState().recommendations.length - before;
-    toast("Media audit complete", `${out.length} findings · ${fresh} new recommendation${fresh === 1 ? "" : "s"} (duplicates of open items skipped). Nothing was changed on the ad platforms.`, "success");
-    setTab("New");
-  };
-
-  const { prev, curr } = kpi;
-  const d = (k: keyof typeof curr) => change(prev[k], curr[k]);
-
-  return (
-    <div className="space-y-4">
-      <PageHeader
-        icon={<Gauge className="size-5 text-accent-text" />}
-        title="Performance Marketing"
-        description="AI media buyer: finds winners, losers, fatigue and wasted budget across every ad platform — you approve, then it executes."
-        actions={
-          <>
-            <Button href="/automations?tab=approvals" icon={<ListChecks className="size-3.5" />}>Approvals</Button>
-            {writable && (
-              <Button variant="ai" loading={running} icon={<Sparkles className="size-3.5" />} onClick={runAudit} disabled={!scopeAds.length}>
-                Run media audit
-              </Button>
-            )}
-          </>
-        }
-      />
-      {!writable && <Readonly>You have read-only access to Performance Marketing — recommendations can be reviewed but not approved.</Readonly>}
-
-      <PlatformStatusGrid adCounts={adCounts} />
-
-      <Card>
-        <div className="flex flex-wrap items-center gap-2 p-3 border-b border-border">
-          {!isClient && (
-            <Select value={clientId} onChange={(e) => setParam("client", e.target.value)} className="w-full sm:w-48">
-              <option value="All">All clients</option>
-              {visibleClients.map((c) => <option key={c.id} value={c.id}>{c.company}</option>)}
-            </Select>
-          )}
-          <Select value={platform} onChange={(e) => setParam("platform", e.target.value)} className="w-full sm:w-52">
-            <option value="All">All platforms</option>
-            {AD_PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
-          </Select>
-          <Select value={campaignId} onChange={(e) => setParam("campaign", e.target.value)} className="w-full sm:w-64">
-            <option value="All">All campaigns</option>
-            {campaignOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-          <span className="ml-auto text-xs text-fg-3">{scopeAds.length} ads · this week vs last week</span>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-11 gap-px bg-border rounded-b-xl overflow-hidden">
-          <MetricTile label="Spend" value={compactMoney(curr.spend)} delta={d("spend")} />
-          <MetricTile label="Impressions" value={compact(curr.impressions)} delta={d("impressions")} />
-          <MetricTile label="Reach (est.)" value={compact(kpi.reach)} hint="Impressions ÷ frequency per ad (platform-reported frequency)" />
-          <MetricTile label="CTR" value={pct(curr.ctr, 2)} delta={d("ctr")} />
-          <MetricTile label="CPC" value={money(curr.cpc)} delta={d("cpc")} lowerBetter />
-          <MetricTile label="CPM" value={money(curr.cpm)} delta={d("cpm")} lowerBetter />
-          <MetricTile label="Leads" value={compact(curr.leads)} delta={d("leads")} />
-          <MetricTile label="Conversions" value={compact(curr.conversions)} delta={d("conversions")} />
-          <MetricTile label="CPA" value={curr.conversions ? money(curr.cpa) : "—"} delta={d("cpa")} lowerBetter />
-          <MetricTile label="ROAS" value={`${curr.roas.toFixed(2)}x`} delta={d("roas")} />
-          <MetricTile label="Revenue" value={compactMoney(curr.revenue)} delta={d("revenue")} />
-        </div>
-      </Card>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader
-            title={<span className="inline-flex items-center gap-2"><Target className="size-4 text-accent-text" /> What should the media team optimise today?</span>}
-            subtitle="Open recommendations ranked by priority and spend at stake"
-            action={<AIBadge>Media agent</AIBadge>}
-          />
-          {today.length === 0 ? (
-            <EmptyState title="Nothing urgent" description={writable ? "Run a media audit to check the latest data." : "No open recommendations for this selection."} />
-          ) : (
-            <ol className="px-4 pb-4 space-y-1.5">
-              {today.map((r, i) => (
-                <li key={r.id}>
-                  <button onClick={() => setFocus(r.id)} className="w-full flex items-start gap-3 rounded-lg border border-border px-3 py-2 text-left hover:bg-surface-2/60 transition">
-                    <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-surface-2 text-[11px] font-semibold tabular-nums">{i + 1}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[13px] font-medium leading-snug">{r.title}</span>
-                      <span className="block text-[11px] text-fg-3 truncate">{clientName.get(r.clientId ?? "")} · {r.action?.label ?? r.recommendation}</span>
-                    </span>
-                    <Badge tone={r.priority === "High" ? "danger" : r.priority === "Medium" ? "warning" : "neutral"}>{r.priority}</Badge>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Card>
-        <ModePanel />
-      </div>
-
-      <Card>
-        <CardHeader title="Ads" subtitle="Every ad from the connected platforms with AI status" />
-        <AdsTable analyses={analyses} campaigns={campaigns} clients={clients} connected={connected} />
-      </Card>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader title="Recommendations queue" subtitle="Finding → Evidence → Recommendation → Priority" action={<InsightLegend />} className="flex-col sm:flex-row" />
-          <div className="px-4">
-            <Tabs value={tab} onChange={setTab} tabs={(Object.keys(byTab) as QueueTab[]).map((t) => ({ value: t, label: t, count: byTab[t].length }))} />
-          </div>
-          <div className="p-4 grid gap-3 xl:grid-cols-2">
-            {byTab[tab].length === 0 && <div className="xl:col-span-2"><EmptyState title={`No ${tab.toLowerCase()} recommendations`} /></div>}
-            {byTab[tab].slice(0, 30).map((r) => (
-              <RecommendationCard key={r.id} rec={r} writable={writable} clientName={clientName.get(r.clientId ?? "")} campaignName={r.campaignId ? campaignById.get(r.campaignId)?.service : undefined} />
-            ))}
-          </div>
-        </Card>
-        <BudgetPacing campaigns={scopedCampaigns} clients={clients} />
-      </div>
-
-      {focused && (
-        <Drawer open onClose={() => setFocus(null)} width={640} title="Recommendation" subtitle={clientName.get(focused.clientId ?? "")}>
-          <RecommendationCard rec={focused} writable={writable} defaultOpen clientName={clientName.get(focused.clientId ?? "")} campaignName={focused.campaignId ? campaignById.get(focused.campaignId)?.name : undefined} />
-        </Drawer>
-      )}
-    </div>
-  );
+import Link from "next/link";
+import {useEffect,useMemo,useState} from "react";
+import Papa from "papaparse";
+import {useCRM,useMe} from "@/lib/store";
+import {can} from "@/lib/permissions";
+import {flushCRMChanges,refreshCRMChanges} from "@/lib/crmSync";
+import {MEDIA_PLATFORMS,MEDIA_METRICS,mediaDates,mediaTotals,campaignMediaRows,type MediaTotals} from "@/lib/domain/performance";
+import type {Campaign,MediaMetricRow,Recommendation} from "@/lib/types";
+import {Button,Card,CardHeader,EmptyState,Field,Input,Modal,PageHeader,Select,StatusBadge,Table,Td,Textarea,Th} from "@/components/ui";
+import {AreaTrend,Bars,Legend} from "@/components/charts";
+const metrics:[keyof MediaTotals,string][]=[["spend","Spend"],["impressions","Impressions"],["reach","Daily reach total*"],["ctr","CTR"],["cpc","CPC"],["cpm","CPM"],["leads","Leads"],["cpl","CPL"],["conversions","Conversions"],["cpa","CPA"],["roas","ROAS"],["revenue","Revenue"]];
+const fmt=(key:string,value:number|null)=>value===null?"Unknown":["spend","cpc","cpm","cpl","cpa","revenue"].includes(key)?`₹${value.toLocaleString("en-IN",{maximumFractionDigits:2})}`:["ctr","cvr"].includes(key)?`${value.toFixed(2)}%`:key==="roas"?`${value.toFixed(2)}x`:value.toLocaleString("en-IN",{maximumFractionDigits:0});
+async function mediaRequest(path:string,body:unknown){await flushCRMChanges();const response=await fetch(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({operationId:crypto.randomUUID(),...body as object}),signal:AbortSignal.timeout(110000)});const result=await response.json();if(!response.ok)throw new Error(result.error??"The media request could not complete.");await refreshCRMChanges();return result;}
+type Connection={platform:string;connected:boolean;accountLabel:string;lastSyncAt?:string;connectUrl?:string};
+export function PerformanceView(){
+ const me=useMe(),campaigns=useCRM(s=>s.campaigns),clients=useCRM(s=>s.clients),recommendations=useCRM(s=>s.recommendations),ads=useCRM(s=>s.ads);
+ const [clientId,setClientId]=useState("All"),[campaignId,setCampaignId]=useState("All"),[platform,setPlatform]=useState("All"),[days,setDays]=useState(30),[end,setEnd]=useState(new Date().toISOString().slice(0,10)),[busy,setBusy]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState(""),[importing,setImporting]=useState(false),[queue,setQueue]=useState("New"),[connections,setConnections]=useState<Connection[]>([]),[connectorNote,setConnectorNote]=useState("Checking authorized connections…");
+ const writable=can(me.role,"performance","write")&&me.role!=="client";
+ useEffect(()=>{let live=true;fetch("/api/media/platforms",{cache:"no-store"}).then(async r=>{const data=await r.json();if(!r.ok)throw new Error(data.error??"Could not verify platform connections.");if(live){setConnections(data.connections??[]);setConnectorNote(data.note??"Connections verified through the server connector.");}}).catch(e=>{if(live)setConnectorNote(e.message);});return()=>{live=false;};},[]);
+ const scope=useMemo(()=>campaigns.filter(c=>(me.role!=="client"||c.clientId===me.clientId)&&(clientId==="All"||c.clientId===clientId)&&(campaignId==="All"||c.id===campaignId)&&(platform==="All"||(c.performanceRows??[]).some(r=>r.platform===platform)||c.service===platform)),[campaigns,me.role,me.clientId,clientId,campaignId,platform]);
+ const range=mediaDates(days,Number.isFinite(Date.parse(end))?end:new Date().toISOString().slice(0,10));
+ const campaignRows=scope.map(c=>({campaign:c,rows:campaignMediaRows(c,range.start,range.end,platform)}));const allRows=campaignRows.flatMap(c=>c.rows),total=mediaTotals(allRows);
+ const adRows=scope.flatMap(c=>{const grouped=new Map<string,MediaMetricRow[]>();for(const row of c.performanceRows??[])if(row.adId&&row.date>=range.start&&row.date<=range.end&&(platform==="All"||row.platform===platform)){const key=`${row.platform}|${row.adId}`;grouped.set(key,[...(grouped.get(key)??[]),row]);}return [...grouped.values()].map(rows=>({campaign:c,rows,metrics:mediaTotals(rows)}));});
+ const scopedIds=new Set(scope.map(c=>c.id)),recs=recommendations.filter(r=>r.mediaPlan&&r.campaignId&&scopedIds.has(r.campaignId)),shown=recs.filter(r=>r.status===queue);
+ const trendMap=new Map<string,Partial<MediaMetricRow>[]>();for(const row of allRows){if(!row.date)continue;trendMap.set(row.date,[...(trendMap.get(row.date)??[]),row]);}const trend=[...trendMap.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([date,rows])=>({date,...mediaTotals(rows)}));
+ async function run(action:()=>Promise<unknown>,success:string){setBusy(true);setError("");setMessage("");try{await action();if(success)setMessage(success);}catch(e){setError(e instanceof Error?e.message:"Request failed.");}finally{setBusy(false);}}
+ if(!can(me.role,"performance","read"))return <EmptyState title="Performance Marketing is not available for this role."/>;
+ return <div className="min-w-0 space-y-5 [&_button]:min-h-11 [&_select]:min-h-11">
+ <PageHeader title="Performance Marketing" description="Compare dated campaign and ad results, review optimization signals, and approve actions before execution." actions={<>{writable&&<><Button onClick={()=>setImporting(true)}>Import platform CSV</Button><Button variant="primary" disabled={busy||!allRows.length} loading={busy} onClick={()=>run(async()=>{const result=await mediaRequest("/api/media/analyze",{campaignIds:scope.map(c=>c.id),days,end:range.end,platform});setMessage(`Analysis complete: ${result.findings} findings. Source: ${result.source}`);},"")}>Run AI analysis</Button><Button disabled={busy||!allRows.length} onClick={()=>run(()=>mediaRequest("/api/media/analyze",{campaignIds:scope.map(c=>c.id),days,end:range.end,platform,mode:"rules"}),"Rules-based analysis saved; no changes were executed.")}>Run rules analysis</Button></>}</>}/>
+ <section className="border-y border-border py-4"><h2 className="text-sm font-semibold">Platform connections</h2><p className="mt-1 text-xs text-fg-3">{connectorNote}</p><div className="mt-3 flex flex-wrap gap-3">{MEDIA_PLATFORMS.map(p=>{const connection=connections.find(c=>c.platform===p);return <div key={p} className="min-w-40 rounded-lg border border-border px-3 py-2"><p className="text-sm font-medium">{p}</p><p className="mt-1 text-xs text-fg-3">{connection?.connected?connection.accountLabel:"Not authorized"}</p>{connection?.connectUrl&&<a className="inline-block py-2 text-xs text-accent-text underline" href={connection.connectUrl} target="_blank" rel="noreferrer">Authorize account</a>}{writable&&connection?.connected&&<Button className="mt-2" disabled={busy||campaignId==="All"} onClick={()=>run(()=>mediaRequest("/api/media/sync",{campaignId,platform:p,days}),"Platform metrics synced.")}>Sync selected campaign</Button>}</div>})}</div></section>
+ <div className="flex flex-wrap gap-3"><Field label="Client"><Select value={clientId} onChange={e=>{setClientId(e.target.value);setCampaignId("All");}}><option value="All">All clients</option>{clients.filter(c=>me.role!=="client"||c.id===me.clientId).map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</Select></Field><Field label="Campaign"><Select value={campaignId} onChange={e=>setCampaignId(e.target.value)}><option value="All">All campaigns</option>{campaigns.filter(c=>(clientId==="All"||c.clientId===clientId)&&(me.role!=="client"||c.clientId===me.clientId)).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field><Field label="Platform"><Select value={platform} onChange={e=>setPlatform(e.target.value)}><option value="All">All platforms</option>{MEDIA_PLATFORMS.map(p=><option key={p}>{p}</option>)}</Select></Field><Field label="Period"><Select value={days} onChange={e=>setDays(Number(e.target.value))}>{[7,14,30,60].map(d=><option key={d} value={d}>{d} days</option>)}</Select></Field><Field label="Period ending"><Input type="date" value={end} onChange={e=>setEnd(e.target.value)}/></Field></div>
+ {error&&<p role="alert" className="rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger">{error}</p>}{message&&<p role="status" className="text-sm text-success">{message}</p>}
+ <p className="text-xs text-fg-3">{range.start} to {range.end}. INR values. Unknown means unreported or an unavailable denominator. *Daily reach totals are not deduplicated people across days, ads or platforms. Campaign rollups take precedence over ad rows for the same date/platform.</p>
+ <dl className="grid grid-cols-2 gap-4 border-y border-border py-4 sm:grid-cols-4 lg:grid-cols-6">{metrics.map(([key,label])=><div key={key}><dt className="text-xs text-fg-3">{label}</dt><dd className="mt-1 text-base font-semibold tabular-nums">{fmt(key,total[key])}</dd></div>)}</dl>
+ {!!trend.length&&<Card><CardHeader title="Recorded spend and revenue" subtitle={trend.length===1?"One recorded day; more days are needed for a trend":"Daily totals within the selected period"}/><div className="p-3">{trend.length===1?<Bars data={trend} x="date" series={[{key:"spend",label:"Spend"},{key:"revenue",label:"Revenue"}]} height={220} fmt={v=>fmt("spend",v)}/>:<AreaTrend data={trend} x="date" series={[{key:"spend",label:"Spend"},{key:"revenue",label:"Revenue"}]} height={220} fmt={v=>fmt("spend",v)}/>}<Legend items={[{label:"Spend",value:fmt("spend",total.spend)},{label:"Revenue",value:fmt("revenue",total.revenue)}]}/></div></Card>}
+ <section><h2 className="mb-3 text-base font-semibold">Campaign performance</h2><PerformanceTable rows={campaignRows.map(({campaign,rows})=>({name:campaign.name,client:clients.find(c=>c.id===campaign.clientId)?.company??"",href:`/campaigns?c=${campaign.id}`,source:rows.some(r=>r.source==="Platform sync")?"Platform sync":rows.some(r=>r.source==="CSV import")?"CSV import":"Saved campaign records",metrics:mediaTotals(rows)}))}/></section>
+ <section><h2 className="mb-3 text-base font-semibold">Ad performance</h2><PerformanceTable rows={adRows.map(({campaign,rows,metrics})=>({name:rows[0].adName||rows[0].adId!,client:campaign.name,source:`${rows[0].platform}: ${rows[0].source}`,metrics}))}/>{!!ads.length&&<p className="mt-2 text-xs text-fg-3">Undated saved ad snapshots are excluded from these dated totals. Import a dated export to analyze them.</p>}</section>
+ <section className="border-t border-border pt-5"><h2 className="text-base font-semibold">Optimization recommendations</h2><p className="mt-1 text-sm text-fg-2">Analysis identifies hypotheses about winners, losers, fatigue, scaling, budget, audience, creative and funnel issues. Causes and expected improvements require validation.</p><p className="mt-2 text-xs text-fg-3">Automatic changes are off in this workspace. Approve and execute are separate actions. Execution updates an internal planning budget or creates a team task; external ads are unchanged.</p><div className="my-3 flex flex-wrap gap-2">{["New","Approved","Executed","Dismissed"].map(status=><Button key={status} variant={queue===status?"primary":"secondary"} onClick={()=>setQueue(status)}>{status} ({recs.filter(r=>r.status===status).length})</Button>)}</div><div className="divide-y divide-border">{shown.map(rec=><RecommendationRow key={rec.id} rec={rec} busy={busy} writable={writable} act={decision=>run(()=>mediaRequest("/api/media/actions",{recommendationId:rec.id,decision}),decision==="approve"?"Human approval recorded. Execute is a separate action.":decision==="execute"?"Approved action completed. See its execution receipt.":"Recommendation dismissed.")}/>)}{!shown.length&&<EmptyState title={`No ${queue.toLowerCase()} recommendations`} description="Run analysis on recorded data to create evidence-based recommendations."/>}</div></section>
+ {importing&&<ImportModal campaigns={campaigns.filter(c=>me.role!=="client"||c.clientId===me.clientId)} onClose={()=>setImporting(false)} onSaved={()=>{setImporting(false);setMessage("Performance records imported. Overlapping date/ad rows were replaced, not added twice.");}}/>}
+ </div>;
 }
+function PerformanceTable({rows}:{rows:{name:string;client:string;href?:string;source:string;metrics:MediaTotals}[]}){return rows.length?<Card><p className="px-4 pt-3 text-xs text-fg-3">Scroll horizontally to compare all metrics.</p><Table><thead><tr><Th>Campaign / ad</Th>{metrics.map(([key,label])=><Th key={key} className="whitespace-nowrap text-right">{label}</Th>)}</tr></thead><tbody>{rows.map((row,i)=><tr key={i}><Td className="min-w-56"><p className="font-medium">{row.href?<Link className="text-accent-text underline" href={row.href}>{row.name}</Link>:row.name}</p><p className="mt-1 text-xs text-fg-3">{row.client}</p><p className="mt-1 text-xs text-fg-3">{row.source}</p></Td>{metrics.map(([key])=><Td key={key} className="whitespace-nowrap text-right tabular-nums">{fmt(key,row.metrics[key])}</Td>)}</tr>)}</tbody></Table></Card>:<EmptyState title="No dated records in this selection" description="Import a platform CSV or sync an authorized connector. No results are fabricated."/>;}
+function RecommendationRow({rec,busy,writable,act}:{rec:Recommendation;busy:boolean;writable:boolean;act:(decision:"approve"|"execute"|"dismiss")=>void}){return <article className="space-y-3 py-5"><div className="flex flex-wrap items-center gap-3"><h3 className="text-sm font-semibold">{rec.title}</h3><StatusBadge status={rec.status}/><span className="text-xs text-fg-3">{rec.category} · {rec.priority} priority</span></div><p className="text-sm text-fg-2">{rec.finding}</p><dl className="flex flex-wrap gap-x-5 gap-y-2">{rec.evidence.map((e,i)=><div key={i}><dt className="text-xs text-fg-3">{e.label}</dt><dd className="text-xs font-medium">{e.value}</dd></div>)}</dl><p className="text-sm text-fg-2"><strong>AI inference: </strong>{rec.why}</p><p className="text-sm text-fg-2"><strong>Recommended action: </strong>{rec.recommendation}</p>{rec.test&&<p className="text-sm text-fg-2">Test: {rec.test}</p>}<p className="text-xs text-fg-3">{rec.mediaPlan?.source} · {rec.mediaPlan?.rangeStart} to {rec.mediaPlan?.rangeEnd}</p>{rec.mediaPlan?.action==="budget_change"&&<p className="text-sm">Proposed internal planning budget: {fmt("spend",rec.mediaPlan.budget??null)}. External delivery requires a separately authorized platform change.</p>}{rec.mediaExecution&&<p className="rounded-lg border border-success/30 p-3 text-sm text-success">Execution receipt: {rec.mediaExecution.note}{rec.mediaExecution.taskId&&<Link className="ml-2 underline" href="/tasks">Open tasks</Link>}</p>}{writable&&<div className="flex flex-wrap gap-2">{rec.status==="New"&&<Button disabled={busy} onClick={()=>act("approve")}>Approve recommendation</Button>}{rec.status==="Approved"&&<Button disabled={busy} variant="primary" onClick={()=>act("execute")}>{rec.mediaPlan?.action==="budget_change"?"Apply approved internal budget":"Create approved implementation task"}</Button>}{["New","Approved"].includes(rec.status)&&<Button disabled={busy} onClick={()=>act("dismiss")}>Dismiss recommendation</Button>}</div>}</article>;}
+function ImportModal({campaigns,onClose,onSaved}:{campaigns:Campaign[];onClose:()=>void;onSaved:()=>void}){
+ const [campaignId,setCampaignId]=useState(campaigns[0]?.id??""),[platform,setPlatform]=useState<string>(MEDIA_PLATFORMS[0]),[csv,setCSV]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+ async function submit(){setBusy(true);setError("");try{const result=Papa.parse<Record<string,string>>(csv,{header:true,skipEmptyLines:true});if(result.errors.length)throw new Error("The CSV has invalid columns or quoting. Export it again with a header row.");const rows=result.data.map((raw,index)=>{const record=Object.fromEntries(Object.entries(raw).map(([k,v])=>[k.toLowerCase().replace(/[^a-z0-9]/g,""),v]));const aliases:Record<string,string[]>={spend:["spend","cost","amountspent"],impressions:["impressions"],reach:["reach"],clicks:["clicks"],leads:["leads"],conversions:["conversions","purchases"],revenue:["revenue","conversionvalue","purchaseconversionvalue"]};const row:Record<string,unknown>={date:record.date??record.datestart??record.day,adId:record.adid||undefined,adName:record.adname||undefined};for(const key of MEDIA_METRICS){const raw=aliases[key].map(alias=>record[alias]).find(v=>v!==undefined&&v.trim()!=="");row[key]=raw===undefined?null:Number(raw.replace(/[₹,\s]/g,""));if(row[key]!==null&&(!Number.isFinite(row[key])||Number(row[key])<0))throw new Error(`Row ${index+2}: ${key} must be a non-negative number or blank.`);}if(record.frequency?.trim())row.frequency=Number(record.frequency);return row;});await mediaRequest("/api/media/import",{campaignId,platform,rows});onSaved();}catch(e){setError(e instanceof Error?e.message:"Import failed. Your CSV is preserved.");}finally{setBusy(false);}}
+ return <Modal open size="lg" title="Import platform performance" onClose={()=>!busy&&onClose()} footer={<><Button disabled={busy} onClick={onClose}>Cancel</Button><Button disabled={!campaignId||!csv.trim()} loading={busy} variant="primary" onClick={submit}>Import metrics</Button></>}><div className="space-y-4"><p className="text-sm text-fg-2">Use an INR export with date, spend, impressions, reach, clicks, leads, conversions and revenue columns. Add ad_id and ad_name for ad-level rows, and frequency if reported. Blank metrics stay unknown.</p><Field label="Import campaign"><Select value={campaignId} onChange={e=>setCampaignId(e.target.value)}>{campaigns.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field><Field label="Import platform"><Select value={platform} onChange={e=>setPlatform(e.target.value)}>{MEDIA_PLATFORMS.map(p=><option key={p}>{p}</option>)}</Select></Field><Field label="Platform CSV file"><Input type="file" accept=".csv,text/csv" onChange={async e=>{const file=e.target.files?.[0];if(file){if(file.size>2000000){setError("Import CSV files up to 2 MB / 3,000 rows per batch.");return;}setCSV(await file.text());}}}/></Field><Field label="CSV data"><Textarea rows={9} value={csv} onChange={e=>setCSV(e.target.value)} placeholder="date,ad_id,ad_name,spend,impressions,reach,clicks,leads,conversions,revenue"/></Field><p className="text-xs text-fg-3">Overlapping campaign/platform/date/ad records replace the prior value. Campaign-level rollups and ad-level rows are not added together.</p>{error&&<p role="alert" className="text-sm text-danger">{error}</p>}</div></Modal>;
+}
+
+

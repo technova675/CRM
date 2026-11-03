@@ -12,7 +12,7 @@ import { toast } from "@/components/shell/toast";
 import { ContextUsed } from "./shared";
 import { generateStrategyDoc } from "./actions";
 
-const EMPTY: StrategyInputs = { business: "", product: "", audience: "", geography: "India", goals: "", monthlyBudget: 300000, currentPerformance: "", competitors: "", channels: "" };
+const EMPTY: StrategyInputs = { business: "", product: "", audience: "", geography: "", goals: "", monthlyBudget: 0, currentPerformance: "", competitors: "", channels: "" };
 
 export function StrategyGenerator({ onClose, initialClientId, initialBudget, onCreated }: { onClose: () => void; initialClientId?: string; initialBudget?: number; onCreated: (doc: StrategyDoc) => void }) {
   const clients = useCRM((s) => s.clients);
@@ -21,49 +21,50 @@ export function StrategyGenerator({ onClose, initialClientId, initialBudget, onC
   const [clientId, setClientId] = useState(initialClientId && clients.some((c) => c.id === initialClientId) ? initialClientId : "");
   const derive = (cid: string, budget?: number): StrategyInputs => {
     const client = clients.find((c) => c.id === cid);
-    if (!client) return { ...EMPTY, monthlyBudget: budget || EMPTY.monthlyBudget };
+    if (!client) return { ...EMPTY, monthlyBudget: budget ?? EMPTY.monthlyBudget };
     return deriveStrategyInputs({ client, campaigns: campaigns.filter((c) => c.clientId === cid), knowledge: knowledge.find((k) => k.clientId === cid) }, budget);
   };
   const [f, setF] = useState<StrategyInputs>(() => derive(clientId, initialBudget));
   const [busy, setBusy] = useState(false);
+  const [error,setError]=useState("");
 
   const context = useMemo(() => {
     const client = clients.find((c) => c.id === clientId);
-    if (!client) return [{ label: "Inputs only", value: "No client selected — industry defaults and your inputs are used" }];
+    if (!client) return [{ label: "Inputs only", value: "No client selected — only your brief is used" }];
     return strategyContextUsed({ client, campaigns: campaigns.filter((c) => c.clientId === clientId), knowledge: knowledge.find((k) => k.clientId === clientId) });
   }, [clients, campaigns, knowledge, clientId]);
 
   const pickClient = (cid: string) => {
     setClientId(cid);
-    setF(derive(cid, f.monthlyBudget));
+    setF(derive(cid, initialBudget));
   };
   const set = (k: keyof StrategyInputs) => (e: { target: { value: string } }) => setF({ ...f, [k]: k === "monthlyBudget" ? Number(e.target.value) : e.target.value });
 
-  const generate = async () => {
-    if (!f.business.trim()) return toast("Add the business", "Describe the business or pick a client.", "warning");
-    setBusy(true);
-    const doc = await generateStrategyDoc({ inputs: f, clientId: clientId || undefined });
-    setBusy(false);
-    if (!doc) return;
-    toast("Strategy generated", "Review and edit before submitting for approval.", "ai");
-    onCreated(doc);
+  const generate = async (mode:"ai"|"structured"="ai") => {
+    const missing=(["business","product","audience","geography","goals"] as const).filter(key=>!f[key].trim());
+    if(missing.length){setError(`Complete ${missing.join(", ")} before generation.`);return;}
+    if(!Number.isInteger(f.monthlyBudget)||f.monthlyBudget<0||f.monthlyBudget>1e9){setError("Enter a whole-rupee monthly budget between 0 and 1 billion.");return;}
+    setBusy(true);setError("");
+    try{const doc=await generateStrategyDoc({inputs:f,clientId:clientId||undefined,mode});toast("Strategy draft saved","Review and edit all outputs before approval.","ai");onCreated(doc);}
+    catch(error){setError(error instanceof Error?error.message:"Generation failed. Your brief is preserved.");}finally{setBusy(false);}
   };
-
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={()=>!busy&&onClose()}
       size="xl"
       title="New marketing strategy"
-      subtitle={<span className="inline-flex items-center gap-1.5">Prefilled from the client record, last-30-day performance and knowledge base <AgentChip name={AGENTS.strategy.name} color={AGENTS.strategy.color} /></span>}
+      subtitle={<span className="inline-flex items-center gap-1.5">Use your brief, client onboarding and saved campaign performance <AgentChip name={AGENTS.strategy.name} color={AGENTS.strategy.color} /></span>}
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="ai" loading={busy} icon={<Sparkles className="size-3.5" />} onClick={generate}>Generate strategy</Button>
+          <Button disabled={busy} onClick={onClose}>Cancel</Button>
+          <Button disabled={busy} onClick={()=>generate("structured")}>Structured planning draft</Button>
+          <Button variant="ai" loading={busy} icon={<Sparkles className="size-3.5" />} onClick={()=>generate("ai")}>Generate AI strategy</Button>
         </>
       }
     >
-      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+      <fieldset disabled={busy} className="grid min-w-0 gap-4 lg:grid-cols-[1fr_280px] [&_input]:min-h-11 [&_select]:min-h-11">
+        {error&&<p role="alert" className="rounded-lg bg-danger-soft p-3 text-sm text-danger lg:col-span-2">{error}</p>}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Client" className="sm:col-span-2">
             <Select value={clientId} onChange={(e) => pickClient(e.target.value)}>
@@ -77,17 +78,20 @@ export function StrategyGenerator({ onClose, initialClientId, initialBudget, onC
           <Field label="Goals"><Textarea value={f.goals} onChange={set("goals")} className="min-h-14" /></Field>
           <Field label="Geography"><Input value={f.geography} onChange={set("geography")} /></Field>
           <Field label="Monthly budget (₹)" hint={f.monthlyBudget ? `${compactMoney(f.monthlyBudget)} / month` : undefined}>
-            <Input type="number" min={0} step={10000} value={f.monthlyBudget} onChange={set("monthlyBudget")} />
+            <Input type="number" min={0} step={1} value={f.monthlyBudget} onChange={set("monthlyBudget")} />
           </Field>
-          <Field label="Current performance" className="sm:col-span-2" hint="Pulled from connected campaigns (last 30 days) — edit if you have better numbers."><Textarea value={f.currentPerformance} onChange={set("currentPerformance")} className="min-h-14" /></Field>
+          <Field label="Current performance" className="sm:col-span-2" hint="Saved campaign records from the last 30 calendar days — edit with your latest reported figures."><Textarea value={f.currentPerformance} onChange={set("currentPerformance")} className="min-h-14" /></Field>
           <Field label="Competitors"><Input value={f.competitors} onChange={set("competitors")} placeholder="Comma separated" /></Field>
           <Field label="Existing channels"><Input value={f.channels} onChange={set("channels")} /></Field>
         </div>
         <div className="space-y-3">
           <ContextUsed items={context} />
-          <p className="text-[11px] text-fg-3 leading-relaxed">The Strategy Agent is deterministic: it uses the industry playbook, your budget, geography and current metrics. Every line is tagged as data, assumption or recommendation. A human reviews and approves before anything is executed.</p>
+          <p className="text-[11px] text-fg-3 leading-relaxed">AI drafts all ten outputs from your brief. Personas, allocations and targets are proposals to validate. The source label identifies the model used, or a structured planning fallback. Approval records readiness for the team.</p>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   );
 }
+
+
+

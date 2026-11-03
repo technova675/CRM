@@ -9,6 +9,7 @@ import { cn, fmtDate } from "@/lib/utils";
 import { Badge, Button } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import { acceptProposal, approveProposalNow, canSendProposal, markProposalViewed, sendProposal, submitForReview } from "./workflow";
+import {ProposalDownload} from "./ProposalDownload";
 
 const FLOW = ["Draft", "Internal Review", "Sent", "Viewed", "Accepted"] as const;
 
@@ -43,7 +44,7 @@ export function ProposalWorkflow({ proposal: p, canWrite, showPrint = true }: { 
   const sendable = canSendProposal(p, mode);
 
   const approvalTone = p.approval === "Approved" ? "success" : p.approval === "Awaiting" ? "warning" : "neutral";
-  const approvalLabel = p.status === "Draft" && p.approval !== "Approved" ? (mode === "Approval Required" ? "Needs approval" : "Not required") : p.approval;
+  const approvalLabel = p.status === "Draft" && p.approval !== "Approved" ? "Needs approval" : p.approval;
 
   return (
     <div className="space-y-3">
@@ -51,7 +52,7 @@ export function ProposalWorkflow({ proposal: p, canWrite, showPrint = true }: { 
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-fg-3">Internal review:</span>
         <Badge tone={approvalTone}>{approvalLabel}</Badge>
-        <span className="text-fg-3">· Proposals mode <b className="font-medium text-fg-2">{mode}</b></span>
+        <span className="text-fg-3">· Internal approval required</span>
         {p.sentAt && ["Sent", "Viewed", "Accepted", "Rejected"].includes(p.status) && <span className="text-fg-3">· Sent {fmtDate(p.sentAt)}</span>}
         {p.viewedAt && <span className="text-fg-3">· Viewed {fmtDate(p.viewedAt)}</span>}
       </div>
@@ -69,11 +70,11 @@ export function ProposalWorkflow({ proposal: p, canWrite, showPrint = true }: { 
           )}
           {["Draft", "Internal Review"].includes(p.status) && (
             <Button size="xs" variant={p.status === "Internal Review" ? "primary" : "secondary"} icon={<Send className="size-3" />} disabled={!sendable} title={!sendable ? "Approve internally before sending" : undefined}
-              onClick={() => { if (sendProposal(p.id)) toast("Proposal sent", `${p.company} · deal moved to Proposal`); }}>
-              Send to client
+              onClick={() => { if (sendProposal(p.id)) toast("External send recorded", "This records your manual share; no message was sent by the app."); }}>
+              Record sent externally
             </Button>
           )}
-          {p.status === "Sent" && <Button size="xs" icon={<Eye className="size-3" />} onClick={() => { markProposalViewed(p.id); toast("Marked as viewed"); }}>Mark viewed</Button>}
+          {p.status === "Sent" && <Button size="xs" icon={<Eye className="size-3" />} onClick={() => { markProposalViewed(p.id); toast("Client view recorded manually"); }}>Record client view</Button>}
           {["Sent", "Viewed"].includes(p.status) && (
             <>
               <Button size="xs" variant="primary" icon={<ThumbsUp className="size-3" />} onClick={() => { const cid = acceptProposal(p.id); toast("Proposal accepted 🎉", cid ? "Deal won — client created and onboarding started." : "Deal moved to Won."); }}>Accepted</Button>
@@ -81,10 +82,11 @@ export function ProposalWorkflow({ proposal: p, canWrite, showPrint = true }: { 
             </>
           )}
           {p.status === "Rejected" && <Button size="xs" icon={<RotateCcw className="size-3" />} onClick={() => { useCRM.getState().setProposalStatus(p.id, "Draft"); useCRM.getState().updateProposal(p.id, { approval: mode === "Approval Required" ? "Awaiting" : "Not Required" }); }}>Reopen as draft</Button>}
-          {showPrint && <Button size="xs" variant="ghost" icon={<FileDown className="size-3" />} href={`/proposals/${p.id}`}>Printable / PDF</Button>}
+          {showPrint && <><ProposalDownload id={p.id}/><Button size="xs" variant="ghost" icon={<FileDown className="size-3" />} href={`/proposals/${p.id}`}>Preview / Print</Button></>}
         </div>
       )}
-      {!canWrite && showPrint && <Button size="xs" variant="ghost" icon={<FileDown className="size-3" />} href={`/proposals/${p.id}`}>Printable / PDF</Button>}
+      <p className="text-xs text-fg-2">Sent, viewed and decision statuses are manual records. They are not delivery receipts or electronic signatures.</p>
+      {!canWrite && showPrint && <ProposalDownload id={p.id}/>}
 
       {p.status === "Internal Review" && p.approval === "Awaiting" && (
         <p className="rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">

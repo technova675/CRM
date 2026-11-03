@@ -1,6 +1,6 @@
 // Server-only storage. R2 credentials must never be sent to the browser.
 import { createHash } from "node:crypto";
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand,DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export class ReportStorageError extends Error {}
 
@@ -31,6 +31,23 @@ export function r2Prefix(sessionId: string) {
 }
 
 export const contentHash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+function onboardingObjectKey(owner:string,clientId:string,assetId:string,file:{id:string;sha256:string}){
+ if(!/^[a-f0-9-]{36}$/i.test(owner)||!/^.{1,150}$/.test(clientId)||![assetId,file.id].every(id=>/^[a-f0-9-]{36}$/i.test(id))||!(/^[a-f0-9]{64}$/i.test(file.sha256)))throw new ReportStorageError("Invalid onboarding storage identifier.");
+ return `onboarding/${owner}/${createHash("sha256").update(clientId).digest("hex").slice(0,32)}/${assetId}/${file.id}-${file.sha256}`;
+}
+export async function writeOnboardingAsset(owner:string,clientId:string,assetId:string,fileId:string,bytes:Buffer){
+ if(!bytes.length||bytes.length>10*1024*1024)throw new ReportStorageError("Brand assets must be between 1 byte and 10 MB.");
+ const sha256=contentHash(bytes),key=onboardingObjectKey(owner,clientId,assetId,{id:fileId,sha256}),{client,bucket}=storage();
+ try{await client.send(new PutObjectCommand({Bucket:bucket,Key:key,Body:bytes,ContentType:"application/octet-stream",Metadata:{sha256}}),{abortSignal:AbortSignal.timeout(60000)});return {sha256,size:bytes.length};}catch{throw new ReportStorageError("Could not upload this brand asset to private R2 storage. Please retry or save an existing asset link.");}finally{client.destroy();}
+}
+export async function readOnboardingAsset(owner:string,clientId:string,assetId:string,file:{id:string;sha256:string;size:number}){
+ const key=onboardingObjectKey(owner,clientId,assetId,file),{client,bucket}=storage();
+ try{const result=await client.send(new GetObjectCommand({Bucket:bucket,Key:key}),{abortSignal:AbortSignal.timeout(60000)});if(!result.Body||result.ContentLength!==file.size||file.size>10*1024*1024)throw new Error();const bytes=Buffer.from(await result.Body.transformToByteArray());if(bytes.length!==file.size||contentHash(bytes)!==file.sha256)throw new Error();return bytes;}catch{throw new ReportStorageError("This brand asset could not be read or verified. Please retry; no blank file was substituted.");}finally{client.destroy();}
+}
+export async function removeOnboardingAsset(owner:string,clientId:string,assetId:string,file:{id:string;sha256:string}){
+ const key=onboardingObjectKey(owner,clientId,assetId,file),{client,bucket}=storage();try{await client.send(new DeleteObjectCommand({Bucket:bucket,Key:key}),{abortSignal:AbortSignal.timeout(30000)});}finally{client.destroy();}
+}
 
 export async function writeR2Part(sessionId: string, kind: string, tableIndex: number, partIndex: number, bytes: Buffer) {
   const sha256 = contentHash(bytes);

@@ -1,0 +1,3 @@
+.content { min-width:0; --text-3:var(--text-2); }
+.content button { min-height:44px; }
+.content :is(button,input,select,textarea,a):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }

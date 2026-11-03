@@ -39,7 +39,8 @@ const ratio = (a: number, b: number) => (b ? a / b : 0);
 export function performanceSnapshot(campaigns: Campaign[], days = 30): PerfSnapshot {
   const by = new Map<Service, ChannelPerf>();
   for (const c of campaigns) {
-    const rows = c.metrics.slice(-days);
+    const today=new Date().toISOString().slice(0,10),start=new Date(`${today}T00:00:00Z`);start.setUTCDate(start.getUTCDate()-days+1);
+    const rows = (c.metrics??[]).filter(row=>row.date>=start.toISOString().slice(0,10)&&row.date<=today);
     if (!rows.length) continue;
     const cur = by.get(c.service) ?? { service: c.service, spend: 0, leads: 0, conversions: 0, revenue: 0, clicks: 0, impressions: 0, roas: 0, cpa: 0, ctr: 0, campaigns: 0 };
     cur.campaigns += 1;
@@ -232,29 +233,29 @@ export const stageForChannel = (ch: string): Stage => ROLE[ch as Service]?.[0] ?
 
 // ---------- Inputs derived from the client record ----------
 export interface StrategySource {
-  client?: Pick<Client, "id" | "company" | "industry" | "location" | "services" | "monthlyAdSpend" | "retainer">;
+  client?: Pick<Client, "id" | "company" | "industry" | "location" | "services" | "monthlyAdSpend" | "retainer" | "onboardingWorkspace">;
   campaigns: Campaign[]; // this client's campaigns
   knowledge?: ClientKnowledge;
 }
 
 export function deriveStrategyInputs(src: StrategySource, budget?: number): StrategyInputs {
   const { client, campaigns, knowledge } = src;
-  const pb = playbookFor(client?.industry);
+  const form=client?.onboardingWorkspace?.form;
   const perf = performanceSnapshot(campaigns);
   const active = campaigns.filter((c) => c.status === "Active");
   const activeBudget = active.reduce((a, c) => a + c.budget, 0);
-  const products = knowledge?.products?.length ? knowledge.products.map((p) => `${p.name}${p.price ? ` (${p.price})` : ""} — ${p.usp}`).join("; ") : pb.product;
-  const audience = knowledge?.audience || campaigns.find((c) => c.audience)?.audience || pb.audience;
+  const products = form?.products|| (knowledge?.products?.length ? knowledge.products.map((p) => `${p.name}${p.price ? ` (${p.price})` : ""} — ${p.usp}`).join("; ") : "");
+  const audience = form?.audience||knowledge?.audience || campaigns.find((c) => c.audience)?.audience || "";
   const channels = [...new Set([...(client?.services ?? []), ...active.map((c) => c.platform)])].join(", ");
   return {
     business: client ? `${client.company} — ${client.industry}, based in ${client.location}` : "",
     product: products,
     audience,
-    geography: client ? `${client.location} + top metros (India)` : "India",
-    goals: pb.goals,
-    monthlyBudget: Math.round(budget || client?.monthlyAdSpend || activeBudget || 300000),
+    geography: client?.location??"",
+    goals: form?.goals??"",
+    monthlyBudget: Math.round(budget ?? client?.monthlyAdSpend ?? activeBudget),
     currentPerformance: describePerformance(perf),
-    competitors: knowledge?.competitors?.join(", ") ?? "",
+    competitors: form?.competitors||knowledge?.competitors?.join(", ") || "",
     channels,
   };
 }
@@ -292,12 +293,10 @@ export function allocate(weights: { channel: string; w: number }[], total: numbe
   return withAmounts(weights.map((x, i) => ({ channel: x.channel, pct: pcts[i]! })), total);
 }
 export function withAmounts<T extends { pct: number }>(rows: T[], total: number): (T & { amount: number })[] {
-  let used = 0;
-  return rows.map((r, i) => {
-    const amount = i === rows.length - 1 ? Math.round(total) - used : Math.round((total * r.pct) / 100);
-    used += amount;
-    return { ...r, amount };
-  });
+  const valid=Math.abs(rows.reduce((n,r)=>n+r.pct,0)-100)<.011;
+  const raw=rows.map(r=>Math.max(0,total*r.pct/100)),amounts=raw.map(n=>valid?Math.floor(n):Math.round(n));
+  if(valid&&rows.length){let rest=Math.round(total)-amounts.reduce((a,b)=>a+b,0);const order=raw.map((n,i)=>({i,f:n-Math.floor(n)})).sort((a,b)=>b.f-a.f||a.i-b.i);for(let i=0;rest>0;i++,rest--)amounts[order[i%order.length].i]++;}
+  return rows.map((r,i)=>({...r,amount:amounts[i]}));
 }
 // Rescales edited percentages back to 100 (keeps proportions) and recomputes amounts.
 export function normalizeBudget(rows: StrategyDoc["budget"], total: number): StrategyDoc["budget"] {

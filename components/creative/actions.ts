@@ -2,9 +2,10 @@
 
 // Creative Studio workflow actions on top of the store's creative + generic helpers.
 import { useCRM } from "@/lib/store";
-import { callAgent, runAgentJob } from "@/lib/ai/client";
-import { conceptToCreative, generateConcepts, type CreativeInputs, type FatiguedAd } from "@/lib/ai/creative";
-import type { Creative, CreativeConcept, CreativeVersion, InsightItem } from "@/lib/types";
+import {flushCRMChanges,refreshCRMChanges} from "@/lib/crmSync";
+import {conceptProductionDraft} from "@/lib/domain/creativeStrategy";
+import { type CreativeInputs, type FatiguedAd } from "@/lib/ai/creative";
+import type { Creative, CreativeConcept, CreativeVersion } from "@/lib/types";
 import { DAY, uid } from "@/lib/utils";
 
 const now = () => new Date().toISOString();
@@ -81,42 +82,15 @@ export function createCreative(input: Pick<Creative, "clientId" | "title" | "typ
   return c;
 }
 
-export function saveConceptAsCreative(concept: CreativeConcept): Creative {
-  const s = useCRM.getState();
-  const campaignId = s.campaigns.find((c) => c.clientId === concept.clientId && c.service === "Meta Ads")?.id;
-  const c = conceptToCreative(concept, { id: uid("cr"), ownerId: s.currentUserId, campaignId });
-  s.upsert("creatives", c);
-  s.patch("concepts", concept.id, { savedAsCreativeId: c.id });
-  s.log({ actor: "human", actorId: s.currentUserId, agent: "creative", entity: "creative", entityId: c.id, action: "Saved AI concept as creative (Draft v1)", detail: c.title });
-  return c;
+export function saveConceptAsCreative(concept:CreativeConcept):Creative{
+ const s=useCRM.getState(),latest=s.concepts.find(c=>c.id===concept.id)??concept;
+ const existing=s.creatives.find(c=>c.id===latest.savedAsCreativeId||c.fromConceptId===latest.id);if(existing)return existing;
+ if(latest.generationSource&&!latest.reviewedAt)throw new Error("Review the concept before saving a production draft.");
+ const creative=conceptProductionDraft(latest,s.currentUserId,uid("cr"));s.upsert("creatives",creative);s.patch("concepts",latest.id,{savedAsCreativeId:creative.id});s.log({actor:"human",actorId:s.currentUserId,entity:"creative",entityId:creative.id,action:"Saved reviewed creative strategy as a production draft",detail:creative.title});return creative;
 }
-
-export async function generateConceptsJob(o: { inputs: CreativeInputs; clientId: string; count: number }): Promise<{ concepts: CreativeConcept[]; skipped: string[]; commentary?: { summary?: string; insights: InsightItem[] } } | null> {
-  const s = useCRM.getState();
-  const client = s.clients.find((c) => c.id === o.clientId);
-  const knowledge = s.knowledge.find((k) => k.clientId === o.clientId);
-  const strategy = s.strategies.filter((x) => x.clientId === o.clientId && x.status === "Approved").sort((a, b) => b.version - a.version)[0];
-  const ads = s.ads.filter((a) => a.clientId === o.clientId);
-  const res = await runAgentJob({
-    agent: "creative",
-    title: `${o.count} creative concepts — ${client?.company ?? "client"}`,
-    input: `${o.inputs.platform} · ${o.inputs.objective} · ${o.inputs.offer}`,
-    clientId: o.clientId,
-    minDelayMs: 1000,
-    local: async () => {
-      const out = generateConcepts({ inputs: o.inputs, clientId: o.clientId, industry: client?.industry, knowledge, strategy, ads, count: o.count, idPrefix: uid("cpt") });
-      // LLM mode: commentary only; concept structure stays deterministic.
-      const llm = await callAgent("creative", "Comment on this batch of creative concepts: which to test first and why, and any brand-voice risks. Tag each insight.", { inputs: o.inputs, concepts: out.concepts.map((c) => ({ title: c.title, hook: c.hook, angle: c.angle, kind: c.kind })) }, { format: "insights", clientId: o.clientId });
-      return { ...out, commentary: llm?.summary || llm?.insights?.length ? { summary: llm.summary, insights: (llm.insights ?? []).map((i) => ({ ...i, source: i.source ?? "AI provider" })) } : undefined };
-    },
-  });
-  if (!res) return null;
-  res.concepts.forEach((c) => s.upsert("concepts", c));
-  s.log({ actor: "ai", agent: "creative", entity: "creative", action: "Generated creative concepts", detail: `${res.concepts.length} concept(s) · ${client?.company ?? ""}` });
-  return res;
+export async function generateConceptsJob(o:{inputs:CreativeInputs;clientId:string;count:number}){
+ await flushCRMChanges();const response=await fetch("/api/ai/creative-strategy",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...o,kinds:["UGC","Static","Video"],count:Math.max(3,o.count),existingCreativeIds:[],operationId:crypto.randomUUID()}),signal:AbortSignal.timeout(110000)});const result=await response.json();if(!response.ok)throw new Error(result.error??"Could not generate creative concepts.");await refreshCRMChanges();return {concepts:useCRM.getState().concepts.filter(c=>result.conceptIds.includes(c.id)),skipped:[] as string[]};
 }
-
-// "Refresh creative" on a fatigued ad → creative brief task, respecting the Task creation mode.
 export function createRefreshTask(f: FatiguedAd, o: { brief: string; assigneeId: string; dueDays: number }): "created" | "approval" {
   const s = useCRM.getState();
   const mode = s.modeFor("Task creation");
@@ -142,3 +116,4 @@ export function createRefreshTask(f: FatiguedAd, o: { brief: string; assigneeId:
   s.log({ actor: mode === "Automatic" ? "ai" : "human", actorId: mode === "Automatic" ? undefined : s.currentUserId, agent: "creative", entity: "task", entityId: id, action: "Created creative refresh brief", detail: `${f.name} · ${client?.company ?? ""}` });
   return "created";
 }
+

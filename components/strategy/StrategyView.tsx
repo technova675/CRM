@@ -15,6 +15,7 @@ import { toast } from "@/components/shell/toast";
 import { ContextUsed, EditableInsights, EditableText, SectionCard } from "./shared";
 import { approveStrategy, backToDraft, createCampaignsFromStrategy, generateStrategyDoc, submitForReview, updateStrategy } from "./actions";
 import { downloadStrategyMarkdown, printStrategy } from "./export";
+import {strategyReviewIssues} from "@/lib/domain/strategy";
 
 export const STRATEGY_TONE: Record<StrategyDoc["status"], Tone> = { Draft: "neutral", "In Review": "warning", Approved: "success" };
 const splitList = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
@@ -29,6 +30,8 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
   const writable = can(me.role, "strategy", "write") && me.role !== "client";
   const client = clients.find((c) => c.id === doc.clientId);
   const [busy, setBusy] = useState(false);
+  const [error,setError]=useState("");
+  const issues=strategyReviewIssues(doc);
   const [confirmCampaigns, setConfirmCampaigns] = useState(false);
   const pending = approvals.find((a) => a.status === "pending" && a.ref?.type === "strategy" && a.ref.id === doc.id);
 
@@ -49,15 +52,15 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
   };
   const setTotal = (v: number) => edit({ inputs: { ...doc.inputs, monthlyBudget: v }, budget: withAmounts(doc.budget, v) });
 
-  const regenerate = async () => {
-    setBusy(true);
-    const next = await generateStrategyDoc({ inputs: doc.inputs, clientId: doc.clientId, existing: doc });
-    setBusy(false);
-    if (next) toast(`Regenerated as v${next.version}`, "Previous edits were replaced by the new draft.", "ai");
+  const regenerate = async (mode:"ai"|"structured"="ai") => {
+    if(!confirm("Generate a new draft version? This replaces the current strategy outputs and resets review approval."))return;
+    setBusy(true);setError("");
+    try{const next=await generateStrategyDoc({inputs:doc.inputs,clientId:doc.clientId,existing:doc,mode});toast(`Regenerated as v${next.version}`,"Review the new draft before approval.","ai");}catch(error){setError(error instanceof Error?error.message:"Could not regenerate. Your strategy was preserved.");}finally{setBusy(false);}
   };
 
   const submit = () => {
     const r = submitForReview(doc);
+    if(r==="invalid")return;
     toast(r === "approval" ? "Sent for approval" : "Submitted for review", r === "approval" ? "Approve it in Automations → Approvals, or approve directly here." : undefined, r === "approval" ? "warning" : "success");
   };
 
@@ -70,7 +73,7 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
   const setPersona = (i: number, patch: Partial<StrategyPersona>) => edit({ personas: doc.personas.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4 break-words [&_button]:min-h-11 [&_input]:min-h-11">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <button onClick={onBack} className="inline-flex items-center gap-1 text-xs text-fg-3 hover:text-fg mb-1.5"><ArrowLeft className="size-3.5" /> All strategies</button>
@@ -87,9 +90,9 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
         </div>
         <div className="flex flex-wrap gap-2 print:hidden">
           {writable && doc.status === "Draft" && <Button variant="primary" icon={<Send className="size-3.5" />} onClick={submit}>{mode === "Approval Required" ? "Submit for approval" : "Submit for review"}</Button>}
-          {writable && doc.status === "In Review" && <Button variant="primary" icon={<CheckCircle2 className="size-3.5" />} onClick={() => { approveStrategy(doc); toast("Strategy approved"); }}>Approve</Button>}
+          {writable && doc.status === "In Review" && <Button variant="primary" icon={<CheckCircle2 className="size-3.5" />} disabled={busy||issues.length>0} onClick={async()=>{setBusy(true);setError("");try{if(await approveStrategy(doc))toast("Strategy approved");}catch(error){setError(error instanceof Error?error.message:"Approval could not be saved.");}finally{setBusy(false);}}}>Approve</Button>}
           {writable && doc.status !== "Draft" && <Button icon={<Undo2 className="size-3.5" />} onClick={() => { backToDraft(doc); toast("Moved back to draft"); }}>Back to draft</Button>}
-          {writable && <Button variant="ai" loading={busy} icon={<RefreshCw className="size-3.5" />} onClick={regenerate}>Regenerate</Button>}
+          {writable && <Button variant="ai" loading={busy} icon={<RefreshCw className="size-3.5" />} onClick={()=>regenerate("ai")}>Regenerate</Button>}
           {writable && doc.clientId && (
             <Button icon={<Megaphone className="size-3.5" />} disabled={doc.status !== "Approved"} title={doc.status !== "Approved" ? "Approve the strategy first — humans review before execution" : undefined} onClick={() => setConfirmCampaigns(true)}>Create campaigns</Button>
           )}
@@ -104,15 +107,21 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
         </div>
       )}
 
+            <Card className="overflow-hidden border-accent/20 bg-gradient-to-r from-violet-500/10 via-sky-400/10 to-emerald-400/10 p-4">
+        <p className="text-sm font-semibold">Generation source: {doc.generationSource??"Legacy playbook draft"}</p>
+        <p className="mt-1 text-xs text-fg-2">AI outputs are proposals. Personas and KPI targets require validation; input data is reported by your team. Edit any text to refine the plan.</p>
+        {error&&<p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+        {error&&writable&&<Button className="mt-2" disabled={busy} onClick={()=>regenerate("structured")}>Use structured planning draft</Button>}
+        {issues.length>0&&<div className="mt-3 rounded-lg border border-warning/30 bg-warning-soft p-3 text-xs text-warning"><p className="font-medium">Before strategist approval</p><ul className="mt-1 list-inside list-disc">{issues.map(issue=><li key={issue}>{issue}</li>)}</ul></div>}
+      </Card>
+      <nav aria-label="Strategy sections" className="flex flex-wrap gap-2">{["Budget allocation","Funnel","Marketing strategy","Customer personas","Channel strategy","Campaign strategy","Creative strategy","Content pillars","Testing roadmap","KPI framework"].map(label=><a key={label} href={`#strategy-${label.toLowerCase().replaceAll(" ","-")}`} className="inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-xs hover:bg-surface-2">{label}</a>)}</nav>
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2 min-w-0">
           <SectionCard title="Executive summary" action={<InsightLegend />}>
             <p className="text-[13px] text-fg-2 leading-relaxed"><EditableText value={doc.summary} multiline disabled={!writable} onSave={(summary) => edit({ summary })} /></p>
           </SectionCard>
 
-          <Card>
-            <CardHeader
-              title="Budget allocation"
+          <Card id="strategy-budget-allocation"><CardHeader title="Budget allocation"
               subtitle={<>Suggested split of <span className="font-medium text-fg-2">{money(doc.inputs.monthlyBudget)}</span> / month</>}
               action={writable && budgetSum !== 100 ? <Button size="xs" onClick={() => edit({ budget: normalizeBudget(doc.budget, doc.inputs.monthlyBudget) })}>Normalize to 100%</Button> : undefined}
             />
@@ -128,7 +137,7 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
                     {doc.budget.map((b, i) => (
                       <tr key={i}>
                         <Td className="font-medium"><EditableText value={b.channel} disabled={!writable} onSave={(channel) => channel && setBudgetRow(i, { channel })} /></Td>
-                        <Td>{writable ? <Input type="number" min={0} max={100} value={b.pct} onChange={(e) => setBudgetRow(i, { pct: Math.max(0, Number(e.target.value)) })} className="h-7 w-16" /> : `${b.pct}%`}</Td>
+                        <Td>{writable ? <Input type="number" min={0} max={100} value={b.pct} aria-label={`${b.channel} budget percentage`} onChange={(e) => setBudgetRow(i, { pct: Math.min(100,Math.max(0, Number(e.target.value))) })} className="h-7 w-16" /> : `${b.pct}%`}</Td>
                         <Td className="text-right tabular-nums">{money(b.amount)}</Td>
                         <Td className="text-xs text-fg-3 min-w-48"><EditableText value={b.rationale} disabled={!writable} onSave={(rationale) => setBudgetRow(i, { rationale })} /></Td>
                         {writable && <Td><button onClick={() => edit({ budget: withAmounts(doc.budget.filter((_, j) => j !== i), doc.inputs.monthlyBudget) })} className="text-fg-3 hover:text-danger" aria-label="Remove channel"><Trash2 className="size-3.5" /></button></Td>}
@@ -141,7 +150,7 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
                       <Td colSpan={writable ? 2 : 1}>
                         {writable ? (
                           <span className="flex flex-wrap items-center gap-2 text-xs text-fg-3">
-                            Budget ₹ <Input type="number" min={0} step={10000} defaultValue={doc.inputs.monthlyBudget} key={doc.inputs.monthlyBudget} onBlur={(e) => Number(e.target.value) !== doc.inputs.monthlyBudget && setTotal(Math.max(0, Number(e.target.value)))} className="h-7 w-28" />
+                            Budget ₹ <Input type="number" min={0} step={10000} aria-label="Total monthly budget" defaultValue={doc.inputs.monthlyBudget} key={doc.inputs.monthlyBudget} onBlur={(e) => Number(e.target.value) !== doc.inputs.monthlyBudget && setTotal(Math.max(0, Number(e.target.value)))} className="h-7 w-28" />
                             <button onClick={() => edit({ budget: withAmounts([...doc.budget, { channel: "New channel", pct: 0, amount: 0, rationale: "Strategist addition" }], doc.inputs.monthlyBudget) })} className="inline-flex items-center gap-1 text-accent-text hover:underline"><Plus className="size-3" /> Add channel</button>
                           </span>
                         ) : null}
@@ -154,28 +163,26 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
             </div>
           </Card>
 
-          <Card>
-            <CardHeader title="Funnel" subtitle="Objective, channels and KPI per stage" />
+          <Card id="strategy-funnel"><CardHeader title="Funnel" subtitle="Objective, channels and KPI per stage" />
             <div className="grid gap-px bg-border border-t border-border sm:grid-cols-4">
               {doc.funnel.map((f, i) => (
                 <div key={f.stage} className="bg-surface p-3 space-y-1.5">
                   <p className="text-xs font-semibold text-fg">{i + 1}. {f.stage}</p>
                   <p className="text-xs text-fg-2"><EditableText value={f.objective} multiline disabled={!writable} onSave={(objective) => edit({ funnel: doc.funnel.map((x, j) => (j === i ? { ...x, objective } : x)) })} /></p>
-                  <div className="flex flex-wrap gap-1">{f.channels.map((c) => <Badge key={c}>{c}</Badge>)}</div>
-                  <p className="text-[11px] text-fg-3">KPI: {f.kpi}</p>
+                  <p className="text-xs text-fg-2">Channels: <EditableText value={f.channels.join(", ")} disabled={!writable} onSave={value=>edit({funnel:doc.funnel.map((x,j)=>j===i?{...x,channels:splitList(value)}:x)})}/></p>
+                  <p className="text-[11px] text-fg-3">KPI: <EditableText value={f.kpi} disabled={!writable} onSave={kpi=>edit({funnel:doc.funnel.map((x,j)=>j===i?{...x,kpi}:x)})}/></p>
                 </div>
               ))}
             </div>
           </Card>
 
           {doc.sections.map((s, si) => (
-            <SectionCard key={s.key} title={s.title} subtitle={`${s.items.length} lines`}>
+            <SectionCard key={s.key} id={`strategy-${s.title.toLowerCase().replaceAll(" ","-")}`} title={s.title} subtitle={`${s.items.length} lines`}>
               <EditableInsights items={s.items} disabled={!writable} onChange={(items) => edit({ sections: doc.sections.map((x, j) => (j === si ? { ...x, items } : x)) })} />
             </SectionCard>
           ))}
 
-          <Card>
-            <CardHeader title="Customer personas" action={writable && <Button size="xs" icon={<Plus className="size-3" />} onClick={() => edit({ personas: [...doc.personas, { name: "New persona", profile: "Describe the persona", pains: [], motivations: [], channels: [] }] })}>Add</Button>} />
+          <Card id="strategy-customer-personas"><CardHeader title="Customer personas" subtitle="Audience hypotheses for strategist validation" action={writable && <Button size="xs" icon={<Plus className="size-3" />} onClick={() => edit({ personas: [...doc.personas, { name: "New persona", profile: "Describe the persona", pains: [], motivations: [], channels: [] }] })}>Add</Button>} />
             <div className="grid gap-3 px-4 pb-4 sm:grid-cols-2">
               {doc.personas.map((p, i) => (
                 <div key={i} className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
@@ -192,8 +199,7 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
             </div>
           </Card>
 
-          <Card>
-            <CardHeader title="Testing roadmap" subtitle="One variable at a time; scale winners" action={writable && <Button size="xs" icon={<Plus className="size-3" />} onClick={() => edit({ testing: [...doc.testing, { week: "Week —", test: "New test", hypothesis: "Hypothesis" }] })}>Add</Button>} />
+          <Card id="strategy-testing-roadmap"><CardHeader title="Testing roadmap" subtitle="One variable at a time; scale winners" action={writable && <Button size="xs" icon={<Plus className="size-3" />} onClick={() => edit({ testing: [...doc.testing, { week: "Week —", test: "New test", hypothesis: "Hypothesis" }] })}>Add</Button>} />
             <Table>
               <thead><tr><Th className="w-28">When</Th><Th>Test</Th><Th>Hypothesis</Th>{writable && <Th className="w-8" />}</tr></thead>
               <tbody>
@@ -212,8 +218,7 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
             </Table>
           </Card>
 
-          <Card>
-            <CardHeader title="KPI framework" subtitle="Targets are estimates until validated with live data" action={writable && <Button size="xs" icon={<Plus className="size-3" />} onClick={() => edit({ kpis: [...doc.kpis, { metric: "New KPI", target: "—", stage: "Conversion" }] })}>Add</Button>} />
+          <Card id="strategy-kpi-framework"><CardHeader title="KPI framework" subtitle="Targets are estimates until validated with live data" action={writable && <Button size="xs" icon={<Plus className="size-3" />} onClick={() => edit({ kpis: [...doc.kpis, { metric: "New KPI", target: "—", stage: "Conversion" }] })}>Add</Button>} />
             <Table>
               <thead><tr><Th>Metric</Th><Th>Target</Th><Th>Stage</Th>{writable && <Th className="w-8" />}</tr></thead>
               <tbody>
@@ -248,6 +253,7 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
               })}
             </ol>
             <p className="px-4 pb-4 text-[11px] text-fg-3">Editing an approved strategy resets it to Draft. Regenerating bumps the version.</p>
+            {!!doc.reviewHistory?.length&&<ul className="space-y-2 border-t border-border p-4 text-xs text-fg-2">{doc.reviewHistory.slice(-6).reverse().map((entry,i)=><li key={`${entry.at}-${i}`}><span className="font-medium">{entry.status}</span> · <MemberAvatar id={entry.actorId} showName size={14}/><span className="block text-fg-3">{fmtDate(entry.at)}{entry.note?` · ${entry.note}`:""}</span></li>)}</ul>}
           </Card>
           <Card>
             <CardHeader title="Inputs" subtitle="What the agent was given" />
@@ -283,3 +289,6 @@ export function StrategyView({ doc, onBack }: { doc: StrategyDoc; onBack: () => 
     </div>
   );
 }
+
+
+

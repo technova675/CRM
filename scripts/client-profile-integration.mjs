@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import {createTestAccount,TestBrowser} from "./reportAuthFixture.mjs";
+import {clientProfileFixture} from "./clientProfileFixture.mjs";
+let account,other;
+try{
+ account=await createTestAccount();other=await createTestAccount();const a=new TestBrowser(),b=new TestBrowser();await a.signIn(account);await b.signIn(other);const initial=await(await a.request("/api/crm/library")).json();let revision=initial.revision;
+ const {library}=clientProfileFixture(account.id,initial.data);library.clients[0].contracts=[{id:"contract-a",title:"Confirmed scope",status:"Draft",value:3000,documentUrl:"https://example.com/contract"}];library.clients[0].documents=[{name:"Linked brief",kind:"Brief",addedAt:new Date().toISOString(),url:"https://example.com/brief"}];library.clients[0].reportCompanyId="explicit-report-company";
+ const save=async(data=library)=>{const response=await a.request("/api/crm/library",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({revision,operationId:crypto.randomUUID(),data})});if(response.ok)revision=(await response.clone().json()).revision;return response;};
+ const response=await save();assert.equal(response.status,200,JSON.stringify(await response.clone().json()));const laptop=new TestBrowser();await laptop.signIn(account);const saved=(await(await laptop.request("/api/crm/library")).json()).data;
+ for(const key of ["campaigns","ads","invoices","creatives","socialPosts","seoProjects","influencers","engagements","assets","reports","recommendations"])assert.equal(saved[key].length,library[key].length,key);assert.equal(saved.clients[0].contracts[0].title,"Confirmed scope");assert.equal(saved.clients[0].reportCompanyId,"explicit-report-company");assert.equal((await(await b.request("/api/crm/library")).json()).data.clients.length,0);
+ const legacy=structuredClone(saved);for(const key of ["campaigns","ads","invoices","creatives","socialPosts","seoProjects","influencers","engagements","assets","reports","recommendations","reportSchedules"])delete legacy[key];assert.equal((await save(legacy)).status,200);const preserved=(await(await a.request("/api/crm/library")).json()).data;assert.equal(preserved.campaigns.length,2);assert.equal(preserved.messages[0].body,"Historic lead communication A");
+ const invalid=structuredClone(preserved);invalid.clients[0].retainer=-1;assert.equal((await save(invalid)).status,400);invalid.clients[0].retainer=0;invalid.clients[0].documents[0].url="javascript:alert(1)";assert.equal((await save(invalid)).status,400);
+ console.log("PASS: client 360 module storage, contacts/contracts/document links/report mapping, same-login cross-laptop persistence, account isolation, older-browser preservation and client validation.");
+}finally{if(account)await account.remove();if(other)await other.remove();}

@@ -10,14 +10,14 @@ import { cn, compactMoney, fmtDate, fmtDateTime, fmtShort, money, pct, relTime, 
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, Input, MemberAvatar, PageHeader, Progress, Select, StatusBadge, Table, Tabs, Td, Th } from "@/components/ui";
 import { aggregateMetrics, AreaTrend, totals } from "@/components/charts";
 import { toast } from "@/components/shell/toast";
-import { Client360 } from "@/components/clients/Client360";
+import { Client360 } from "@/components/clients/ClientOverview";
 import { ClientInsights } from "@/components/clients/ClientInsights";
 import { KnowledgeEditor } from "@/components/clients/KnowledgeEditor";
 import { CreativeTab, InfluencersTab, SeoTab, SocialTab, StrategyTab } from "@/components/clients/ModuleTabs";
-import { useClientHealth } from "@/components/clients/useClientHealth";
+import {clientProfile} from "@/lib/domain/clientProfile";
 import { AssetLibrary } from "@/components/documents/AssetLibrary";
 
-type Tab = "overview" | "insights" | "onboarding" | "campaigns" | "creative" | "social" | "seo" | "influencers" | "strategy" | "tasks" | "communication" | "documents" | "reports" | "billing" | "meetings" | "knowledge";
+type Tab = "overview" | "profile" | "insights" | "onboarding" | "campaigns" | "creative" | "social" | "seo" | "influencers" | "strategy" | "tasks" | "communication" | "documents" | "reports" | "billing" | "meetings" | "knowledge";
 
 const FLOW = ["Deal Won", "Send onboarding form", "Collect business info", "Website & social links", "Ad account access", "Brand assets", "Tracking requirements", "Internal tasks", "Assign team", "Create campaign", "Begin execution"];
 
@@ -62,7 +62,7 @@ function Overview({ client, internal }: { client: Client; internal: boolean }) {
           <Info label="Contract end">{fmtDate(client.contractEnd)}</Info>
           <Info label="Client since">{fmtDate(client.createdAt)}</Info>
           <Info label="Monthly retainer">{money(client.retainer)}</Info>
-          <Info label="Annual value">{compactMoney(client.retainer * 12)}</Info>
+          <Info label="Annualized retainer estimate">{compactMoney(client.retainer * 12)}</Info>
           {fromDeal && (
             <Info label="Source deal">
               <Link href={`/pipeline?deal=${fromDeal.id}`} className="text-accent-text hover:underline">
@@ -277,13 +277,9 @@ function Campaigns({ client }: { client: Client }) {
 }
 
 function Tasks({ client, internal }: { client: Client; internal: boolean }) {
-  const all = useCRM((s) => s.tasks);
+  const state=useCRM();
   const updateTask = useCRM((s) => s.updateTask);
-  const campaigns = useCRM((s) => s.campaigns);
-  const tasks = useMemo(() => {
-    const campIds = new Set(campaigns.filter((c) => c.clientId === client.id).map((c) => c.id));
-    return all.filter((t) => (t.related?.type === "client" && t.related.id === client.id) || (t.related?.type === "campaign" && campIds.has(t.related.id))).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  }, [all, campaigns, client.id]);
+  const tasks=useMemo(()=>clientProfile(client,state).tasks.sort((a,b)=>a.dueDate.localeCompare(b.dueDate)),[client,state]);
   if (!tasks.length) return <Card><EmptyState title="No tasks" /></Card>;
   return (
     <Card>
@@ -331,9 +327,8 @@ function Tasks({ client, internal }: { client: Client; internal: boolean }) {
 }
 
 function Communication({ client }: { client: Client }) {
-  const conversations = useCRM((s) => s.conversations);
-  const messages = useCRM((s) => s.messages);
-  const convs = useMemo(() => conversations.filter((c) => c.clientId === client.id), [conversations, client.id]);
+  const state=useCRM(),profile=useMemo(()=>clientProfile(client,state),[client,state]);
+  const messages=profile.messages,convs=profile.conversations;
   if (!convs.length) return <Card><EmptyState title="No conversations yet" /></Card>;
   return (
     <div className="space-y-3">
@@ -497,8 +492,8 @@ function Billing({ client }: { client: Client }) {
 }
 
 function Meetings({ client }: { client: Client }) {
-  const all = useCRM((s) => s.meetings);
-  const meetings = useMemo(() => all.filter((m) => m.clientId === client.id).sort((a, b) => b.startsAt.localeCompare(a.startsAt)), [all, client.id]);
+  const state=useCRM();
+  const meetings=useMemo(()=>clientProfile(client,state).meetings.sort((a,b)=>b.startsAt.localeCompare(a.startsAt)),[client,state]);
   if (!meetings.length) return <Card><EmptyState title="No meetings" /></Card>;
   return (
     <Card>
@@ -530,7 +525,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   const [tab, setTab] = useState<Tab>("overview");
   const isClient = me.role === "client";
   const internal = !isClient && can(me.role, "clients", "write");
-  const health = useClientHealth(client);
+
 
   if (!client || (isClient && me.clientId !== id))
     return (
@@ -545,7 +540,8 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   const done = client.onboarding.filter((o) => o.done).length;
   const staffCan = (m: Parameters<typeof can>[1]) => !isClient && can(me.role, m);
   const tabs: { value: Tab; label: string }[] = [
-    { value: "overview", label: "Overview" },
+    { value: "overview", label: "360° overview" },
+    { value:"profile",label:"Profile settings" },
     ...(isClient ? [] : [{ value: "insights" as Tab, label: "AI insights" }]),
     { value: "onboarding", label: `Onboarding ${done}/${client.onboarding.length}` },
     { value: "campaigns", label: "Campaigns" },
@@ -573,15 +569,9 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       <PageHeader
         icon={<Avatar name={client.company} size={32} className="rounded-lg" />}
         title={client.company}
-        description={`${client.industry} · ${client.location} · client since ${fmtShort(client.createdAt)}`}
+        description={`${client.industry||"Industry not recorded"} · ${client.location||"Location not recorded"} · client since ${fmtShort(client.createdAt)}`}
         actions={
           <>
-            {!isClient && health && (
-              <button onClick={() => setTab("insights")} title="Computed health score — see AI insights" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs hover:bg-surface-2">
-                <span className="text-fg-3">Health</span>
-                <span className={cn("font-semibold tabular-nums", health.score >= 75 ? "text-success" : health.score >= 55 ? "text-warning" : "text-danger")}>{health.score}</span>
-              </button>
-            )}
             {!isClient && <StatusBadge status={client.health} />}
             <MemberAvatar id={client.accountManagerId} showName />
           </>
@@ -590,13 +580,14 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       <div className="mb-4">
         <Tabs value={tab} onChange={setTab} tabs={tabs} />
       </div>
+      {tab!=="overview"&&<Button className="mb-4" onClick={()=>setTab("overview")}>Back to 360° overview</Button>}
       <div className="animate-in" key={tab}>
         {tab === "overview" && (
           <div className="space-y-4">
-            <Client360 client={client} isClient={isClient} onTab={(t) => setTab(t as Tab)} />
-            <Overview client={client} internal={internal} />
+            <Client360 key={client.id} client={client} isClient={isClient} onTab={(t) => setTab(t as Tab)} />
           </div>
         )}
+        {tab === "profile"&&<Overview client={client} internal={internal}/>}
         {tab === "insights" && !isClient && <ClientInsights client={client} writable={internal} />}
         {tab === "creative" && <CreativeTab client={client} isClient={isClient} />}
         {tab === "social" && !isClient && <SocialTab client={client} />}

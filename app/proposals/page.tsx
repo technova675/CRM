@@ -12,6 +12,7 @@ import { AIBadge, Badge, Button, Card, CardHeader, Drawer, EmptyState, PageHeade
 import { ProposalGenerator } from "@/components/proposals/ProposalGenerator";
 import { ProposalWorkflow } from "@/components/proposals/ProposalWorkflow";
 import { proposalContractValue, proposalMonthly, proposalOneTime, proposalTotal } from "@/components/proposals/workflow";
+import styles from "@/components/proposals/proposal.module.css";
 
 function ProposalsInner() {
   const router = useRouter();
@@ -51,7 +52,7 @@ function ProposalsInner() {
   if (me.role === "client") return <Readonly>Proposals are managed by the Adbibe team.</Readonly>;
 
   return (
-    <div>
+    <div className={styles.page}>
       <PageHeader
         title={<>Proposals <AIBadge>Generator</AIBadge></>}
         description="AI-generated proposals from discovery notes, strategy and your price book — reviewed internally before they reach the client."
@@ -60,7 +61,7 @@ function ProposalsInner() {
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="In internal review" value={stats.review} hint={`${stats.awaitingApproval} awaiting approval · mode ${mode}`} icon={<ShieldCheck className="size-3.5" />} tone={stats.awaitingApproval ? "warning" : undefined} />
-        <Stat label="Out with clients" value={stats.openCount} hint={`${compactMoney(stats.openValue)} year-1 value`} icon={<Send className="size-3.5" />} />
+        <Stat label="Recorded as shared" value={stats.openCount} hint={`${compactMoney(stats.openValue)} proposed value`} icon={<Send className="size-3.5" />} />
         <Stat label="Acceptance rate" value={pct(stats.acceptRate, 0)} hint="accepted / decided" icon={<TrendingUp className="size-3.5" />} tone="success" />
         <Stat label="Accepted value" value={compactMoney(stats.acceptedValue)} hint={`${counts.Accepted ?? 0} proposals`} icon={<CheckCircle2 className="size-3.5" />} tone="success" />
       </div>
@@ -98,7 +99,7 @@ function ProposalsInner() {
                 return (
                   <tr key={p.id} className={cn("cursor-pointer hover:bg-surface-2/60", p.id === openId && "bg-accent-soft/40")} onClick={() => setOpen(p.id)}>
                     <Td>
-                      <p className="font-medium">{p.company}</p>
+                      <button className="text-left font-medium hover:underline" onClick={event=>{event.stopPropagation();setOpen(p.id);}} aria-label={`Open proposal: ${p.company}`}>{p.company}</button>
                       <p className="text-xs text-fg-3">{p.title}{p.strategySummary ? " · AI" : ""}</p>
                     </Td>
                     <Td className="hidden md:table-cell text-xs text-fg-2 max-w-56 truncate">{[...new Set(p.lines.map((l) => l.service))].join(", ")}</Td>
@@ -121,7 +122,7 @@ function ProposalsInner() {
           <div className="space-y-5">
             <ProposalWorkflow proposal={open} canWrite={canWrite} />
             <Card>
-              <CardHeader title="Investment" subtitle={`Year-1 contract value ${money(proposalContractValue(open))}`} />
+              <CardHeader title="Investment" subtitle={`${open.durationMonths??12}-month proposed value ${money(proposalContractValue(open))}`} />
               <div className="divide-y divide-border border-t border-border text-[13px]">
                 {open.lines.map((l, i) => (
                   <div key={i} className="flex items-center justify-between gap-2 px-4 py-2">
@@ -138,6 +139,9 @@ function ProposalsInner() {
                 <p className="text-[13px] text-fg-2">{open.strategySummary}</p>
               </div>
             )}
+            {open.generationSource&&<p className="text-xs text-fg-2">Generation: {open.generationSource}</p>}
+            {open.timeline?.length?<section><h3 className="mb-2 text-sm font-semibold">Proposed timeline</h3><ol className="space-y-2">{open.timeline.map((t,i)=><li key={i} className="rounded-lg border border-border p-3 text-sm"><b>{t.phase} · {t.weeks}</b><p className="mt-1 text-fg-2">{t.detail}</p></li>)}</ol></section>:null}
+            {open.terms?.length?<section><h3 className="mb-2 text-sm font-semibold">Commercial terms</h3><ul className="list-disc pl-5 text-sm">{open.terms.map((term,i)=><li key={i}>{term}</li>)}</ul></section>:null}
             {open.discoveryNotes && (
               <div>
                 <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-3">Discovery notes <Badge className="ml-1">Internal</Badge></p>
