@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { useCRM } from "@/lib/store";
 import { allocateTeamCost, clientProfitability, EXPENSE_WINDOW_DAYS, forecast, mrr, monthlySeries, projectProfitability } from "@/lib/ai/finance";
+import { billingStatus,balance } from "@/lib/domain/billing";
+import { deadlineDay } from "@/lib/domain/projectTasks";
 import { DAY } from "@/lib/utils";
 
 // Shared derived finance data. Selects raw slices only (Zustand v5 rule) and derives with useMemo.
@@ -32,9 +34,9 @@ export function useFinance() {
     const recurring = mrr(clients, now);
     const deliveryCost = profit.reduce((a, p) => a + p.cost, 0);
     const grossMargin = profit.reduce((a, p) => a + p.margin, 0);
-    const open = invoices.filter((i) => i.status !== "Paid");
+    const open = invoices.filter(i=>balance(i)>0);
     const outstanding = open.reduce((a, i) => a + i.amount - i.paid, 0);
-    const overdueList = invoices.filter((i) => i.status === "Overdue");
+    const overdueList = invoices.filter(i=>billingStatus(i,deadlineDay(now))==="Overdue");
     const overdue = overdueList.reduce((a, i) => a + i.amount - i.paid, 0);
     const operatingProfit = grossMargin - benchCost - overheadExpenses;
     return {

@@ -3,12 +3,11 @@
 import { File, FileArchive, FileImage, FileSpreadsheet, FileText, FileVideo, Presentation } from "lucide-react";
 import { useCRM } from "@/lib/store";
 import { ASSET_FOLDERS, type Asset, type AssetFolder, type Client } from "@/lib/types";
-import { cn, uid } from "@/lib/utils";
+import { flushCRMChanges,refreshCRMChanges } from "@/lib/crmSync";
+import { MAX_LIBRARY_ASSET_BYTES } from "@/lib/domain/assetLibrary";
+import { cn } from "@/lib/utils";
 
-// Helpers + actions for the Documents & Assets module. Only metadata is ever persisted
-// (name, extension, size) — never file contents.
-
-export type LibraryItem = Asset & { legacy?: boolean };
+export type LibraryItem = Asset & { legacy?: boolean; legacyUrl?: string };
 
 const S = () => useCRM.getState();
 
@@ -76,40 +75,33 @@ export function legacyItems(clients: Client[]): LibraryItem[] {
       updatedAt: d.addedAt,
       clientVisible: true,
       legacy: true,
+      legacyUrl: d.url,
     })),
   );
 }
 
-export function uploadFiles(files: { name: string; size: number }[], clientId: string | undefined, folder?: AssetFolder) {
-  const me = S().currentUserId;
-  const now = new Date().toISOString();
-  let added = 0;
-  let versioned = 0;
-  files.forEach((f) => {
-    const target = folder ?? guessFolder(f.name);
-    const sizeKb = Math.max(1, Math.ceil(f.size / 1024));
-    const existing = S().assets.find((a) => a.clientId === clientId && a.name === f.name);
-    if (existing) {
-      addVersion(existing.id, "Re-uploaded with the same name", sizeKb);
-      versioned++;
-      return;
-    }
-    const asset: Asset = { id: uid("as"), clientId, name: f.name, folder: target, ext: extOf(f.name), sizeKb, tags: [], versions: [{ v: 1, at: now, by: me, note: "Initial upload" }], uploadedBy: me, createdAt: now, updatedAt: now, clientVisible: false };
-    S().upsert("assets", asset);
-    S().log({ actor: "human", actorId: me, entity: "document", entityId: asset.id, action: "Uploaded asset", detail: `${f.name} → ${target}${clientId ? ` · ${S().clients.find((c) => c.id === clientId)?.company ?? ""}` : " · Agency library"}` });
-    added++;
-  });
-  return { added, versioned };
+export async function uploadAsset(file:File,options:{clientId?:string;folder:AssetFolder;assetId?:string;expected?:number;note?:string}) {
+  if(!file.size||file.size>MAX_LIBRARY_ASSET_BYTES)throw new Error("Choose a file between 1 byte and 100 MB.");
+  await flushCRMChanges();
+  const response=await fetch("/api/documents/storage",{method:"POST",headers:{
+    "Content-Type":"application/octet-stream","x-asset-meta":encodeURIComponent(JSON.stringify({...options,name:file.name})),
+  },body:file,signal:AbortSignal.timeout(175000)});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error??"Upload failed.");
+  await refreshCRMChanges();
+  return data as {id:string;version:number};
 }
 
-export function addVersion(id: string, note: string, sizeKb?: number) {
-  const a = S().assets.find((x) => x.id === id);
-  if (!a) return;
-  const me = S().currentUserId;
-  const now = new Date().toISOString();
-  const v = (a.versions[a.versions.length - 1]?.v ?? 0) + 1;
-  S().patch("assets", id, { versions: [...a.versions, { v, at: now, by: me, note: note || `Version ${v}` }], updatedAt: now, ...(sizeKb ? { sizeKb } : {}) });
-  S().log({ actor: "human", actorId: me, entity: "document", entityId: id, action: "Uploaded new version", detail: `${a.name} · v${v}${note ? ` — ${note}` : ""}`, before: `v${v - 1}`, after: `v${v}` });
+export function assetUrl(item:LibraryItem,version?:number) {
+  if(item.legacy){
+    try{
+      const url=new URL(item.legacyUrl??"");
+      if(url.protocol==="https:"&&!url.username&&!url.password)return url.href;
+    }catch{}
+    return;
+  }
+  const available=version===undefined?item.versions.some(v=>v.file):item.versions.some(v=>v.v===version&&v.file);
+  if(available)return "/api/documents/storage?asset="+encodeURIComponent(item.id)+(version===undefined?"":"&version="+version);
 }
 
 export function setTags(id: string, tags: string[]) {
@@ -122,6 +114,10 @@ export function setClientVisible(id: string, v: boolean) {
 
 export function moveFolder(id: string, folder: AssetFolder) {
   S().patch("assets", id, { folder }, { entity: "document", action: "Moved asset", field: "folder" });
+}
+
+export function archiveAsset(id:string,archived:boolean) {
+  S().patch("assets",id,{archivedAt:archived?new Date().toISOString():undefined},{entity:"document",action:archived?"Archived asset":"Restored asset",field:"archivedAt"});
 }
 
 export function deleteAsset(id: string) {

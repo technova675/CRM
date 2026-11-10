@@ -1,4 +1,5 @@
 import "server-only";
+import {reserveTenantUsage} from "../tenantServer";
 import type { LanguageModel } from "ai";
 import { createGroq } from "@ai-sdk/groq";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
@@ -33,7 +34,8 @@ export const AI_MODEL: LanguageModel = modelFor(AI_PROVIDER);
 // Free tiers hit rate limits often: when the primary provider fails, retry once on the next
 // provider that has a key. The label tells the caller which model actually answered.
 const FALLBACK = PROVIDERS.find((p) => p !== AI_PROVIDER && hasKey[p]);
-export async function withModelFallback<T>(run: (model: LanguageModel, label: string) => Promise<T>): Promise<T> {
+export async function withModelFallback<T>(owner:string,run: (model: LanguageModel, label: string) => Promise<T>): Promise<T> {
+  await reserveTenantUsage(owner,"aiCredits",1);
   try {
     return await run(AI_MODEL, `${AI_PROVIDER} · ${AI_MODEL_ID}`);
   } catch (e) {

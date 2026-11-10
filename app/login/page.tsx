@@ -26,12 +26,21 @@ export default function LoginPage() {
       if (!response.ok) throw new Error(result.error ?? "Could not sign in.");
       setPassword("");
       if (result.confirmationRequired) { setNotice("Check your email to confirm your account, then return here to sign in."); setMode("signin"); return; }
-      await refresh();
+      const account=await refresh();
       notifyAuthChange();
       const requested = new URLSearchParams(window.location.search).get("next");
-      router.replace(safeReturnPath(requested)); router.refresh();
+      router.replace(account?.kind==="staff"?"/staff":safeReturnPath(requested)); router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not connect. Please retry."); }
     finally { setBusy(false); }
+  }
+  async function google(){
+    setBusy(true);setError("");
+    try{
+      const response=await fetch("/api/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"google",next:new URLSearchParams(window.location.search).get("next")??undefined})});
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error);
+      window.location.assign(data.url);
+    }catch(error){setError(error instanceof Error?error.message:"Google sign-in could not start.");setBusy(false);}
   }
   return <main className="grid min-h-dvh lg:grid-cols-2">
     <section className="relative hidden flex-col justify-between overflow-hidden lg:flex bg-[#151e38] px-8 py-10 text-white sm:px-14 lg:p-16">
@@ -51,6 +60,8 @@ export default function LoginPage() {
         <Button type="submit" variant="primary" className="h-11 w-full" loading={busy}>{mode === "signin" ? "Sign in" : "Create account"}<ArrowRight size={16} aria-hidden="true" /></Button>
       </form>
       <p className="mt-6 text-center text-sm text-fg-2">{mode === "signin" ? "New here?" : "Already have an account?"} <button disabled={busy} className="min-h-11 font-medium text-accent-text hover:underline" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setNotice(""); }}>{mode === "signin" ? "Create an account" : "Sign in"}</button></p>
+      {process.env.NEXT_PUBLIC_GOOGLE_OAUTH==="true"&&<Button className="mt-3 min-h-11 w-full" disabled={busy} onClick={()=>void google()}>Continue with Google</Button>}
+      <Button href="/portal/login" variant="ghost" className="mt-3 min-h-11 w-full">Client portal sign-in</Button>
     </div></section>
   </main>;
 }

@@ -10,7 +10,7 @@ export async function ownedLibrary(owner: string) {
   const [row] = await supabaseRequest<{data:CRMLibrary}[]>("crm_libraries",{query:{owner_id:`eq.${owner}`,select:"data",limit:"1"}});
   return row?.data;
 }
-export async function boundedJSON(req: Request, limit = 32000):Promise<unknown> {
+export async function boundedJSON(req: Pick<Request, "body">, limit = 32000):Promise<unknown> {
   const reader=req.body?.getReader();if(!reader)throw new Error("Missing request body");
   let bytes=0,text="";const decoder=new TextDecoder();
   while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.byteLength;if(bytes>limit){await reader.cancel();throw new Error("Request too large");}text+=decoder.decode(part.value,{stream:true});}

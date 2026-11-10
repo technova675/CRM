@@ -1,7 +1,7 @@
 import type { Role } from "./types";
 
-// Module-level RBAC. The server-side equivalent should enforce the same matrix
-// in API handlers / row-level security once a database is attached.
+// Module access policy for agency roles.
+// Agency sign-in currently authenticates the account owner; client scope is enforced separately.
 export const MODULES = [
   "command", "dashboard",
   "leads", "research", "outreach", "inbox", "pipeline", "proposals", "meetings",
@@ -81,7 +81,8 @@ export const DEFAULT_PERMISSIONS: Record<Role, Record<Module, Access>> = {
 };
 
 // Runtime overrides edited in Team → Permissions. Kept module-level so `can()` stays a pure function call.
-let overrides: Partial<Record<Role, Partial<Record<Module, Access>>>> = {};
+export type PermissionOverrides = Partial<Record<Role, Partial<Record<Module, Access>>>>;
+let overrides: PermissionOverrides = {};
 export const setPermissionOverrides = (o: typeof overrides) => {
   overrides = o ?? {};
 };
@@ -99,5 +100,8 @@ export const can = (role: Role, m: Module, need: "read" | "write" = "read") => {
 
 export const moduleFromPath = (path: string): Module => {
   const seg = path.split("/")[1] || "dashboard";
+  if (seg === "audit") return "settings";
+  if (seg === "approvals") return "automations";
+  if (seg === "knowledge") return "documents";
   return ((MODULES as readonly string[]).includes(seg) ? seg : "dashboard") as Module;
 };

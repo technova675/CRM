@@ -9,7 +9,7 @@ import { cn, fmtShort, relTime } from "@/lib/utils";
 import { Badge, Button, Card, EmptyState, MemberAvatar, SearchInput, Segmented, Select, Table, Td, Th } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import { AssetDrawer } from "./AssetDrawer";
-import { FileIcon, fmtSize, legacyItems, uploadFiles, type LibraryItem } from "./assets";
+import { FileIcon, fmtSize, legacyItems, guessFolder, uploadAsset, assetUrl, type LibraryItem } from "./assets";
 
 type Scope = string; // client id | "agency" | "all"
 
@@ -27,18 +27,22 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
   const [view, setView] = useState<"grid" | "list">(isClient ? "list" : "grid");
   const [openId, setOpenId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [archive,setArchive]=useState(false);
+  const [uploading,setUploading]=useState(false);
+  const [uploadError,setUploadError]=useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const legacy = useMemo(() => legacyItems(clients), [clients]);
   const inScope = useMemo(() => {
     const all: LibraryItem[] = [...assets, ...legacy];
     return all.filter((a) => {
+      if(!!a.archivedAt!==archive)return false;
       if (isClient) return a.clientId === me.clientId && (a.clientVisible || a.legacy);
       if (scope === "all") return true;
       if (scope === "agency") return !a.clientId;
       return a.clientId === scope;
     });
-  }, [assets, legacy, isClient, me.clientId, scope]);
+  }, [assets, legacy, isClient, me.clientId, scope,archive]);
 
   const counts = useMemo(() => {
     const m: Record<string, number> = {};
@@ -61,23 +65,30 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
 
   const open = openId ? [...assets, ...legacy].find((a) => a.id === openId) : undefined;
   const clientName = (id?: string) => (id ? clients.find((c) => c.id === id)?.company ?? "—" : "Agency");
-  const canUpload = writable && scope !== "all";
+  const canUpload = writable && scope !== "all"&&!archive&&!uploading;
 
-  const handleFiles = (list: FileList | null) => {
-    if (!list?.length) return;
-    if (!canUpload) {
-      toast("Choose where to upload", "Select a client or the Agency library first.", "warning");
-      return;
-    }
-    const res = uploadFiles(
-      Array.from(list).map((f) => ({ name: f.name, size: f.size })),
-      scope === "agency" ? undefined : scope,
-      folder === "all" ? undefined : folder,
-    );
-    toast(`${res.added} file${res.added === 1 ? "" : "s"} added${res.versioned ? `, ${res.versioned} new version${res.versioned > 1 ? "s" : ""}` : ""}`, "Metadata saved — connect cloud storage to keep the actual files.");
+  const handleFiles = async (list: FileList | null) => {
+    if (!list?.length || !canUpload) return;
+    const files=Array.from(list);
+    setUploading(true);setUploadError("");
+    let done=0;
+    const errors:string[]=[];
+    try {
+      for(const file of files){
+        try {
+          await uploadAsset(file,{clientId:scope==="agency"?undefined:scope,folder:folder==="all"?guessFolder(file.name):folder});
+          done++;
+        }catch(error){errors.push(file.name+" · "+(error instanceof Error?error.message:"Upload failed."));}
+      }
+      if(done)toast("Files saved",done+" uploaded");
+      if(errors.length)setUploadError(errors.join("\n"));
+    }finally{setUploading(false);}
   };
-
-  const download = () => toast("File storage not connected", "Downloads are available once cloud storage is connected. Ask your account manager for this file.", "info");
+  const download=(item:LibraryItem)=>{
+    const url=assetUrl(item);
+    if(url)window.location.assign(url);
+    else toast("No stored file for this record",undefined,"info");
+  };
 
   return (
     <div
@@ -93,9 +104,9 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
         if (!canUpload) return;
         e.preventDefault();
         setDragging(false);
-        handleFiles(e.dataTransfer.files);
+        void handleFiles(e.dataTransfer.files);
       }}
-      className="relative"
+      className="relative min-w-0"
     >
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-xl border-2 border-dashed border-accent bg-accent-soft/80">
@@ -108,7 +119,7 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
 
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
         {!isClient && !fixedClientId && (
-          <Select value={scope} onChange={(e) => { setScope(e.target.value); setTagFilter([]); }} className="sm:w-52">
+          <Select aria-label="Asset library" value={scope} onChange={(e) => { setScope(e.target.value); setTagFilter([]); }} className="min-h-11 sm:w-52">
             <option value="all">All libraries</option>
             <option value="agency">Agency library</option>
             {clients.map((c) => (
@@ -118,7 +129,7 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
             ))}
           </Select>
         )}
-        <SearchInput value={q} onChange={setQ} placeholder="Search names and tags…" className="sm:w-64" />
+        <SearchInput value={q} onChange={setQ} placeholder="Search filenames and tags…" className="sm:w-64" />
         <div className="flex items-center gap-2 sm:ml-auto">
           <Segmented
             value={view}
@@ -130,8 +141,8 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
           />
           {writable && (
             <>
-              <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} />
-              <Button variant="primary" icon={<Upload className="size-3.5" />} onClick={() => (canUpload ? fileRef.current?.click() : toast("Choose where to upload", "Select a client or the Agency library first.", "warning"))}>
+              <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { void handleFiles(e.target.files); e.target.value = ""; }} />
+              <Button className="min-h-11" disabled={uploading||archive} loading={uploading} variant="primary" icon={<Upload className="size-3.5" />} onClick={() => (canUpload ? fileRef.current?.click() : toast("Choose where to upload", "Select a client or the Agency library first.", "warning"))}>
                 Upload
               </Button>
             </>
@@ -139,14 +150,16 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[200px_1fr]">
+      {writable&&<div className="mb-3 flex flex-wrap items-center gap-2"><Button className="min-h-11" onClick={()=>setArchive(value=>!value)}>{archive?"Show active files":"Show archived files"}</Button><span className="text-sm text-fg-2">{uploading?"Saving files to private storage…":"Up to 100 MB per file"}</span></div>}
+      {uploadError&&<p role="alert" className="mb-3 whitespace-pre-wrap break-words text-sm text-danger">{uploadError}</p>}
+      <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
         <Card className="h-fit p-1.5">
-          <nav className="flex gap-1 overflow-x-auto lg:flex-col">
+          <nav aria-label="Asset folders" className="flex gap-1 overflow-x-auto lg:flex-col">
             {[{ key: "all" as const, label: "All files", n: inScope.length }, ...ASSET_FOLDERS.map((f) => ({ key: f, label: f, n: counts[f] ?? 0 }))].map((f) => (
               <button
                 key={f.key}
-                onClick={() => setFolder(f.key)}
-                className={cn("flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition", folder === f.key ? "bg-accent-soft font-medium text-accent-text" : "text-fg-2 hover:bg-surface-2")}
+                onClick={() => setFolder(f.key)} aria-pressed={folder===f.key}
+                className={cn("flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] transition", folder === f.key ? "bg-accent-soft font-medium text-accent-text" : "text-fg-2 hover:bg-surface-2")}
               >
                 {f.key === "all" ? <Folders className="size-3.5" /> : <FolderOpen className="size-3.5" />}
                 <span className="flex-1 whitespace-nowrap">{f.label}</span>
@@ -180,13 +193,13 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
               <EmptyState
                 icon={<FolderOpen className="size-5" />}
                 title={inScope.length ? "No files match" : isClient ? "No shared files yet" : "This library is empty"}
-                description={isClient ? "Your account team will share files here." : canUpload ? "Drag & drop files here or use Upload. Only file metadata is stored." : "Pick a client or the Agency library to upload."}
+                description={isClient ? "Your account team will share files here." : canUpload ? "Drag files here or use Upload to save them to the library." : "Pick a client or the Agency library to upload."}
               />
             </Card>
           ) : view === "grid" ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
               {items.map((a) => (
-                <button key={a.id} onClick={() => (isClient ? download() : setOpenId(a.id))} className="text-left">
+                <button key={a.id} onClick={() => (isClient ? download(a) : setOpenId(a.id))} className="text-left">
                   <Card className="h-full p-3 transition hover:border-border-strong hover:shadow-pop">
                     <div className="flex items-start justify-between gap-2">
                       <FileIcon ext={a.ext} />
@@ -256,7 +269,7 @@ export function AssetLibrary({ fixedClientId, initialScope }: { fixedClientId?: 
                       </Td>
                       {isClient && (
                         <Td className="text-right">
-                          <Button size="xs" variant="ghost" icon={<Download className="size-3" />} onClick={download}>
+                          <Button size="xs" variant="ghost" icon={<Download className="size-3" />} onClick={()=>download(a)}>
                             Download
                           </Button>
                         </Td>

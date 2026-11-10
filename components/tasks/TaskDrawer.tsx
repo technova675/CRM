@@ -6,6 +6,7 @@ import { useCRM, useMe } from "@/lib/store";
 import type { Priority, Task, TaskRelatedType, TaskStatus } from "@/lib/types";
 import { cn, fmtDateTime, fmtShort, isPast, relTime, uid } from "@/lib/utils";
 import { Badge, Button, Drawer, Field, Input, MemberAvatar, Select, StatusBadge, Textarea } from "@/components/ui";
+import {deadlineDay,taskAttachmentUrl,taskDependencyIssue} from "@/lib/domain/projectTasks";
 import { toast } from "@/components/shell/toast";
 import { REL_TYPES, useRelatedIndex } from "./related";
 
@@ -29,7 +30,7 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
     description: task?.description ?? "",
     assigneeId: task?.assigneeId ?? defaults?.assigneeId ?? me.id,
     priority: task?.priority ?? ("Medium" as Priority),
-    dueDate: (task?.dueDate ?? new Date(Date.now() + 2 * 86400000).toISOString()).slice(0, 10),
+    dueDate: deadlineDay(task?.dueDate ?? Date.now() + 2 * 86400000),
     status: task?.status ?? ("Todo" as TaskStatus),
     relType: (task?.related?.type ?? defaults?.related?.type ?? "") as TaskRelatedType | "",
     relId: task?.related?.id ?? defaults?.related?.id ?? "",
@@ -40,16 +41,17 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
   }));
   const [comment, setComment] = useState("");
   const [attachName, setAttachName] = useState("");
+  const [attachUrl, setAttachUrl] = useState("");
   const [depPick, setDepPick] = useState("");
 
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
   const deps = f.dependsOn.map((id) => byId.get(id)).filter((t): t is Task => !!t);
   const blocking = deps.filter((d) => d.status !== "Done");
-  // Candidates: open tasks, not this one, not tasks that already depend on this one (avoids simple cycles).
+  // The save action checks the full dependency chain.
   const depCandidates = useMemo(() => {
     const project = f.projectId;
     return tasks
-      .filter((t) => t.id !== task?.id && !f.dependsOn.includes(t.id) && !(t.dependsOn ?? []).includes(task?.id ?? "__"))
+      .filter((t) => t.id !== task?.id && !f.dependsOn.includes(t.id))
       .sort((a, b) => Number(!!project && b.projectId === project) - Number(!!project && a.projectId === project) || Number(b.related?.id === f.relId) - Number(a.related?.id === f.relId))
       .slice(0, 150);
   }, [tasks, task, f.dependsOn, f.projectId, f.relId]);
@@ -58,12 +60,16 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
 
   const save = () => {
     if (!f.title.trim()) return toast("Title is required", undefined, "warning");
+    if (!f.dueDate || !Number.isFinite(Date.parse(f.dueDate))) return toast("Choose a valid deadline", undefined, "warning");
+    if (!team.some(m=>m.id===f.assigneeId&&m.role!=="client"&&m.status==="active")) return toast("Choose an active team member",undefined,"warning");
+    const issue=taskDependencyIssue({id:task?.id??"",dependsOn:f.dependsOn,status:f.status},byId);
+    if(issue)return toast(issue,undefined,"warning");
     const payload = {
       title: f.title,
       description: f.description,
       assigneeId: f.assigneeId,
       priority: f.priority,
-      dueDate: new Date(`${f.dueDate}T18:00:00`).toISOString(),
+      dueDate: new Date(`${f.dueDate}T18:00:00+05:30`).toISOString(),
       status: f.status,
       related: f.relType && f.relId ? { type: f.relType, id: f.relId } : undefined,
       recurring: f.recurring,
@@ -73,8 +79,7 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
     };
     if (task) updateTask(task.id, payload);
     else addTask({ ...payload, comments: [] });
-    if (f.status === "Done" && blocking.length) toast("Completed with open dependencies", `${blocking.length} dependency task(s) are not done yet.`, "warning");
-    else toast(task ? "Task updated" : "Task created", f.recurring !== "none" ? `Repeats ${f.recurring} — the next one is created when this is completed.` : undefined);
+    toast(task ? "Task updated" : "Task created", f.recurring !== "none" ? `Repeats ${f.recurring} — the next one is created when this is completed.` : undefined);
     onClose();
   };
 
@@ -94,7 +99,7 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
       footer={
         writable ? (
           <>
-            {task && <Button variant="ghost" className="mr-auto text-danger" icon={<Trash2 className="size-3.5" />} onClick={() => { deleteTask(task.id); toast("Task deleted"); onClose(); }}>Delete</Button>}
+            {task && <Button variant="ghost" className="mr-auto text-danger" icon={<Trash2 className="size-3.5" />} onClick={() => { if(dependents.length){toast("Remove this task from its dependents first",undefined,"warning");return;} if(window.confirm("Delete this task?")){deleteTask(task.id);toast("Task deleted");onClose();} }}>Delete</Button>}
             <Button onClick={onClose}>Cancel</Button>
             <Button variant="primary" onClick={save}>{task ? "Save" : "Create task"}</Button>
           </>
@@ -162,22 +167,23 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
             {f.attachments.map((a, i) => (
               <div key={`${a.name}-${i}`} className="flex items-center gap-2 text-[13px]">
                 <Paperclip className="size-3.5 text-fg-3" />
-                <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                {taskAttachmentUrl(a.url)?<a className="min-w-0 flex-1 break-words text-accent-text underline" href={taskAttachmentUrl(a.url)} target="_blank" rel="noreferrer">{a.name}</a>:<span className="min-w-0 flex-1 truncate">{a.name}</span>}
                 <span className="text-[11px] text-fg-3">{relTime(a.addedAt)}</span>
                 {writable && <button onClick={() => setF({ ...f, attachments: f.attachments.filter((_, j) => j !== i) })} className="text-fg-3 hover:text-danger" aria-label="Remove attachment"><X className="size-3.5" /></button>}
               </div>
             ))}
             {writable && (
               <div className="flex flex-wrap gap-2">
-                <Input value={attachName} onChange={(e) => setAttachName(e.target.value)} placeholder="File name or link (metadata only)" className="min-w-0 flex-1" />
-                <label className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-border px-3 text-[13px] hover:bg-surface-2">
-                  Choose file
-                  <input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) setF({ ...f, attachments: [...f.attachments, { name: file.name, addedAt: new Date().toISOString() }] }); e.target.value = ""; }} />
-                </label>
-                <Button disabled={!attachName.trim()} onClick={() => { setF({ ...f, attachments: [...f.attachments, { name: attachName.trim(), addedAt: new Date().toISOString() }] }); setAttachName(""); }}>Add</Button>
+                <Field label="Attachment name" className="min-w-0 flex-1"><Input className="min-h-11" value={attachName} maxLength={180} onChange={e=>setAttachName(e.target.value)}/></Field>
+                <Field label="HTTPS attachment link" className="min-w-0 flex-1"><Input className="min-h-11" type="url" value={attachUrl} maxLength={2000} onChange={e=>setAttachUrl(e.target.value)}/></Field>
+                <Button className="self-end min-h-11" disabled={!attachName.trim()||!taskAttachmentUrl(attachUrl)} onClick={()=>{
+                  const url=taskAttachmentUrl(attachUrl);
+                  if(!url)return;
+                  setF({...f,attachments:[...f.attachments,{name:attachName.trim(),url,addedAt:new Date().toISOString()}]});
+                  setAttachName("");setAttachUrl("");
+                }}>Add attachment</Button>
               </div>
             )}
-            {writable && <p className="text-[11px] text-fg-3">Only file names are stored until file storage is connected (Settings → Integrations).</p>}
           </div>
         </section>
 

@@ -79,7 +79,7 @@ export function OverviewPanel({ data, canWrite }: { data: FinanceData; canWrite:
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Recurring revenue (MRR)" value={compactMoney(kpis.mrr)} hint={`${mrrRows.length} active retainers`} icon={<Repeat className="size-3.5" />} />
-        <Stat label="Collected this month" value={compactMoney(thisMonth?.collected ?? 0)} hint={`of ${compactMoney(thisMonth?.revenue ?? 0)} invoiced`} icon={<Wallet className="size-3.5" />} tone="success" />
+        <Stat label="Collected this month" value={compactMoney(thisMonth?.collected ?? 0)} hint="by receipt date" icon={<Wallet className="size-3.5" />} tone="success" />
         <Stat label="Outstanding" value={compactMoney(kpis.outstanding)} hint={`${compactMoney(kpis.overdue)} overdue`} icon={<AlertTriangle className="size-3.5" />} tone={kpis.overdue ? "danger" : "warning"} />
         <Stat label="Expenses this month" value={compactMoney(thisMonth?.expenses ?? 0)} hint="excl. payroll" icon={<TrendingUp className="size-3.5" />} tone="warning" />
       </div>

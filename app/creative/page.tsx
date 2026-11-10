@@ -5,7 +5,7 @@ import { Suspense, useMemo } from "react";
 import { ClipboardCheck, Palette } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
-import { EmptyState, PageHeader, Readonly, Tabs } from "@/components/ui";
+import { Button, EmptyState, PageHeader, Readonly, Tabs } from "@/components/ui";
 import { ApprovalBoard } from "@/components/creative/ApprovalBoard";
 import { ClientPortal, PORTAL_STATUSES } from "@/components/creative/ClientPortal";
 import { ConceptsTab } from "@/components/creative/ConceptsTab";
@@ -59,6 +59,7 @@ function CreativeInner() {
     <div>
       <PageHeader
         title="Creative Studio"
+        actions={<Button href="/creative/reviews" className="min-h-11">Creative review queue</Button>}
         icon={<Palette className="size-5 text-fg-3" />}
         description="Creative approvals, AI concepts and creative intelligence — Draft → Internal Review → Client Review → Approved → Live."
       />

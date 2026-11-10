@@ -22,6 +22,7 @@ export type Role =
   | "client";
 
 export interface TeamMember {
+  staffAuthId?: ID;
   id: ID;
   name: string;
   email: string;
@@ -181,6 +182,12 @@ export type DealStage = (typeof DEAL_STAGES)[number];
 export type PaymentStatus = "Pending" | "Partially Paid" | "Paid" | "Overdue";
 
 export interface Activity {
+  clientId?: ID;
+  sources?: string[];
+  approvedBy?: ID;
+  approvedAt?: string;
+  outcome?: string;
+  origin?: "server";
   id: ID;
   at: string;
   actor: "ai" | "human" | "system" | "api";
@@ -188,7 +195,7 @@ export interface Activity {
   agent?: AgentId; // which AI agent acted, when actor === "ai"
   entity:
     | "lead" | "deal" | "client" | "campaign" | "task" | "invoice" | "proposal" | "meeting" | "automation" | "settings" | "outreach"
-    | "strategy" | "creative" | "video" | "social" | "seo" | "document" | "influencer" | "recommendation" | "expense" | "integration" | "knowledge" | "organization";
+    | "analytics" | "report" | "strategy" | "creative" | "video" | "social" | "seo" | "document" | "influencer" | "recommendation" | "expense" | "integration" | "knowledge" | "organization";
   entityId?: ID;
   action: string;
   detail?: string;
@@ -414,14 +421,24 @@ export interface Task {
   createdBy: "ai" | "human" | "automation";
   dependsOn?: ID[];
   comments?: { id: ID; authorId: ID; body: string; at: string }[];
-  attachments?: { name: string; addedAt: string }[];
+  attachments?: { name: string; addedAt: string; url?: string }[];
   recurring?: "none" | "daily" | "weekly" | "monthly";
+  recurrenceSeries?: ID;
+  recurrenceAnchor?: number;
   projectId?: ID;
   onboardingKey?: string;
 }
 export type TaskRelatedType = "lead" | "deal" | "client" | "campaign" | "creative" | "seo" | "influencer" | "social" | "video" | "strategy";
 
+export interface ProjectMilestone {
+  id: ID;
+  title: string;
+  dueDate: string;
+  completedAt?: string;
+}
+
 export interface Project {
+  milestones?: ProjectMilestone[];
   id: ID;
   name: string;
   clientId: ID;
@@ -432,7 +449,12 @@ export interface Project {
   createdAt: string;
 }
 
+export interface InvoicePayment { id: ID; amount: number; receivedOn: string; reference?: string }
+
 export interface Invoice {
+  payments?: InvoicePayment[];
+  projectId?: ID;
+  retainerMonth?: string;
   id: ID;
   number: string;
   clientId: ID;
@@ -1038,7 +1060,10 @@ export interface SeoProject {
 // ---------- Documents & assets ----------
 export const ASSET_FOLDERS = ["Logos", "Brand guidelines", "Images", "Videos", "Creatives", "Contracts", "Reports", "Proposals", "Presentations", "Strategy"] as const;
 export type AssetFolder = (typeof ASSET_FOLDERS)[number];
+export interface AssetFile { id: ID; name: string; size: number; sha256: string; knowledgeText?: string }
+
 export interface Asset {
+  archivedAt?: string;
   id: ID;
   clientId?: ID; // undefined = agency-level asset
   name: string;
@@ -1046,7 +1071,7 @@ export interface Asset {
   ext: string;
   sizeKb: number;
   tags: string[];
-  versions: { v: number; at: string; by: ID; note: string }[];
+  versions: { v: number; at: string; by: ID; note: string; file?: AssetFile }[];
   uploadedBy: ID;
   createdAt: string;
   updatedAt: string;
@@ -1072,6 +1097,7 @@ export interface ClientKnowledge {
 
 // ---------- Influencer / projects / finance ----------
 export interface Expense {
+  projectId?: ID;
   id: ID;
   date: string;
   category: "Team" | "Freelancer" | "Software" | "Production" | "Influencer" | "Media" | "Office" | "Other";

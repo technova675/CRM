@@ -334,14 +334,22 @@ export function PageHeader({ title, description, actions, icon }: { title: React
   );
 }
 
-export function Stat({ label, value, delta, hint, icon, tone }: { label: string; value: ReactNode; delta?: number; hint?: ReactNode; icon?: ReactNode; tone?: Tone }) {
+export function Stat({ label, value, full, delta, hint, icon, tone }: { label: string; value: ReactNode; full?: string; delta?: number; hint?: ReactNode; icon?: ReactNode; tone?: Tone }) {
   return (
-    <Card className="p-4">
+    <Card className="min-w-0 p-4">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-fg-3">{label}</span>
         {icon && <span className={cn("rounded-md p-1", tone === "danger" ? "text-danger bg-danger-soft" : tone === "warning" ? "text-warning bg-warning-soft" : tone === "success" ? "text-success bg-success-soft" : "text-accent-text bg-accent-soft")}>{icon}</span>}
       </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
+      <div className="group/stat relative mt-2">
+        <div className="truncate text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
+        {full && (
+          <div role="tooltip" className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 max-w-[min(20rem,80vw)] break-all rounded-lg border border-border bg-surface px-2.5 py-2 text-xs shadow-pop opacity-0 transition-opacity duration-150 group-hover/stat:opacity-100">
+            <p className="text-fg-3">{label}</p>
+            <p className="font-medium tabular-nums text-fg">{full}</p>
+          </div>
+        )}
+      </div>
       <div className="mt-1 flex items-center gap-1.5 text-xs">
         {delta !== undefined && (
           <span className={cn("font-medium tabular-nums", delta >= 0 ? "text-success" : "text-danger")}>

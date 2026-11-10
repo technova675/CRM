@@ -4,6 +4,23 @@ import {DEFAULT_ONBOARDING_TEMPLATES,type OnboardingLibrary} from "./pipeline";
 import type {OnboardingTemplate,Meeting} from "../types";
 
 export interface CRMLibrary extends OnboardingLibrary {
+  credentialVault?: Partial<Record<import("../workspaceVault").VaultSlot,import("../workspaceVault").SealedCredential>>;
+  workspaceApiKeys?: {id:string;name:string;prefix:string;hash:string;createdAt:string;revokedAt?:string}[];
+  staffInvites?: {memberId:string;hash:string;expiresAt:string}[];
+  tenantProfile?: import("./tenant").TenantProfile;
+  tenantMeter?: import("./tenant").TenantMeter;
+  auditEvents?: import("../types").Activity[];
+  aiApprovalPolicy?: import("./approvalPolicy").ApprovalPolicy;
+  integrationRuns?: import("./integrationRuns").IntegrationRun[];
+  notificationPrefs?: import("../types").NotificationPrefs;
+  readNotificationIds?: string[];
+  permissionOverrides: import("../permissions").PermissionOverrides;
+  expenses: import("../types").Expense[];
+  timeEntries: import("./teamTime").TimeEntry[];
+  creativeReviews?: import("./creativeReviews").CreativeReview[];
+  clientPortal?: import("./clientPortal").ClientPortalState;
+  clientReporting?: import("./clientReporting").ClientReporting;
+  analyticsFeeds:import("./analyticsEngine").AnalyticsFeed[];
   marketingAutomations:import("./marketingAutomation").MarketingWorkflow[];
   concepts:import("../types").CreativeConcept[];
   leads: Lead[]; deals: Deal[]; conversations: Conversation[]; messages: Message[];
@@ -14,6 +31,6 @@ export interface CRMLibrary extends OnboardingLibrary {
   campaigns:import("../types").Campaign[];invoices:import("../types").Invoice[];ads:import("../types").AdRow[];creatives:import("../types").Creative[];socialPosts:import("../types").SocialPost[];seoProjects:import("../types").SeoProject[];influencers:import("../types").Influencer[];engagements:import("../types").InfluencerEngagement[];assets:import("../types").Asset[];reports:import("../types").GeneratedReport[];recommendations:import("../types").Recommendation[];reportSchedules:import("../types").ReportSchedule[];
 }
 export function emptyCRMLibrary(user: { id: string; email: string }): CRMLibrary {
-  return { marketingAutomations:[],leads: [], deals: [], conversations: [], messages: [], activities: [], savedViews: [], customFields: [], outreach: [], sequences: [structuredClone(DEFAULT_SEQUENCE)], suppressions: [], outreachTemplates: [],clients:[],tasks:[],projects:[],knowledge:[],approvals:[],proposals:[],meetings:[],onboardingTemplates:structuredClone(DEFAULT_ONBOARDING_TEMPLATES),
-    concepts:[],campaigns:[],invoices:[],ads:[],creatives:[],socialPosts:[],seoProjects:[],influencers:[],engagements:[],assets:[],reports:[],recommendations:[],reportSchedules:[],strategies:[],proposalPriceBook:[],team: [{ id: user.id, name: user.email.split("@")[0], email: user.email, role: "admin", avatarColor: "#6846d6", status: "active" }] };
+  return { tenantProfile:{name:user.email.split("@")[0]||"My workspace",billingEmail:user.email,createdAt:new Date().toISOString(),basePlan:"Starter"},permissionOverrides:{},timeEntries:[],expenses:[],analyticsFeeds:[],marketingAutomations:[],leads: [], deals: [], conversations: [], messages: [], activities: [], savedViews: [], customFields: [], outreach: [], sequences: [structuredClone(DEFAULT_SEQUENCE)], suppressions: [], outreachTemplates: [],clients:[],tasks:[],projects:[],knowledge:[],approvals:[],proposals:[],meetings:[],onboardingTemplates:structuredClone(DEFAULT_ONBOARDING_TEMPLATES),
+    concepts:[],campaigns:[],invoices:[],ads:[],creatives:[],socialPosts:[],seoProjects:[],influencers:[],engagements:[],assets:[],reports:[],recommendations:[],reportSchedules:[],strategies:[],proposalPriceBook:[],team: [{ id: user.id, name: user.email.split("@")[0]||"Owner", email: user.email, role: "admin", avatarColor: "#6846d6", status: "active" }] };
 }

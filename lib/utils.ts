@@ -8,11 +8,14 @@ export const uid = (prefix = "id") =>
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 export const money = (n: number) => inr.format(Math.round(n || 0));
+const trim = (x: number, d: number) => String(Number(x.toFixed(d)));
 export const compactMoney = (n: number) => {
+  if (!Number.isFinite(n)) return "₹0";
   const a = Math.abs(n);
-  if (a >= 1e7) return `₹${(n / 1e7).toFixed(1)}Cr`;
-  if (a >= 1e5) return `₹${(n / 1e5).toFixed(1)}L`;
-  if (a >= 1e3) return `₹${(n / 1e3).toFixed(0)}K`;
+  if (a >= 1e12) return `₹${trim(n / 1e12, 2)}L Cr`;
+  if (a >= 1e7) return `₹${trim(n / 1e7, a >= 1e9 ? 0 : 1)}Cr`;
+  if (a >= 1e5) return `₹${trim(n / 1e5, 1)}L`;
+  if (a >= 1e3) return `₹${trim(n / 1e3, 0)}K`;
   return `₹${Math.round(n)}`;
 };
 export const compact = (n: number) =>

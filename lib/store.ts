@@ -1,5 +1,7 @@
 "use client";
 
+import {balance,billingStatus,rupeeAmount} from "./domain/billing";
+import {deadlineDay,nextTaskOccurrence,taskDependencyIssue} from "./domain/projectTasks";
 import { create } from "zustand";
 import { flushCRMChanges } from "./crmSync";
 import { emailKey, phoneKey } from "./domain/leadImport";
@@ -50,6 +52,7 @@ import type {
   UsageKey,
   Role,
 } from "./types";
+import { effectiveApprovalMode, recommendedModes } from "./domain/approvalPolicy";
 import { AI_ACTIONS, NOTIFICATION_CATEGORIES } from "./types";
 import { buildOnboarding, buildSeed, type SeedData } from "./seed";
 import type { Access, Module } from "./permissions";
@@ -72,6 +75,7 @@ export interface Settings {
   agencyName: string;
   currency: "INR";
   notificationPrefs: NotificationPrefs;
+  readNotificationIds: string[];
   permissionOverrides: Partial<Record<Role, Partial<Record<Module, Access>>>>;
   leadCustomFields: CustomFieldDef[];
   // Safety switch: consequential ad-platform changes may only run "Automatic" when an admin enables this.
@@ -79,28 +83,12 @@ export interface Settings {
   aiCreditCost: Partial<Record<AgentId, number>>;
 }
 
-const DEFAULT_NOTIFICATION_PREFS = Object.fromEntries(
+export const DEFAULT_NOTIFICATION_PREFS = Object.fromEntries(
   NOTIFICATION_CATEGORIES.map((c) => [c, { inApp: true, email: ["Client approvals", "Payments", "Performance anomalies"].includes(c), slack: ["Campaign issues", "Performance anomalies"].includes(c) }]),
 ) as NotificationPrefs;
 
 const DEFAULT_SETTINGS: Settings = {
-  approvalModes: {
-    Outreach: "Approval Required",
-    "Follow-ups": "Automatic",
-    "Campaign changes": "Approval Required",
-    "Client communication": "Approval Required",
-    Reports: "Approval Required",
-    "Payment reminders": "Approval Required",
-    "Campaign recommendations": "Approval Required",
-    "Creative generation": "Approval Required",
-    "Social publishing": "Approval Required",
-    "Video exports": "Approval Required",
-    "Strategy documents": "Approval Required",
-    Proposals: "Approval Required",
-    "Task creation": "Automatic",
-    "SEO changes": "Approval Required",
-    "Influencer outreach": "Approval Required",
-  },
+  approvalModes: recommendedModes,
   scoringCriteria: DEFAULT_CRITERIA,
   qualifyThreshold: 60,
   onboardingTemplates: [
@@ -119,6 +107,7 @@ const DEFAULT_SETTINGS: Settings = {
   agencyName: "Adbibe",
   currency: "INR",
   notificationPrefs: DEFAULT_NOTIFICATION_PREFS,
+  readNotificationIds: [],
   permissionOverrides: {},
   leadCustomFields: [
     { key: "budget_band", label: "Monthly marketing budget", type: "select", options: ["< ₹1L", "₹1–5L", "₹5–20L", "₹20L+"] },
@@ -133,6 +122,8 @@ type NewLead = Omit<Lead, "id" | "createdAt" | "status" | "score" | "research" |
   Partial<Pick<Lead, "status" | "tags" | "notes" | "services" | "research">> & { initialScore?: number };
 
 export interface CRMState extends SeedData {
+  analyticsFeeds:import("./domain/analyticsEngine").AnalyticsFeed[];
+  timeEntries:import("./domain/teamTime").TimeEntry[];
   marketingAutomations:import("./domain/marketingAutomation").MarketingWorkflow[];
   currentUserId: string;
   settings: Settings;
@@ -143,7 +134,8 @@ export interface CRMState extends SeedData {
   setAIEnabled: (v: boolean) => void;
   log: (a: Omit<Activity, "id" | "at">) => void;
   notify: (n: Omit<Notification, "id" | "at" | "read">) => void;
-  markNotificationsRead: () => void;
+  accountNotifications: Notification[];
+  markNotificationsRead: (ids?: string[]) => void;
   resetDemo: () => void;
 
   // Leads
@@ -190,8 +182,7 @@ export interface CRMState extends SeedData {
 
   // Payments
   addInvoice: (i: Omit<Invoice, "id" | "number" | "paid" | "status" | "remindersSent">) => void;
-  recordPayment: (id: string, amount: number) => void;
-  sendPaymentReminder: (id: string) => void;
+  recordPayment: (id: string, amount: number, receivedOn?:string, reference?:string) => boolean;
   refreshOverdue: () => void;
 
   // Influencers
@@ -318,14 +309,14 @@ export const useCRM = create<CRMState>()(
         set((s) => ({ notifications: [{ ...n, id: uid("nt"), at: now(), read: false }, ...s.notifications].slice(0, 100) }));
       };
       const me = () => get().currentUserId;
-      const mode = (k: AIActionKind) => get().settings.approvalModes[k];
+      const mode = (k: AIActionKind) => effectiveApprovalMode({modes:get().settings.approvalModes,allowAutonomousSpendChanges:get().settings.allowAutonomousSpendChanges},k);
       const isSuppressed = (l: Lead) => {
         return suppressed(l, get().settings.suppressions);
       };
 
       return {
         ...buildSeed(),
-        marketingAutomations:[],
+        timeEntries:[],analyticsFeeds:[],marketingAutomations:[],
         currentUserId: "u_admin",
         settings: DEFAULT_SETTINGS,
         reports: [],
@@ -336,7 +327,11 @@ export const useCRM = create<CRMState>()(
         setAIEnabled: (v) => set({ aiEnabled: v }),
         log,
         notify,
-        markNotificationsRead: () => set((s) => ({ notifications: s.notifications.map((n) => ({ ...n, read: true })) })),
+        accountNotifications: [],
+        markNotificationsRead: (ids) => set((s) => ({
+          notifications: s.notifications.map((n) => !ids || ids.includes(n.id) ? {...n,read:true} : n),
+          settings: {...s.settings,readNotificationIds:[...new Set([...(ids ?? s.accountNotifications.map(n=>n.id)),...s.settings.readNotificationIds])].slice(0,300)},
+        })),
         resetDemo: () => set((state) => {
           const cloud = /^[a-f0-9-]{36}$/i.test(state.currentUserId);
           return { ...buildSeed(), settings: cloud ? { ...DEFAULT_SETTINGS, leadCustomFields: state.settings.leadCustomFields } : DEFAULT_SETTINGS, reports: [], currentUserId: cloud ? state.currentUserId : "u_admin",
@@ -521,7 +516,7 @@ export const useCRM = create<CRMState>()(
           if (stage === "Won" && !deal.clientId) {
             const clientId = get().createClientFromDeal(id);
             if (clientId) {
-              notify({ title: `Deal won: ${deal.company}`, body: "Client profile created and onboarding started.", href: `/clients/${clientId}`, kind: "success" });
+              notify({ title: `Deal won: ${deal.company}`, body: "Client profile created and onboarding started.", href: `/clients/${clientId}`, kind: "success", category:"Deals" });
             }
           }
         },
@@ -646,51 +641,42 @@ export const useCRM = create<CRMState>()(
           return task;
         },
         updateTask: (id, patch) => {
-          const t = get().tasks.find((x) => x.id === id);
-          set((s) => ({ tasks: s.tasks.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+          const tasks = get().tasks;
+          const t = tasks.find(x => x.id === id);
           if (!t) return;
-          if (patch.status && patch.status !== t.status) log({ actor: "human", actorId: me(), entity: "task", entityId: id, action: "Task status changed", detail: t.title, before: t.status, after: patch.status });
-          // Recurring tasks: completing one schedules the next occurrence.
-          if (patch.status === "Done" && t.status !== "Done" && t.recurring && t.recurring !== "none") {
-            const step = t.recurring === "daily" ? 1 : t.recurring === "weekly" ? 7 : 30;
-            const next: Task = { ...t, id: uid("t"), status: "Todo", dueDate: new Date(new Date(t.dueDate).getTime() + step * DAY).toISOString(), createdAt: now(), comments: [], createdBy: "automation" };
-            set((s) => ({ tasks: [next, ...s.tasks] }));
-          }
+          const changed = {...t,...patch};
+          if ((patch.status!==undefined||patch.dependsOn!==undefined)&&taskDependencyIssue(changed,new Map(tasks.map(x=>[x.id,x])))) return;
+          const updated = tasks.map(x => x.id === id ? changed : x);
+          const next = changed.status === "Done" && t.status !== "Done" ? nextTaskOccurrence(changed,now()) : undefined;
+          set({tasks:next&&!updated.some(x=>x.id===next.id)?[next,...updated]:updated});
+          if (patch.status && patch.status !== t.status) log({ actor:"human",actorId:me(),entity:"task",entityId:id,action:"Task status changed",detail:t.title,before:t.status,after:patch.status });
         },
         deleteTask: (id) => set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
 
         // ---------------- Payments ----------------
         addInvoice: (i) => {
-          const n = 1001 + get().invoices.length;
+          if(i.retainerMonth&&get().invoices.some(row=>row.clientId===i.clientId&&row.retainerMonth===i.retainerMonth))return;
+          const n = 1 + Math.max(1000,...get().invoices.map(row=>Number(/^ADB-(\d+)$/.exec(row.number)?.[1]??0)));
           set((s) => ({ invoices: [{ ...i, id: uid("inv"), number: `ADB-${n}`, paid: 0, status: "Pending", remindersSent: 0 }, ...s.invoices] }));
           log({ actor: "human", actorId: me(), entity: "invoice", action: "Created invoice", detail: `ADB-${n}` });
         },
-        recordPayment: (id, amount) => {
-          set((s) => ({
-            invoices: s.invoices.map((inv) => {
-              if (inv.id !== id) return inv;
-              const paid = Math.min(inv.amount, inv.paid + amount);
-              const status: Invoice["status"] = paid >= inv.amount ? "Paid" : paid > 0 ? "Partially Paid" : inv.status;
-              return { ...inv, paid, status, paidAt: status === "Paid" ? now() : inv.paidAt };
-            }),
-          }));
-          log({ actor: "human", actorId: me(), entity: "invoice", entityId: id, action: "Recorded payment", detail: `₹${amount.toLocaleString("en-IN")}` });
-        },
-        sendPaymentReminder: (id) => {
-          const inv = get().invoices.find((i) => i.id === id);
-          const client = get().clients.find((c) => c.id === inv?.clientId);
-          if (!inv) return;
-          const m = mode("Payment reminders");
-          if (m === "Approval Required") {
-            get().requestApproval({ kind: "Payment reminders", title: `Send reminder for ${inv.number}`, detail: `${client?.company} — ₹${(inv.amount - inv.paid).toLocaleString("en-IN")} outstanding`, ref: { type: "invoice", id } });
-            return;
-          }
-          set((s) => ({ invoices: s.invoices.map((i) => (i.id === id ? { ...i, remindersSent: i.remindersSent + 1 } : i)) }));
-          log({ actor: m === "Automatic" ? "ai" : "human", actorId: me(), entity: "invoice", entityId: id, action: "Sent payment reminder", detail: `${inv.number} · ${client?.company}` });
+        recordPayment: (id, amount, receivedOn=deadlineDay(Date.now()), reference) => {
+          const invoice=get().invoices.find(item=>item.id===id);
+          const today=deadlineDay(Date.now());
+          amount=rupeeAmount(amount);
+          if(!invoice||!Number.isFinite(amount)||amount<=0||amount>balance(invoice)||deadlineDay(receivedOn)!==receivedOn||
+             receivedOn<deadlineDay(invoice.issuedAt)||receivedOn>today)return false;
+          const payment={id:crypto.randomUUID(),amount,receivedOn,reference:reference?.trim()||undefined};
+          const next={...invoice,paid:rupeeAmount(invoice.paid+amount),payments:[...(invoice.payments??[]),payment]};
+          next.status=billingStatus(next,today);
+          if(next.status==="Paid") next.paidAt=next.payments.reduce((latest,item)=>item.receivedOn>latest?item.receivedOn:latest,deadlineDay(invoice.paidAt??""));
+          set(state=>({invoices:state.invoices.map(item=>item.id===id?next:item)}));
+          log({actor:"human",actorId:me(),entity:"invoice",entityId:id,action:"Recorded payment",detail:"₹"+amount.toLocaleString("en-IN")});
+          return true;
         },
         refreshOverdue: () =>
           set((s) => ({
-            invoices: s.invoices.map((i) => (i.status !== "Paid" && new Date(i.dueDate).getTime() < Date.now() && i.paid < i.amount ? { ...i, status: "Overdue" } : i)),
+            invoices: s.invoices.map((i) => (i.status !== "Overdue" && billingStatus(i,deadlineDay(Date.now()))==="Overdue" ? { ...i, status: "Overdue" } : i)),
           })),
 
         // ---------------- Influencers ----------------
@@ -744,7 +730,7 @@ export const useCRM = create<CRMState>()(
           }
           log({ actor: "system", entity: "outreach", entityId: conversationId, action: `Reply received (${sentiment})`, detail: `${lead?.company} — follow-ups stopped` });
           if (sentiment !== "negative") {
-            notify({ title: `${sentiment === "positive" ? "Positive reply" : "Reply"} from ${lead?.company}`, body: "Human attention needed — take over the conversation.", href: `/inbox?c=${conversationId}`, kind: "ai" });
+            notify({ title: `${sentiment === "positive" ? "Positive reply" : "Reply"} from ${lead?.company}`, body: "Human attention needed — take over the conversation.", href: `/inbox?c=${conversationId}`, kind: "ai", category:"Replies" });
           }
         },
         takeOverConversation: (id) => {
@@ -895,11 +881,11 @@ export const useCRM = create<CRMState>()(
         // ---------------- Approvals ----------------
         requestApproval: (r) => {
           set((s) => ({ approvals: [{ requestedBy: me(), ...r, id: uid("ap"), createdAt: now(), status: "pending" }, ...s.approvals] }));
-          notify({ title: "Approval requested", body: r.title, href: "/automations?tab=approvals", kind: "warning", category: r.kind.startsWith("Campaign") ? "AI recommendations" : r.kind === "Creative generation" ? "Client approvals" : undefined });
+          notify({ title: "Approval requested", body: r.title, href: "/approvals", kind: "warning", category: r.kind.startsWith("Campaign") ? "AI recommendations" : r.kind === "Creative generation" ? "Client approvals" : undefined });
         },
         resolveApproval: (id, approve) => {
           const ap = get().approvals.find((a) => a.id === id);
-          if (!ap) return;
+          if (!ap || ap.status!=="pending") return;
           if(ap.ref?.type==="recommendation"&&get().recommendations.find(r=>r.id===ap.ref!.id)?.mediaPlan){get().notify({title:"Review this action in Performance Marketing",body:"Media actions require server-verified approval and explicit execution.",kind:"info",href:"/performance"});return;}
           if(ap.ref?.type==="campaign"&&approve&&ap.payload&&"previousBudget" in ap.payload){const campaign=get().campaigns.find(c=>c.id===ap.ref!.id);if(!campaign||campaign.budget!==ap.payload.previousBudget||(campaign.budgetPeriod??"Monthly")!==ap.payload.previousBudgetPeriod){get().notify({title:"Campaign budget changed",body:"Open the campaign and submit a fresh budget request before approving.",kind:"warning",href:`/campaigns?c=${ap.ref.id}`});return;}}
           if(ap.ref?.type==="strategy"&&approve){const doc=get().strategies.find(d=>d.id===ap.ref!.id);if(!doc||doc.status!=="In Review"||!ap.reviewUpdatedAt||ap.reviewUpdatedAt!==doc.updatedAt||strategyReviewIssues(doc).length){get().notify({title:"Strategy needs a fresh review",body:"The strategy changed or has incomplete inputs/budget. Open Marketing Strategy and resubmit it.",kind:"warning",href:`/strategy?id=${ap.ref.id}`});return;}const at=now();set(s=>({strategies:s.strategies.map(d=>d.id===doc.id?{...d,status:"Approved",approvedAt:at,approvedBy:me(),updatedAt:at,reviewHistory:[...(d.reviewHistory??[]),{status:"Approved" as const,at,actorId:me()}].slice(-100)}:d)}));}
@@ -920,9 +906,7 @@ export const useCRM = create<CRMState>()(
             const field = Object.keys(patch)[0];
             log({ actor: "ai", agent: ap.agent, entity: "automation", entityId: targetId, action: `Executed after approval: ${ap.title}`, detail: collection, before: field ? short(before?.[field]) : undefined, after: field ? short(patch[field]) : undefined });
           }
-          if (ap.kind === "Payment reminders" && ap.ref?.type === "invoice") {
-            set((s) => ({ invoices: s.invoices.map((i) => (i.id === ap.ref!.id ? { ...i, remindersSent: i.remindersSent + 1 } : i)) }));
-          }
+
           if (ap.kind === "Campaign changes" && ap.ref?.type === "campaign" && ap.payload) {
             const { budget } = ap.payload;
             const c = get().campaigns.find((x) => x.id === ap.ref!.id);
@@ -1030,7 +1014,7 @@ export const useCRM = create<CRMState>()(
         },
         startAITask: (t) => {
           const credits = get().settings.aiCreditCost[t.agent] ?? 2;
-          if (!get().consumeUsage("aiCredits", credits)) return null;
+
           const id = uid("ait");
           set((s) => ({ aiTasks: [{ ...t, id, status: "running" as const, credits, createdAt: now(), requestedBy: me() }, ...s.aiTasks].slice(0, 300) }));
           return id;
@@ -1142,10 +1126,11 @@ export const useCRM = create<CRMState>()(
       partialize: (s) => {
         // Functions are not serializable; persist data only.
         const out: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(s)) if (typeof v !== "function" && k !== "aiEnabled") out[k] = v;
+        for (const [k, v] of Object.entries(s)) if (typeof v !== "function" && k !== "aiEnabled" && k !== "accountNotifications") out[k] = v;
         return out as Partial<CRMState>;
       },
-      merge: (persisted, current) => {
+      merge: (persisted):CRMState => {
+        const current:CRMState=useCRM.getInitialState();
         const p = (persisted ?? {}) as Partial<CRMState>;
         return {
           ...current,

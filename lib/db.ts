@@ -1,5 +1,6 @@
+import {TenantQuotaError} from "./domain/tenant.ts";
 // Server-only Supabase Data API access. Never import into client components.
-import { AuthenticationRequiredError, AuthenticationUnavailableError } from "./auth/identity.ts";
+import { AuthenticationRequiredError, AuthenticationUnavailableError, WorkspaceAccessError } from "./auth/identity.ts";
 import { ReportStorageError } from "./reportR2.ts";
 import { resilientFetch } from "./auth/resilientFetch.ts";
 export class DbNotConfiguredError extends Error {
@@ -58,6 +59,8 @@ export async function supabaseRequest<T>(resource: string, options: RequestOptio
 }
 
 export function dbError(error: unknown) {
+  if(error instanceof WorkspaceAccessError)return Response.json({error:error.message,code:"workspace_access_denied"},{status:403,headers:{"Cache-Control":"private, no-store"}});
+  if(error instanceof TenantQuotaError)return Response.json({error:error.message,code:"tenant_quota",resource:error.key,limit:error.limit,plan:error.plan},{status:429,headers:{"Cache-Control":"private, no-store"}});
   if (error instanceof ReportStorageError) return Response.json({ error: error.message, code: "storage_unavailable" }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
   if (error instanceof AuthenticationRequiredError) return Response.json({ error: error.message, code: "auth_required" }, { status: 401, headers: { "Cache-Control": "private, no-store" } });
   if (error instanceof AuthenticationUnavailableError) return Response.json({ error: error.message, code: "auth_unavailable" }, { status: 503, headers: { "Cache-Control": "private, no-store" } });

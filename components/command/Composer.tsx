@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { ArrowUp, Lightbulb } from "lucide-react";
+import { AGENT_WORKSPACES } from "@/lib/ai/agentWorkspaces";
+import { can } from "@/lib/permissions";
+import { useMe } from "@/lib/store";
 import { AGENT_LIST } from "@/lib/ai/agents";
 import { COMMAND_EXAMPLES } from "@/lib/ai/command";
 import type { AgentId, Client } from "@/lib/types";
@@ -38,6 +41,7 @@ export function Composer({
   onClient: (id: string) => void;
   clients: Client[];
 }) {
+  const me = useMe();
   const [text, setText] = useState("");
   const [chips, setChips] = useState(false);
   const send = (q = text) => {
@@ -67,7 +71,7 @@ export function Composer({
         <div className="flex items-center gap-1.5">
           <select value={agent} onChange={(e) => onAgent(e.target.value as AgentId | "auto")} className={pickerCls} aria-label="Agent">
             <option value="auto">Auto-route agent</option>
-            {AGENT_LIST.map((a) => (
+            {AGENT_LIST.filter((a)=>can(me.role,AGENT_WORKSPACES[a.id].module)).map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
               </option>

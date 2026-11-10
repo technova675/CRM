@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  AlertTriangle, ArrowRight, BadgeCheck, Bot, Brain, CalendarCheck, CalendarClock, CheckCircle2, Clock, FileText, Handshake, IndianRupee, Lightbulb,
+  AlertTriangle, ArrowRight, BadgeCheck, Bot, CalendarCheck, CalendarClock, CheckCircle2, Clock, FileText, Handshake, IndianRupee,
   ListChecks, Megaphone, PieChart, Receipt, RefreshCcw, Rocket, ShieldCheck, Sparkles, Target, TrendingUp, Trophy, Users, Wallet, XCircle,
 } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
@@ -11,9 +11,11 @@ import { can } from "@/lib/permissions";
 import { effectiveScore } from "@/lib/ai/scoring";
 import { DEAL_STAGES, LEAD_SOURCES, type Client, type Role, type Service } from "@/lib/types";
 import { cn, compact, compactMoney, DAY, fmtDate, fmtShort, fmtTime, isPast, isSameDay, money, pct, relTime, startOfDay, sum } from "@/lib/utils";
-import { AIBadge, Badge, Button, Card, CardHeader, EmptyState, MemberAvatar, PageHeader, Progress, Stat, StatusBadge, Tabs } from "@/components/ui";
+import { AIBadge, Badge, Card, CardHeader, EmptyState, MemberAvatar, PageHeader, Progress, Stat, StatusBadge, Tabs } from "@/components/ui";
 import { aggregateMetrics, AreaTrend, Bars, Donut, Legend, totals } from "@/components/charts";
-import { useUI } from "@/components/shell/ui-state";
+import { DashboardOverview } from "@/components/dashboard/DashboardOverview";
+import { dashboardChange,dashboardDay,dashboardMetrics } from "@/lib/domain/dashboardOverview";
+import { campaignMediaRows,mediaTotals } from "@/lib/domain/performance";
 
 type Section = "sales" | "clients" | "marketing" | "operations" | "finance";
 const SECTIONS: { value: Section; label: string; icon: ReactNode }[] = [
@@ -34,6 +36,7 @@ const SECTION_ROLES: Record<Section, Role[] | "all"> = {
 const sectionsFor = (role: Role) =>
   SECTIONS.filter((s) => {
     const r = SECTION_ROLES[s.value];
+    if (s.value === "marketing" && !can(role,"campaigns") && !can(role,"performance")) return false;
     if (s.value === "finance" && !can(role, "payments", "read")) return false;
     return r === "all" || r.includes(role);
   });
@@ -49,7 +52,6 @@ const GAP: Partial<Record<Service, Service[]>> = {
   "Brand Strategy": ["Social Media", "Meta Ads"],
 };
 
-const d30 = (metrics: { date: string }[][], from: number, to: number) => metrics.flatMap((m) => m.slice(from, to === 0 ? undefined : to));
 const delta = (a: number, b: number) => (b ? ((a - b) / b) * 100 : undefined);
 
 export default function DashboardPage() {
@@ -62,123 +64,21 @@ export default function DashboardPage() {
 function AgencyDashboard() {
   const me = useMe();
   const allowed = sectionsFor(me.role);
+  const [days,setDays]=useState(30);
   const [section, setSection] = useState<Section>(allowed[0]?.value ?? "operations");
   const current = allowed.some((s) => s.value === section) ? section : allowed[0]?.value ?? "operations";
-  const hour = new Date().getHours();
-  const greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title={`${greet}, ${me.name.split(" ")[0]}`}
-        description={new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" }) + " · What is happening, why, what to do — and how to execute it."}
-        actions={can(me.role, "leads", "write") ? <Button href="/leads?new=1" variant="primary">Add lead</Button> : undefined}
-      />
-      <FourQuestions />
-      <Tabs value={current} onChange={setSection} tabs={allowed.map((s) => ({ value: s.value, label: <span className="inline-flex items-center gap-1.5">{s.icon}{s.label}</span> }))} />
-      {current === "sales" && <SalesSection />}
-      {current === "clients" && <ClientsSection />}
-      {current === "marketing" && <MarketingSection />}
-      {current === "operations" && <OperationsSection />}
-      {current === "finance" && <FinanceSection />}
-    </div>
-  );
-}
-
-function useMarketingTotals() {
-  const campaigns = useCRM((s) => s.campaigns);
-  return useMemo(() => {
-    const ms = campaigns.map((c) => c.metrics);
-    const cur = totals(aggregateMetrics(d30(ms, -30, 0) as Parameters<typeof aggregateMetrics>[0]));
-    const prev = totals(aggregateMetrics(d30(ms, -60, -30) as Parameters<typeof aggregateMetrics>[0]));
-    return { cur, prev };
-  }, [campaigns]);
-}
-
-function Q({ n, title, icon, children, href, cta }: { n: number; title: string; icon: ReactNode; children: ReactNode; href?: string; cta?: string }) {
-  return (
-    <Card className="flex flex-col p-3.5">
-      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-fg-3">
-        <span className="grid size-4 place-items-center rounded bg-accent-soft text-[9px] text-accent-text">{n}</span>
-        {icon}
-        {title}
-      </p>
-      <div className="mt-2 flex-1 text-[13px]">{children}</div>
-      {href && cta && <Link href={href} className="mt-2 inline-flex items-center gap-1 text-xs text-accent-text hover:underline">{cta} <ArrowRight className="size-3" /></Link>}
-    </Card>
-  );
-}
-
-// ---------------- Four questions ----------------
-function FourQuestions() {
-  const me = useMe();
-  const recommendations = useCRM((s) => s.recommendations);
-  const approvals = useCRM((s) => s.approvals);
-  const aiTasks = useCRM((s) => s.aiTasks);
-  const leads = useCRM((s) => s.leads);
-  const openAssistant = useUI((s) => s.openAssistant);
-  const [now] = useState(() => Date.now());
-  const { cur, prev } = useMarketingTotals();
-  const showMarketing = me.role === "admin" || can(me.role, "campaigns", "read") || can(me.role, "performance", "read");
-  const canPerf = can(me.role, "performance", "read");
-
-  const newRecs = recommendations.filter((r) => r.status === "New");
-  const top = [...newRecs].sort((a, b) => ["High", "Medium", "Low"].indexOf(a.priority) - ["High", "Medium", "Low"].indexOf(b.priority) || b.createdAt.localeCompare(a.createdAt))[0];
-  const pending = approvals.filter((a) => a.status === "pending").length;
-  const running = aiTasks.filter((t) => t.status === "running" || t.status === "queued").length;
-  const leads7 = leads.filter((l) => now - new Date(l.createdAt).getTime() < 7 * DAY).length;
-  const leadsPrev7 = leads.filter((l) => { const a = now - new Date(l.createdAt).getTime(); return a >= 7 * DAY && a < 14 * DAY; }).length;
-
-  const deltas: { label: string; d?: number; good: boolean }[] = showMarketing
-    ? [
-        { label: `Spend ${compactMoney(cur.spend)}`, d: delta(cur.spend, prev.spend), good: true },
-        { label: `Revenue ${compactMoney(cur.revenue)}`, d: delta(cur.revenue, prev.revenue), good: true },
-        { label: `ROAS ${cur.roas.toFixed(2)}x`, d: delta(cur.roas, prev.roas), good: true },
-        { label: `CPA ${compactMoney(cur.cpa)}`, d: delta(cur.cpa, prev.cpa), good: false },
-      ]
-    : [{ label: `${leads7} new leads (7d)`, d: delta(leads7, leadsPrev7), good: true }];
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Q n={1} title="What is happening" icon={<TrendingUp className="size-3" />} href={canPerf ? "/performance" : showMarketing ? "/campaigns" : can(me.role, "leads", "read") ? "/leads" : undefined} cta={canPerf ? "Performance" : showMarketing ? "Campaigns" : "Leads"}>
-        <ul className="space-y-1">
-          {deltas.map((x) => (
-            <li key={x.label} className="flex items-center justify-between gap-2">
-              <span className="text-fg-2">{x.label}</span>
-              {x.d !== undefined ? <span className={cn("text-xs font-medium tabular-nums", (x.good ? x.d >= 0 : x.d <= 0) ? "text-success" : "text-danger")}>{x.d >= 0 ? "↑" : "↓"} {Math.abs(x.d).toFixed(0)}%</span> : <span className="text-xs text-fg-3">—</span>}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-1 text-[10px] text-fg-3">{showMarketing ? "Last 30 days vs previous 30 · ad platforms" : "vs previous 7 days"}</p>
-      </Q>
-      <Q n={2} title="Why" icon={<Brain className="size-3" />} href={top && canPerf ? "/performance" : undefined} cta="See evidence">
-        {top ? (
-          <>
-            <p className="line-clamp-1 font-medium">{top.title}</p>
-            <p className="mt-0.5 line-clamp-3 text-xs text-fg-2">{top.why ?? top.finding}</p>
-            <p className="mt-1 text-[10px] text-fg-3">{top.why ? "AI reasoning (assumption unless evidenced)" : "Finding from data"} · {top.priority} priority</p>
-          </>
-        ) : (
-          <p className="text-xs text-fg-3">No open AI findings. Run the Media / Analytics agents to explain changes.</p>
-        )}
-      </Q>
-      <Q n={3} title="What should we do" icon={<Lightbulb className="size-3" />} href={canPerf ? "/performance" : undefined} cta="Review recommendations">
-        <p className="text-2xl font-semibold tabular-nums">{newRecs.length}</p>
-        <p className="text-xs text-fg-3">new AI recommendations · {newRecs.filter((r) => r.priority === "High").length} high priority</p>
-      </Q>
-      <Q n={4} title="How do we execute" icon={<ShieldCheck className="size-3" />}>
-        <div className="grid grid-cols-2 gap-2">
-          <Link href="/automations?tab=approvals" className="rounded-lg border border-border px-2.5 py-1.5 hover:border-border-strong">
-            <p className={cn("text-lg font-semibold tabular-nums", pending > 0 && "text-warning")}>{pending}</p>
-            <p className="text-[11px] text-fg-3">approvals pending</p>
-          </Link>
-          <Link href="/command" className="rounded-lg border border-border px-2.5 py-1.5 hover:border-border-strong">
-            <p className="text-lg font-semibold tabular-nums">{running}</p>
-            <p className="text-[11px] text-fg-3">AI tasks running</p>
-          </Link>
-        </div>
-        <button onClick={() => openAssistant("What should we do today?")} className="mt-2 inline-flex items-center gap-1 text-xs text-accent-text hover:underline"><Sparkles className="size-3" /> Ask the AI what to do next</button>
-      </Q>
+    <div className="min-w-0 space-y-6">
+      <DashboardOverview days={days} onDaysChange={setDays} />
+      <div className="min-w-0 rounded-2xl border border-border bg-surface p-4 sm:p-5">
+        <h2 className="mb-2 text-lg font-semibold tracking-tight">Workspace details</h2>
+        <div className="mb-4 [&_button]:min-h-11"><Tabs value={current} onChange={setSection} tabs={allowed.map((s) => ({ value: s.value, label: <span className="inline-flex items-center gap-1.5">{s.icon}{s.label}</span> }))} /></div>
+        {current === "sales" && <SalesSection />}
+        {current === "clients" && <ClientsSection />}
+        {current === "marketing" && <MarketingSection days={days} />}
+        {current === "operations" && <OperationsSection />}
+        {current === "finance" && <FinanceSection />}
+      </div>
     </div>
   );
 }
@@ -255,15 +155,15 @@ function SalesSection() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
         <Stat label="Total leads" value={compact(m.total)} hint={`${m.new7} this week`} icon={<Users className="size-3.5" />} />
         <Stat label="Qualified leads" value={m.qualified} hint={pct(m.conv[0]!.v, 0)} icon={<BadgeCheck className="size-3.5" />} />
         <Stat label="Meetings (±30d)" value={m.meetings} hint={`${m.upcomingMeetings} upcoming`} icon={<CalendarCheck className="size-3.5" />} />
         <Stat label="Proposals" value={m.proposals} hint={`${m.proposalsOpen} awaiting reply`} icon={<FileText className="size-3.5" />} />
         <Stat label="Won deals" value={m.won} hint={compactMoney(m.wonValue)} icon={<Trophy className="size-3.5" />} tone="success" />
         <Stat label="Lost deals" value={m.lost} hint={`${pct(m.winRate, 0)} win rate`} icon={<XCircle className="size-3.5" />} tone="danger" />
-        <Stat label="Pipeline value" value={compactMoney(m.pipeline)} hint={`${m.openCount} open deals`} icon={<PieChart className="size-3.5" />} />
-        <Stat label="Expected revenue" value={compactMoney(m.weighted)} hint="weighted by probability" icon={<TrendingUp className="size-3.5" />} tone="success" />
+        <Stat label="Pipeline value" value={compactMoney(m.pipeline)} full={money(m.pipeline)} hint={`${m.openCount} open deals`} icon={<PieChart className="size-3.5" />} />
+        <Stat label="Expected revenue" value={compactMoney(m.weighted)} full={money(m.weighted)} hint="weighted by probability" icon={<TrendingUp className="size-3.5" />} tone="success" />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-3">
@@ -421,40 +321,45 @@ function ClientsSection() {
 }
 
 // ---------------- Marketing ----------------
-function MarketingSection() {
-  const campaigns = useCRM((s) => s.campaigns);
-  const clients = useCRM((s) => s.clients);
-  const { cur, prev } = useMarketingTotals();
-  const rows = useMemo(() => aggregateMetrics(campaigns.flatMap((c) => c.metrics.slice(-30))), [campaigns]);
-  const status = useMemo(() => (["Active", "Planning", "Paused", "Completed"] as const).map((s) => ({ name: s, value: campaigns.filter((c) => c.status === s).length })).filter((x) => x.value), [campaigns]);
-  const clientPerf = useMemo(
-    () => clients.map((c) => { const t = totals(aggregateMetrics(campaigns.filter((x) => x.clientId === c.id).flatMap((x) => x.metrics.slice(-30)))); return { client: c.company.split(" ")[0]!, roas: +t.roas.toFixed(2) }; }).sort((a, b) => b.roas - a.roas),
-    [clients, campaigns],
-  );
-  const tiles: [string, string, number | undefined, boolean][] = [
-    ["Total ad spend", compactMoney(cur.spend), delta(cur.spend, prev.spend), true],
-    ["Revenue", compactMoney(cur.revenue), delta(cur.revenue, prev.revenue), true],
-    ["ROAS", `${cur.roas.toFixed(2)}x`, delta(cur.roas, prev.roas), true],
-    ["CPA", money(cur.cpa), delta(cur.cpa, prev.cpa), false],
-    ["Leads", compact(cur.leads), delta(cur.leads, prev.leads), true],
-    ["Conversions", compact(cur.conversions), delta(cur.conversions, prev.conversions), true],
-    ["CTR", pct(cur.ctr, 2), delta(cur.ctr, prev.ctr), true],
-    ["CPC", money(cur.cpc), delta(cur.cpc, prev.cpc), false],
-  ];
+function MarketingSection({days}:{days:number}) {
+  const me=useMe();
+  const campaigns=useCRM(state=>state.campaigns),clients=useCRM(state=>state.clients);
+  const [today]=useState(()=>dashboardDay(new Date()));
+  const data=useMemo(()=>dashboardMetrics(campaigns,[],days,today),[campaigns,days,today]);
+  const {current,previous,range}=data;
+  const status=useMemo(()=>(["Active","Planning","Paused","Completed"] as const).map(name=>({name,value:campaigns.filter(campaign=>campaign.status===name).length})).filter(item=>item.value),[campaigns]);
+  const clientPerf=useMemo(()=>can(me.role,"clients")?clients.flatMap(client=>{
+    const metrics=mediaTotals(campaigns.filter(campaign=>campaign.clientId===client.id).flatMap(campaign=>campaignMediaRows(campaign,range.start,range.end)));
+    return metrics.roas===null?[]:[{client:client.company,roas:metrics.roas}];
+  }).sort((a,b)=>b.roas-a.roas):[],[clients,campaigns,range.start,range.end,me.role]);
+  const rows=data.chart.filter(row=>row.spend!==null||row.revenue!==null);
+  const tiles=[
+    {key:"spend",label:"Total ad spend",format:compactMoney,good:true},
+    {key:"revenue",label:"Revenue",format:compactMoney,good:true},
+    {key:"roas",label:"ROAS",format:(n:number)=>n.toFixed(2)+"×",good:true},
+    {key:"cpa",label:"CPA",format:money,good:false},
+    {key:"leads",label:"Leads",format:compact,good:true},
+    {key:"conversions",label:"Conversions",format:compact,good:true},
+    {key:"ctr",label:"CTR",format:(n:number)=>pct(n,2),good:true},
+    {key:"cpc",label:"CPC",format:money,good:false},
+  ] as const;
+  const comparable=data.campaignDays===days&&data.previousDays===days;
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-        {tiles.map(([l, v, d, good]) => (
-          <Card key={l} className="p-3.5">
-            <p className="text-xs font-medium text-fg-3">{l}</p>
-            <p className="mt-1.5 text-xl font-semibold tabular-nums">{v}</p>
-            {d !== undefined && Number.isFinite(d) ? <p className={cn("text-xs font-medium tabular-nums", (good ? d >= 0 : d <= 0) ? "text-success" : "text-danger")}>{d >= 0 ? "↑" : "↓"} {Math.abs(d).toFixed(0)}% <span className="font-normal text-fg-3">vs prev 30d</span></p> : <p className="text-xs text-fg-3">no prior data</p>}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-8">
+        {tiles.map(({key,label,format,good})=>{
+          const amount=current[key],d=comparable?dashboardChange(amount,previous[key]):null;
+          return (
+          <Card key={key} className="min-w-0 p-3.5">
+            <p className="text-xs font-medium text-fg-3">{label}</p>
+            <p className="mt-1.5 text-xl font-semibold tabular-nums">{amount===null?"—":format(amount)}</p>
+            {d !== null ? <p className={cn("text-xs font-medium tabular-nums", (good ? d >= 0 : d <= 0) ? "text-success" : "text-danger")}>{d >= 0 ? "↑" : "↓"} {Math.abs(d).toFixed(0)}% <span className="font-normal text-fg-3">vs previous period</span></p> : <p className="text-xs text-fg-3">No comparable data</p>}
           </Card>
-        ))}
+        );})}
       </div>
       <div className="grid gap-3 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader title="Spend vs revenue" subtitle="All clients, last 30 days · from connected ad platforms" action={<Link href="/performance" className="text-xs text-accent-text hover:underline">Performance</Link>} />
+          <CardHeader title="Spend vs revenue" subtitle={`${fmtShort(range.start)} – ${fmtShort(range.end)} · Saved campaign records`} action={<Link href="/performance" className="text-xs text-accent-text hover:underline">Performance</Link>} />
           <div className="px-2 pb-3">{rows.length ? <AreaTrend data={rows.map((r) => ({ ...r, date: fmtShort(r.date) }))} x="date" series={[{ key: "revenue", label: "Revenue" }, { key: "spend", label: "Spend" }]} fmt={compactMoney} /> : <EmptyState title="No campaign data yet" />}</div>
         </Card>
         <Card>
@@ -466,8 +371,8 @@ function MarketingSection() {
         </Card>
       </div>
       <Card>
-        <CardHeader title="ROAS by client" subtitle="Last 30 days (target 3.0x)" action={<Link href="/reports" className="text-xs text-accent-text hover:underline">Reports</Link>} />
-        <div className="px-2 pb-3"><Bars data={clientPerf} x="client" series={[{ key: "roas", label: "ROAS" }]} fmt={(v) => `${v.toFixed(1)}x`} height={220} /></div>
+        <CardHeader title="ROAS by client" subtitle={`${fmtShort(range.start)} – ${fmtShort(range.end)} · Recorded revenue and spend`} action={<Link href="/reports" className="text-xs text-accent-text hover:underline">Reports</Link>} />
+        <div className="px-2 pb-3">{clientPerf.length?<Bars data={clientPerf} x="client" series={[{ key: "roas", label: "ROAS" }]} fmt={(v) => `${v.toFixed(1)}x`} height={220} />:<EmptyState title="No measured client ROAS in this window"/>}</div>
       </Card>
     </div>
   );

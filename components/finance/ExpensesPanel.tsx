@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, Pencil, Plus, Receipt, Trash2 } from "lucide-react";
 import { useCRM } from "@/lib/store";
 import type { Expense } from "@/lib/types";
@@ -20,6 +20,7 @@ const PERIODS = [
 
 function ExpenseModal({ initial, onClose }: { initial: Expense | null; onClose: () => void }) {
   const clients = useCRM((s) => s.clients);
+  const projects=useCRM(s=>s.projects);
   const upsert = useCRM((s) => s.upsert);
   const log = useCRM((s) => s.log);
   const me = useCRM((s) => s.currentUserId);
@@ -44,7 +45,7 @@ function ExpenseModal({ initial, onClose }: { initial: Expense | null; onClose: 
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" disabled={!e.vendor.trim() || e.amount <= 0} onClick={save}>
+          <Button variant="primary" disabled={!e.vendor.trim()||!Number.isFinite(e.amount)||e.amount<=0||!Number.isFinite(Date.parse(e.date))} onClick={save}>
             Save
           </Button>
         </>
@@ -52,7 +53,7 @@ function ExpenseModal({ initial, onClose }: { initial: Expense | null; onClose: 
     >
       <div className="grid grid-cols-2 gap-3">
         <Field label="Date">
-          <Input type="date" value={e.date.slice(0, 10)} onChange={(ev) => set({ date: new Date(`${ev.target.value}T12:00:00`).toISOString() })} />
+          <Input type="date" value={e.date.slice(0, 10)} onChange={(ev) => set({ date: ev.target.value })} />
         </Field>
         <Field label="Amount (₹)">
           <Input type="number" min={0} value={e.amount || ""} onChange={(ev) => set({ amount: Number(ev.target.value) })} />
@@ -68,7 +69,7 @@ function ExpenseModal({ initial, onClose }: { initial: Expense | null; onClose: 
           <Input value={e.vendor} onChange={(ev) => set({ vendor: ev.target.value })} placeholder="e.g. Figma, freelance editor" />
         </Field>
         <Field label="Client" hint="Leave as agency overhead if not client-specific" className="col-span-2">
-          <Select value={e.clientId ?? ""} onChange={(ev) => set({ clientId: ev.target.value || undefined, billable: ev.target.value ? e.billable : false })}>
+          <Select value={e.clientId ?? ""} onChange={(ev) => set({ clientId: ev.target.value || undefined, projectId:undefined, billable: ev.target.value ? e.billable : false })}>
             <option value="">Agency overhead (no client)</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
@@ -77,6 +78,7 @@ function ExpenseModal({ initial, onClose }: { initial: Expense | null; onClose: 
             ))}
           </Select>
         </Field>
+        <Field label="Project" className="col-span-2"><Select value={e.projectId??""} onChange={event=>set({projectId:event.target.value||undefined})}><option value="">No project</option>{projects.filter(p=>p.clientId===e.clientId).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
         <Field label="Description" className="col-span-2">
           <Input value={e.description} onChange={(ev) => set({ description: ev.target.value })} />
         </Field>
@@ -92,6 +94,15 @@ function ExpenseModal({ initial, onClose }: { initial: Expense | null; onClose: 
 
 export function ExpensesPanel({ canWrite }: { canWrite: boolean }) {
   const expenses = useCRM((s) => s.expenses);
+  const owner=useCRM(s=>s.currentUserId);
+  const [backup,setBackup]=useState("");
+  useEffect(()=>{
+    try{
+      const data=localStorage.getItem("adbibe-expense-backup-v1:"+owner);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- setState runs after an async fetch, not synchronously in the effect
+      if(data&&data!==JSON.stringify(useCRM.getState().expenses))setBackup(data);
+    }catch{}
+  },[owner]);
   const clients = useCRM((s) => s.clients);
   const remove = useCRM((s) => s.remove);
   const log = useCRM((s) => s.log);
@@ -144,6 +155,7 @@ export function ExpensesPanel({ canWrite }: { canWrite: boolean }) {
 
   return (
     <div className="space-y-4">
+      {backup&&canWrite&&<Button className="min-h-11" onClick={()=>downloadFile("browser-expense-backup.json",backup,"application/json")}>Download browser expense backup</Button>}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Total expenses" value={compactMoney(summary.total)} hint={`${rows.length} entries`} icon={<Receipt className="size-3.5" />} />
         <Stat label="Client direct costs" value={compactMoney(summary.clientAmt)} hint="linked to a client" tone="warning" icon={<Receipt className="size-3.5" />} />

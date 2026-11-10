@@ -112,6 +112,7 @@ export function KnowledgeEditor({ client, editable }: { client: Client; editable
             ))}
           </div>
         </div>
+        <Button href={"/knowledge?client="+encodeURIComponent(client.id)} className="mt-3 min-h-11">Search and ask AI</Button>
         <div className="mt-3 flex items-center gap-3">
           <Progress value={completeness.pct} tone={completeness.pct >= 80 ? "success" : completeness.pct >= 50 ? "accent" : "warning"} className="flex-1" />
           <span className="text-xs font-medium tabular-nums">{completeness.pct}% complete</span>

@@ -1,13 +1,8 @@
-import type { AITask, Integration, Organization, Plan, UsageKey } from "../types";
+import type { AITask, Integration, Organization, Plan } from "../types";
 import { ago, ahead } from "./context";
 
-// -1 = unlimited. Enforced client-side today via consumeUsage(); the same limits must be enforced server-side.
-export const PLAN_LIMITS: Record<Plan, Record<UsageKey, number>> = {
-  Starter: { aiCredits: 2000, leads: 1000, clients: 5, campaigns: 25, reports: 20, videoMinutes: 30, storageGb: 10, teamMembers: 3 },
-  Growth: { aiCredits: 10000, leads: 10000, clients: 20, campaigns: 150, reports: 100, videoMinutes: 180, storageGb: 100, teamMembers: 10 },
-  Agency: { aiCredits: 40000, leads: 50000, clients: 75, campaigns: 750, reports: 500, videoMinutes: 900, storageGb: 500, teamMembers: 40 },
-  Enterprise: { aiCredits: -1, leads: -1, clients: -1, campaigns: -1, reports: -1, videoMinutes: -1, storageGb: -1, teamMembers: -1 },
-};
+import { PLAN_LIMITS } from "../domain/tenant";
+export { PLAN_LIMITS };
 export const PLAN_PRICE: Record<Plan, number> = { Starter: 7999, Growth: 24999, Agency: 69999, Enterprise: 0 };
 
 export function seedOrganization(counts: { leads: number; clients: number; campaigns: number; team: number }): Organization {

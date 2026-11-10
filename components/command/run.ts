@@ -3,8 +3,9 @@
 import { useCRM } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import { callAgent, runAgentJob } from "@/lib/ai/client";
-import { answerCommand, buildCommandSnapshot, type CommandAction, type CommandAnswer, type CommandOpts, type CommandTodo } from "@/lib/ai/command";
+import { answerCommand, type CommandAction, type CommandAnswer, type CommandOpts, type CommandTodo } from "@/lib/ai/command";
 import type { AgentId, CommandMessage, CommandThread, InsightItem, Recommendation } from "@/lib/types";
+import { flushCRMChanges,refreshCRMChanges } from "@/lib/crmSync";
 import { DAY, uid } from "@/lib/utils";
 
 // Persisted Command Center message: the shared CommandMessage plus UI-only extras
@@ -62,6 +63,7 @@ export async function runCommand(q: string, opts: CommandOpts = {}): Promise<Cmd
   }
   const s = useCRM.getState();
   const local = answerCommand(q, s, me, opts);
+  if (local.denied) return toMessage(local, { mode: "denied" });
   if (local.clarify) return toMessage(local, { mode: "local" }); // no credits for a clarifying question
   let usedModel = false;
   const out = await runAgentJob<CommandAnswer>({
@@ -72,15 +74,17 @@ export async function runCommand(q: string, opts: CommandOpts = {}): Promise<Cmd
     minDelayMs: 450,
     local: async () => {
       if (!useCRM.getState().aiEnabled) return local;
-      const llm = await callAgent(local.agent, q, buildCommandSnapshot(useCRM.getState(), me, local), { format: "insights", clientId: local.clientId });
+      await flushCRMChanges().catch(()=>{});
+      const llm = await callAgent(local.agent, q, undefined, { format: "insights", clientId: local.clientId });
       if (!llm?.summary) return local;
+      await refreshCRMChanges().catch(()=>{});
       usedModel = true;
       const modelInsights: InsightItem[] = (llm.insights ?? []).map((i) => (i.kind === "data" && !i.source ? { ...i, source: "AI model · authorized snapshot" } : i));
       return {
         ...local,
         content: llm.summary,
         insights: [...local.insights.filter((i) => i.kind !== "recommendation"), ...modelInsights, ...local.insights.filter((i) => i.kind === "recommendation"), ...(llm.nextSteps ?? []).map((t) => ({ text: t, kind: "recommendation" as const }))],
-        steps: [...local.steps, "Model reasoned over the authorized, RBAC-filtered snapshot"],
+        steps: [...local.steps, "Agent used server-authorized records and client knowledge"],
       };
     },
   });

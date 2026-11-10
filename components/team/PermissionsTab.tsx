@@ -1,136 +1,51 @@
 "use client";
 
-import { Lock, RotateCcw, ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { Lock } from "lucide-react";
 import { useCRM } from "@/lib/store";
-import { DEFAULT_PERMISSIONS, MODULES, MODULE_LABEL, ROLE_LABEL, type Access, type Module } from "@/lib/permissions";
+import { DEFAULT_PERMISSIONS,MODULES,MODULE_LABEL,ROLE_LABEL,type Access,type Module } from "@/lib/permissions";
 import type { Role } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { Badge, Card, CardHeader, Table, Td, Th } from "@/components/ui";
-import { toast } from "@/components/shell/toast";
-import { ROLES } from "./MembersTab";
+import { Badge,Button,Card,CardHeader,Field,Select } from "@/components/ui";
 
-const ACCESS: Access[] = ["none", "read", "own", "full"];
-const ACCESS_LABEL: Record<Access, string> = { none: "None", read: "Read", own: "Own", full: "Full" };
-const ACCESS_TONE: Record<Access, string> = {
-  full: "bg-success-soft text-success",
-  read: "bg-info-soft text-info",
-  own: "bg-accent-soft text-accent-text",
-  none: "bg-surface-2 text-fg-3",
-};
-const ACCESS_HELP: Record<Access, string> = {
-  none: "Module hidden",
-  read: "View only",
-  own: "Read & write only their own / their client's records",
-  full: "Read & write everything",
-};
+const roles=Object.keys(ROLE_LABEL) as Role[];
+const labels:Record<Access,string>={none:"No access",read:"View only",full:"View and edit",own:"Client portal scope"};
+const options=["none","read","full"] as const;
 
-export function PermissionsTab({ editable }: { editable: boolean }) {
-  const overrides = useCRM((s) => s.settings.permissionOverrides);
-  const setOverride = useCRM((s) => s.setPermissionOverride);
-  const updateSettings = useCRM((s) => s.updateSettings);
-  const log = useCRM((s) => s.log);
-  const me = useCRM((s) => s.currentUserId);
-
-  // Read straight from settings so the matrix reflects edits immediately.
-  const accessOf = (r: Role, m: Module): Access => overrides[r]?.[m] ?? DEFAULT_PERMISSIONS[r][m];
-  const isOverridden = (r: Role, m: Module) => overrides[r]?.[m] !== undefined && overrides[r]?.[m] !== DEFAULT_PERMISSIONS[r][m];
-  const overrideCount = (r: Role) => MODULES.filter((m) => isOverridden(r, m)).length;
-
-  const change = (r: Role, m: Module, a: Access) => {
-    setOverride(r, m, a === DEFAULT_PERMISSIONS[r][m] ? undefined : a);
-    toast(`${ROLE_LABEL[r]} · ${MODULE_LABEL[m]}`, `Access → ${ACCESS_LABEL[a]}`);
-  };
-  const reset = (r: Role) => {
-    updateSettings({ permissionOverrides: { ...overrides, [r]: {} } });
-    log({ actor: "human", actorId: me, entity: "settings", action: "Reset role permissions to defaults", detail: ROLE_LABEL[r], before: `${overrideCount(r)} override(s)`, after: "defaults" });
-    toast(`${ROLE_LABEL[r]} reset to defaults`);
-  };
-
-  return (
-    <div className="space-y-4">
-      <Card className="p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex flex-wrap gap-3">
-            {ACCESS.map((a) => (
-              <span key={a} className="flex items-center gap-1.5 text-xs text-fg-2">
-                <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-medium", ACCESS_TONE[a])}>{ACCESS_LABEL[a]}</span>
-                {ACCESS_HELP[a]}
-              </span>
-            ))}
-            <span className="flex items-center gap-1.5 text-xs text-fg-2">
-              <span className="size-2 rounded-full bg-warning" /> Changed from default
-            </span>
-          </div>
-          {!editable && <Badge tone="warning">Read-only — only admins can change permissions</Badge>}
-        </div>
-        <p className="mt-3 flex items-start gap-1.5 text-xs text-fg-3">
-          <ShieldCheck className="mt-0.5 size-3.5 shrink-0" />
-          Enforced in the UI (navigation, pages and actions). The same matrix must be enforced server-side — in API handlers and database row-level security scoped to the organization — before production.
-        </p>
-      </Card>
-
-      <Card>
-        <CardHeader title="Roles & permissions" subtitle={`${MODULES.length} modules × ${ROLES.length} roles. Admin is locked to full access so the workspace can't be locked out.`} />
-        <Table className="max-h-[70vh]">
-          <thead>
-            <tr>
-              <Th className="sticky left-0 z-[2] min-w-44">Module</Th>
-              {ROLES.map((r) => (
-                <Th key={r} className="min-w-24 text-center">
-                  <span className="block whitespace-normal leading-tight">{ROLE_LABEL[r]}</span>
-                  {r === "admin" ? (
-                    <Lock className="mx-auto mt-0.5 size-3 text-fg-3" />
-                  ) : (
-                    editable &&
-                    overrideCount(r) > 0 && (
-                      <button onClick={() => reset(r)} className="mx-auto mt-0.5 flex items-center gap-0.5 text-[10px] text-accent-text hover:underline" title="Reset role to defaults">
-                        <RotateCcw className="size-2.5" /> Reset ({overrideCount(r)})
-                      </button>
-                    )
-                  )}
-                </Th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {MODULES.map((m) => (
-              <tr key={m} className="hover:bg-surface-2/60">
-                <Td className="sticky left-0 z-[1] bg-surface font-medium">{MODULE_LABEL[m]}</Td>
-                {ROLES.map((r) => {
-                  const a = r === "admin" ? "full" : accessOf(r, m);
-                  const changed = r !== "admin" && isOverridden(r, m);
-                  return (
-                    <Td key={r} className="px-1.5 text-center">
-                      <span className="relative inline-block">
-                        {editable && r !== "admin" ? (
-                          <select
-                            value={a}
-                            onChange={(e) => change(r, m, e.target.value as Access)}
-                            aria-label={`${ROLE_LABEL[r]} access to ${MODULE_LABEL[m]}`}
-                            className={cn("h-6 cursor-pointer appearance-none rounded-md border-0 px-1.5 text-center text-[11px] font-medium outline-none focus:ring-2 focus:ring-[var(--ring)]", ACCESS_TONE[a])}
-                          >
-                            {ACCESS.map((x) => (
-                              <option key={x} value={x}>
-                                {ACCESS_LABEL[x]}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className={cn("inline-block rounded-md px-1.5 py-0.5 text-[11px] font-medium", ACCESS_TONE[a])}>{ACCESS_LABEL[a]}</span>
-                        )}
-                        {changed && <span className="absolute -right-1 -top-1 size-2 rounded-full bg-warning" title={`Default: ${ACCESS_LABEL[DEFAULT_PERMISSIONS[r][m]]}`} />}
-                      </span>
-                    </Td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-        <p className="flex items-center gap-1.5 px-4 py-3 text-xs text-fg-3">
-          <Lock className="size-3.5" /> Client-portal users only ever see their own client&apos;s records and never internal notes, costs, margins, AI prompts or other clients — regardless of these settings.
-        </p>
-      </Card>
+export function PermissionsTab({editable}:{editable:boolean}){
+  const overrides=useCRM(s=>s.settings.permissionOverrides);
+  const setOverride=useCRM(s=>s.setPermissionOverride);
+  const updateSettings=useCRM(s=>s.updateSettings);
+  const log=useCRM(s=>s.log);
+  const actor=useCRM(s=>s.currentUserId);
+  const [role,setRole]=useState<Role>("sales");
+  const locked=role==="admin"||role==="client";
+  const count=MODULES.filter(module=>overrides[role]?.[module]!==undefined).length;
+  const change=(module:Module,value:Access)=>setOverride(role,module,value===DEFAULT_PERMISSIONS[role][module]?undefined:value);
+  return <Card>
+    <CardHeader title="Roles & permissions" subtitle="Choose a role to review or configure access for every agency module."/>
+    <div className="space-y-3 p-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label="Role to configure" className="w-full sm:w-64"><Select className="min-h-11" value={role} onChange={e=>setRole(e.target.value as Role)}>
+          {roles.map(item=><option key={item} value={item}>{ROLE_LABEL[item]}</option>)}
+        </Select></Field>
+        {editable&&!locked&&count>0&&<Button className="min-h-11" onClick={()=>{
+          updateSettings({permissionOverrides:{...overrides,[role]:{}}});
+          log({actor:"human",actorId:actor,entity:"settings",action:"Reset role permissions",detail:ROLE_LABEL[role]});
+        }}>Reset role defaults</Button>}
+      </div>
+      <p className="text-sm text-fg-2">Role settings are saved to this agency account. Staff profiles are used for planning and assignments under the agency login.</p>
+      {locked&&<p className="flex items-center gap-2 text-sm text-fg-2"><Lock size={15}/>{role==="admin"?"Founder access is fixed.":"Client access is managed through the separate client portal."}</p>}
     </div>
-  );
+    <ul className="divide-y divide-border border-t border-border">
+      {MODULES.map(module=>{
+        const current=locked?DEFAULT_PERMISSIONS[role][module]:overrides[role]?.[module]??DEFAULT_PERMISSIONS[role][module];
+        return <li key={module} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+          <span className="text-sm font-medium">{MODULE_LABEL[module]} {overrides[role]?.[module]&&<Badge tone="info">Custom</Badge>}</span>
+          {editable&&!locked?<Select aria-label={ROLE_LABEL[role]+" access to "+MODULE_LABEL[module]} value={current} className="min-h-11 w-full sm:w-48"
+            onChange={e=>change(module,e.target.value as Access)}>{options.map(value=><option value={value} key={value}>{labels[value]}</option>)}</Select>
+            :<Badge>{labels[current]}</Badge>}
+        </li>;
+      })}
+    </ul>
+  </Card>;
 }

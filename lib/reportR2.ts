@@ -89,3 +89,44 @@ export async function removeR2Prefix(prefix: string) {
   } catch { throw new ReportStorageError("R2 cleanup could not finish. The cleanup job is saved for retry."); }
   finally { client.destroy(); }
 }
+
+
+
+function libraryAssetKey(owner:string,assetId:string,file:{id:string;sha256:string}) {
+  if (!/^[a-f0-9-]{36}$/i.test(owner)||!/^[a-f0-9-]{36}$/i.test(file.id)||!/^[a-f0-9]{64}$/i.test(file.sha256))
+    throw new ReportStorageError("Invalid library file identifier.");
+  return "library/"+owner+"/"+contentHash(Buffer.from(assetId))+"/"+file.id+"-"+file.sha256;
+}
+export async function writeLibraryAsset(owner:string,assetId:string,file:{id:string;sha256:string},bytes:Buffer) {
+  const {client,bucket}=storage();
+  try {
+    await client.send(new PutObjectCommand({Bucket:bucket,Key:libraryAssetKey(owner,assetId,file),Body:bytes,ContentType:"application/octet-stream",Metadata:{sha256:file.sha256}}),{abortSignal:AbortSignal.timeout(90000)});
+  } catch { throw new ReportStorageError("The file could not be saved to private R2 storage. Check the connection and try again."); }
+  finally { client.destroy(); }
+}
+export async function readLibraryAsset(owner:string,assetId:string,file:{id:string;sha256:string;size:number}) {
+  const {client,bucket}=storage();
+  try {
+    const object=await client.send(new GetObjectCommand({Bucket:bucket,Key:libraryAssetKey(owner,assetId,file)}),{abortSignal:AbortSignal.timeout(90000)});
+    if(!object.Body||object.ContentLength!==file.size||object.Metadata?.sha256!==file.sha256)throw new Error();
+    const reader=object.Body.transformToWebStream().getReader();
+    return new ReadableStream<Uint8Array>({
+      async pull(controller){
+        try{
+          const part=await reader.read();
+          if(part.done){client.destroy();controller.close();}
+          else controller.enqueue(part.value);
+        }catch(error){client.destroy();controller.error(error);}
+      },
+      async cancel(reason){try{await reader.cancel(reason);}finally{client.destroy();}},
+    });
+  }catch{
+    client.destroy();
+    throw new ReportStorageError("The stored asset could not be read or verified.");
+  }
+}
+export async function removeLibraryAsset(owner:string,assetId:string,file:{id:string;sha256:string}) {
+  const {client,bucket}=storage();
+  try {await client.send(new DeleteObjectCommand({Bucket:bucket,Key:libraryAssetKey(owner,assetId,file)}),{abortSignal:AbortSignal.timeout(20000)});}
+  finally {client.destroy();}
+}

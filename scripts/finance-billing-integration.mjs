@@ -1,0 +1,73 @@
+import assert from "node:assert/strict";
+import {createTestAccount,TestBrowser} from "./reportAuthFixture.mjs";
+import {campaignBrowser} from "./campaignBrowser.mjs";
+import {deadlineDay,offsetDeadlineDay} from "../lib/domain/projectTasks.ts";
+
+let account,browser;
+try{
+  account=await createTestAccount();
+  const api=new TestBrowser(),other=new TestBrowser();
+  await Promise.all([api.signIn(account),other.signIn(account)]);
+  const path="/api/crm/library";
+  const read=async(client=other)=>(await(await client.request(path)).json());
+  const today=deadlineDay(Date.now()), yesterday=offsetDeadlineDay(today,-1), at=new Date().toISOString();
+  const library=await read(api);
+  library.data.clients=[{id:"c",company:"Billing test client",industry:"Technology",location:"Pune",contacts:[],services:["SEO"],retainer:1000,contractStart:"",contractEnd:"",accountManagerId:account.id,health:"Healthy",onboarding:[],createdAt:at,documents:[]}];
+  library.data.projects=[{id:"p",name:"Billing test project",clientId:"c",ownerId:account.id,status:"Active",startDate:yesterday,dueDate:today,createdAt:at}];
+  library.data.invoices=[{id:"i",number:"TEST-001",clientId:"c",projectId:"p",amount:1000,paid:0,issuedAt:yesterday,dueDate:yesterday,status:"Pending",remindersSent:0,description:"Synthetic invoice"}];
+  library.data.team[0].monthlyCost=17320;
+  library.data.team[0].capacityHours=40;
+  library.data.timeEntries=[{id:crypto.randomUUID(),memberId:account.id,projectId:"p",kind:"manual",day:today,minutes:60,note:"Synthetic labor"}];
+  const saved=await api.request(path,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({...library,operationId:crypto.randomUUID()})});
+  assert.equal(saved.status,200,await saved.clone().text());
+  browser=await campaignBrowser();
+  await browser.command("Network.enable");
+  await browser.command("Network.setCookies",{cookies:[...api.cookies].map(([name,value])=>({name,value,url:api.base}))});
+  await browser.command("Emulation.setDeviceMetricsOverride",{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await browser.command("Page.navigate",{url:api.base+"/payments?tab=invoices"});
+  await browser.wait('document.body.innerText.includes("TEST-001")');
+  await browser.click("Draft reminder");
+  assert.match(await browser.evaluate('document.querySelector("textarea[aria-label=\'Payment reminder draft\']").value'),/TEST-001/);
+  await browser.command("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape"});
+  await browser.click("Record payment");
+  await browser.fill("Amount received (₹)","250");
+  await browser.fill("Payment reference","TEST-REF");
+  await browser.click("Record ₹250");
+  await browser.wait('document.body.innerText.includes("Payment history") && document.body.innerText.includes("CRM saved to your account")');
+  const paid=(await read()).data.invoices.find(i=>i.id==="i");
+  assert.equal(paid.paid,250);
+  assert.equal(paid.payments[0].receivedOn,today);
+  assert.equal(paid.payments[0].reference,"TEST-REF");
+  assert.equal(paid.status,"Overdue");
+
+  await browser.command("Page.navigate",{url:api.base+"/payments?tab=retainers"});
+  await browser.wait('document.body.innerText.includes("Billing test client")');
+  await browser.click("Edit retainer");
+  await browser.fill("Monthly retainer amount","1200");
+  await browser.click("Save retainer");
+  await browser.click("Create retainer invoice");
+  await browser.wait('document.body.innerText.includes("ADB-1001") && document.body.innerText.includes("CRM saved to your account")');
+  assert.equal((await read()).data.invoices.find(i=>i.retainerMonth===today.slice(0,7)).amount,1200);
+
+  await browser.command("Page.navigate",{url:api.base+"/payments?tab=expenses"});
+  await browser.wait('document.body.innerText.includes("Add expense")');
+  await browser.click("Add expense");
+  await browser.fill("Amount (₹)","100");
+  await browser.fill("Vendor","Synthetic supplier");
+  await browser.fill("Client","c");
+  await browser.fill("Project","p");
+  await browser.click("Save");
+  await browser.wait('document.body.innerText.includes("Synthetic supplier") && document.body.innerText.includes("CRM saved to your account")');
+  assert.equal((await read()).data.expenses[0].projectId,"p");
+  await browser.command("Page.navigate",{url:api.base+"/payments?tab=profitability"});
+  await browser.wait('document.body.innerText.includes("Billing test project") && document.body.innerText.includes("Payments received")');
+  const project=await browser.evaluate('Array.from(document.querySelectorAll("tr")).find(row=>row.cells[0]?.textContent==="Billing test project")?.innerText');
+  assert.match(project,/₹100/);
+  assert.match(project,/₹750/);
+  await browser.command("Emulation.setDeviceMetricsOverride",{width:375,height:812,deviceScaleFactor:1,mobile:true});
+  assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth"),true);
+  console.log("PASS: overdue draft, dated partial receipt, retainers, linked expenses, profitability, same-account persistence and mobile layout.");
+}finally{
+  await browser?.close();
+  if(account)await account.remove();
+}

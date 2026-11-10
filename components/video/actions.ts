@@ -4,6 +4,7 @@ import type { InsightItem, VideoProject, VideoTrack } from "@/lib/types";
 import { useCRM } from "@/lib/store";
 import { callAgent, runAgentJob } from "@/lib/ai/client";
 import { analyzeProject, buildTimeline, fmtDuration, makeVersions, reviseTimeline, timelineEnd, type Aspect, type RevisionResult } from "@/lib/ai/video";
+import {flushCRMChanges,refreshCRMChanges} from "@/lib/crmSync";
 import { DAY, uid } from "@/lib/utils";
 
 // Video-module domain actions built on the generic store helpers (no shared-file edits).
@@ -13,6 +14,19 @@ const get = (id: string) => S().videos.find((v) => v.id === id);
 const minutesFor = (p: VideoProject) => Math.max(1, Math.ceil(p.settings.targetDurationSec / 60));
 
 export const draftMinutes = minutesFor;
+async function reserveDraft(project:VideoProject){
+  try{
+    await flushCRMChanges();
+    const response=await fetch("/api/tenant",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"videoDraft",minutes:minutesFor(project)})});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error);
+    await refreshCRMChanges().catch(()=>{});
+    return true;
+  }catch(error){
+    S().notify({title:"Video draft unavailable",body:error instanceof Error?error.message:"Could not reserve draft minutes.",kind:"warning",href:"/settings?tab=plan"});
+    return false;
+  }
+}
 
 export async function analyzeVideo(id: string): Promise<boolean> {
   const p = get(id);
@@ -34,7 +48,7 @@ export async function analyzeVideo(id: string): Promise<boolean> {
 export async function generateDraft(id: string): Promise<VideoTrack[] | null> {
   const p = get(id);
   if (!p) return null;
-  if (!S().consumeUsage("videoMinutes", minutesFor(p))) return null;
+  if (!await reserveDraft(p)) return null;
   const prev = p.status;
   S().patch("videos", id, { status: "Analyzing" });
   const res = await runAgentJob({
@@ -68,7 +82,7 @@ export async function reviseVideo(id: string, tracks: VideoTrack[]): Promise<Rev
   if (!p) return null;
   const open = p.reviewNotes.filter((n) => !n.resolved);
   if (!open.length) return null;
-  if (!S().consumeUsage("videoMinutes", minutesFor(p))) return null;
+  if (!await reserveDraft(p)) return null;
   const prev = p.status;
   S().patch("videos", id, { status: "Revising" });
   const res = await runAgentJob({ agent: "video", title: `AI revise · ${p.title}`, input: open.map((n) => n.body).join(" | "), clientId: p.clientId, minDelayMs: 1000, local: () => reviseTimeline({ ...p, tracks }, open) });

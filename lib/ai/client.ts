@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentId, InsightItem } from "../types";
+import {flushCRMChanges,refreshCRMChanges} from "../crmSync";
 import { useCRM } from "../store";
 
 export interface AgentInsights {
@@ -14,9 +15,11 @@ export interface AgentInsights {
 export async function callAgent(agent: AgentId, task: string, context: unknown, opts: { format?: "text" | "insights"; clientId?: string } = {}) {
   const s = useCRM.getState();
   if (!s.aiEnabled) return null;
-  const knowledge = opts.clientId ? s.knowledge.find((k) => k.clientId === opts.clientId) : undefined;
+  const brief = context === undefined ? undefined : JSON.stringify(context).slice(0,12000);
   try {
-    const res = await fetch("/api/ai/agent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent, task, context, format: opts.format ?? "text", knowledge }) });
+    await flushCRMChanges();
+    const res = await fetch("/api/ai/agent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent, task, brief, clientId: opts.clientId || undefined, format: opts.format ?? "text" }) });
+    await refreshCRMChanges().catch(()=>{});
     if (!res.ok) return null;
     return (await res.json()) as { text?: string } & Partial<AgentInsights>;
   } catch {

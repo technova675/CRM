@@ -6,14 +6,17 @@ import { useCRM, useMe } from "@/lib/store";
 import type { Project, Task } from "@/lib/types";
 import { cn, DAY, fmtShort, isPast, uid } from "@/lib/utils";
 import { Badge, Button, Card, EmptyState, Field, Input, MemberAvatar, Modal, Progress, Segmented, Select, StatusBadge, Table, Td, Th } from "@/components/ui";
+import { Milestones } from "./Milestones";
+import { deadlineDay } from "@/lib/domain/projectTasks";
+import { useDeadlineToday } from "./useDeadlineToday";
 import { toast } from "@/components/shell/toast";
 
 const P_STATUSES: Project["status"][] = ["Planning", "Active", "On Hold", "Completed"];
 
-export function projectProgress(p: Project, tasks: Task[]) {
+export function projectProgress(p: Project, tasks: Task[], today=deadlineDay(Date.now())) {
   const mine = tasks.filter((t) => t.projectId === p.id);
   const done = mine.filter((t) => t.status === "Done").length;
-  const overdue = mine.filter((t) => t.status !== "Done" && isPast(t.dueDate)).length;
+  const overdue = mine.filter((t) => t.status !== "Done" && !!deadlineDay(t.dueDate) && deadlineDay(t.dueDate)<today).length;
   return { total: mine.length, done, overdue, pct: mine.length ? (done / mine.length) * 100 : p.status === "Completed" ? 100 : 0 };
 }
 
@@ -42,7 +45,7 @@ function ProjectCard({ p, onOpen }: { p: Project; onOpen: () => void }) {
   );
 }
 
-export function ProjectsView({ writable, onOpenProject }: { writable: boolean; onOpenProject: (id: string) => void }) {
+export function ProjectsView({ writable, onOpenProject, milestoneProject, onMilestones }: { writable: boolean; onOpenProject: (id: string) => void; milestoneProject?:string; onMilestones:(id:string|null)=>void }) {
   const projects = useCRM((s) => s.projects);
   const tasks = useCRM((s) => s.tasks);
   const clients = useCRM((s) => s.clients);
@@ -50,11 +53,15 @@ export function ProjectsView({ writable, onOpenProject }: { writable: boolean; o
   const [view, setView] = useState<"board" | "list">("board");
   const [clientId, setClientId] = useState("All");
   const [creating, setCreating] = useState(false);
+  const [editing,setEditing]=useState<Project>();
+  const today=useDeadlineToday();
+  const currentProject=projects.find(p=>p.id===milestoneProject);
   const clientName = (id: string) => clients.find((c) => c.id === id)?.company ?? "—";
   const list = useMemo(() => projects.filter((p) => clientId === "All" || p.clientId === clientId).sort((a, b) => a.dueDate.localeCompare(b.dueDate)), [projects, clientId]);
 
   return (
     <div className="space-y-3">
+      {currentProject&&<Milestones key={currentProject.id} project={currentProject} writable={writable} onClose={()=>onMilestones(null)}/>}
       <div className="flex flex-wrap items-center gap-2">
         <Segmented value={view} onChange={setView} options={[{ value: "board", label: "Board" }, { value: "list", label: "List" }]} />
         <Select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-48"><option value="All">All clients</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.company}</option>)}</Select>
@@ -74,7 +81,7 @@ export function ProjectsView({ writable, onOpenProject }: { writable: boolean; o
                 <div className="mb-1 flex items-center justify-between px-1.5 py-1"><StatusBadge status={st} /><span className="text-xs tabular-nums text-fg-3">{col.length}</span></div>
                 <div className="space-y-2">
                   {col.map((p) => (
-                    <div key={p.id} draggable={writable} onDragStart={(e) => e.dataTransfer.setData("text/project", p.id)}><ProjectCard p={p} onOpen={() => onOpenProject(p.id)} /></div>
+                    <div key={p.id} draggable={writable} onDragStart={(e) => e.dataTransfer.setData("text/project", p.id)}><ProjectCard p={p} onOpen={() => onOpenProject(p.id)} /><Button className="mt-1 min-h-11" variant="ghost" onClick={()=>onMilestones(p.id)}>Milestones ({p.milestones?.filter(m=>m.completedAt).length??0}/{p.milestones?.length??0})</Button>{writable&&<Button variant="ghost" className="mt-1 min-h-11" onClick={()=>setEditing(p)}>Edit project</Button>}</div>
                   ))}
                 </div>
               </div>
@@ -87,10 +94,10 @@ export function ProjectsView({ writable, onOpenProject }: { writable: boolean; o
             <thead><tr><Th>Project</Th><Th>Client</Th><Th>Owner</Th><Th>Status</Th><Th className="w-40">Progress</Th><Th>Start</Th><Th>Due</Th></tr></thead>
             <tbody>
               {list.map((p) => {
-                const pr = projectProgress(p, tasks);
+                const pr = projectProgress(p, tasks,today);
                 return (
                   <tr key={p.id} className="cursor-pointer hover:bg-surface-2/60" onClick={() => onOpenProject(p.id)}>
-                    <Td className="font-medium">{p.name}</Td>
+                    <Td className="font-medium"><Button variant="ghost" className="min-h-11" onClick={e=>{e.stopPropagation();onOpenProject(p.id);}}>{p.name}</Button><Button className="min-h-11" variant="ghost" onClick={e=>{e.stopPropagation();onMilestones(p.id);}}>Milestones ({p.milestones?.length??0})</Button>{writable&&<Button variant="ghost" className="min-h-11" onClick={e=>{e.stopPropagation();setEditing(p);}}>Edit project</Button>}</Td>
                     <Td className="text-fg-2">{clientName(p.clientId)}</Td>
                     <Td><MemberAvatar id={p.ownerId} showName /></Td>
                     <Td>
@@ -108,32 +115,34 @@ export function ProjectsView({ writable, onOpenProject }: { writable: boolean; o
           </Table>
         </Card>
       )}
-      {creating && <NewProjectModal onClose={() => setCreating(false)} />}
+      {(creating||editing) && <NewProjectModal project={editing} onClose={() => {setCreating(false);setEditing(undefined);}} />}
     </div>
   );
 }
 
-function NewProjectModal({ onClose }: { onClose: () => void }) {
+function NewProjectModal({ onClose,project }: { onClose: () => void;project?:Project }) {
   const me = useMe();
   const clients = useCRM((s) => s.clients);
   const team = useCRM((s) => s.team);
   const upsert = useCRM((s) => s.upsert);
   const log = useCRM((s) => s.log);
-  const [f, setF] = useState(() => ({ name: "", clientId: clients[0]?.id ?? "", ownerId: me.id, status: "Planning" as Project["status"], start: new Date().toISOString().slice(0, 10), due: new Date(Date.now() + 30 * DAY).toISOString().slice(0, 10) }));
+  const [f, setF] = useState(() => ({ name: project?.name??"", clientId: project?.clientId??clients[0]?.id??"", ownerId: project?.ownerId??me.id, status: project?.status??"Planning" as Project["status"], start: project?.startDate.slice(0,10)??new Date().toISOString().slice(0, 10), due: project?.dueDate.slice(0,10)??new Date(Date.now() + 30 * DAY).toISOString().slice(0, 10) }));
   const submit = () => {
     if (!f.name.trim() || !f.clientId) return toast("Name and client are required", undefined, "warning");
-    const p: Project = { id: uid("prj"), name: f.name.trim(), clientId: f.clientId, ownerId: f.ownerId, status: f.status, startDate: new Date(`${f.start}T09:00:00`).toISOString(), dueDate: new Date(`${f.due}T18:00:00`).toISOString(), createdAt: new Date().toISOString() };
+    if(!f.start||!f.due||f.start>f.due||!Number.isFinite(Date.parse(f.start))||!Number.isFinite(Date.parse(f.due)))return toast("Choose a deadline on or after the start date",undefined,"warning");
+    if(!team.some(m=>m.id===f.ownerId&&m.role!=="client"&&m.status==="active"))return toast("Choose an active project owner",undefined,"warning");
+    const p: Project = { ...project, id: project?.id??uid("prj"), name: f.name.trim(), clientId: f.clientId, ownerId: f.ownerId, status: f.status, startDate: new Date(`${f.start}T09:00:00+05:30`).toISOString(), dueDate: new Date(`${f.due}T18:00:00+05:30`).toISOString(), createdAt: project?.createdAt??new Date().toISOString() };
     upsert("projects", p);
-    log({ actor: "human", actorId: me.id, entity: "task", entityId: p.id, action: "Created project", detail: p.name });
-    toast("Project created", "Link tasks to it from the task drawer.");
+    log({ actor: "human", actorId: me.id, entity: "task", entityId: p.id, action: project?"Updated project":"Created project", detail: p.name });
+    toast(project?"Project updated":"Project created", "Link tasks to it from the task drawer.");
     onClose();
   };
   return (
-    <Modal open onClose={onClose} title="New project" footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={submit}>Create</Button></>}>
+    <Modal open onClose={onClose} title={project?"Edit project":"New project"} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={submit}>{project?"Save project":"Create"}</Button></>}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Name" className="col-span-2"><Input autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Q4 Performance Sprint" /></Field>
-        <Field label="Client"><Select value={f.clientId} onChange={(e) => setF({ ...f, clientId: e.target.value })}>{clients.map((c) => <option key={c.id} value={c.id}>{c.company}</option>)}</Select></Field>
-        <Field label="Owner"><Select value={f.ownerId} onChange={(e) => setF({ ...f, ownerId: e.target.value })}>{team.filter((t) => t.role !== "client").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></Field>
+        <Field label="Client"><Select disabled={!!project} value={f.clientId} onChange={(e) => setF({ ...f, clientId: e.target.value })}>{clients.map((c) => <option key={c.id} value={c.id}>{c.company}</option>)}</Select></Field>
+        <Field label="Owner"><Select value={f.ownerId} onChange={(e) => setF({ ...f, ownerId: e.target.value })}>{team.filter((t) => t.role !== "client"&&t.status==="active").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></Field>
         <Field label="Status"><Select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value as Project["status"] })}>{P_STATUSES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
         <div />
         <Field label="Start"><Input type="date" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} /></Field>

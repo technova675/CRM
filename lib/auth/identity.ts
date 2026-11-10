@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 export class AuthenticationRequiredError extends Error {
   constructor() { super("Sign in to access your reports."); }
 }
+export class WorkspaceAccessError extends Error {
+  constructor(message = "This session cannot access that workspace.") { super(message); }
+}
 export class AuthenticationUnavailableError extends Error {
   constructor() { super("Could not verify your session. Check your connection and retry."); }
 }

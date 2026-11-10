@@ -6,6 +6,10 @@ import { AlertTriangle, Info } from "lucide-react";
 import { useCRM } from "@/lib/store";
 import { TASK_HOURS } from "@/lib/ai/finance";
 import { ROLE_LABEL } from "@/lib/permissions";
+import { deadlineDay,offsetDeadlineDay } from "@/lib/domain/projectTasks";
+import { formatMinutes,minutesInWeek,teamWeek } from "@/lib/domain/teamTime";
+import { isBlockedByDeps } from "@/components/tasks/related";
+import { useDeadlineToday } from "@/components/tasks/useDeadlineToday";
 import { cn } from "@/lib/utils";
 import { Avatar, Badge, Card, CardHeader, Progress, Segmented, Table, Td, Th } from "@/components/ui";
 
@@ -15,24 +19,29 @@ export function WorkloadTab() {
   const campaigns = useCRM((s) => s.campaigns);
   const clients = useCRM((s) => s.clients);
   const [sort, setSort] = useState<"load" | "overdue" | "name">("load");
-  const [now] = useState(() => Date.now());
+  const today=useDeadlineToday();
+  const timeEntries=useCRM(s=>s.timeEntries);
 
   const rows = useMemo(() => {
+    const byId=new Map(tasks.map(task=>[task.id,task]));
+    const week=teamWeek(today);
+    const upcoming=offsetDeadlineDay(today,6);
     return team
-      .filter((m) => m.role !== "client" && m.status !== "disabled")
+      .filter((m) => m.role !== "client" && (m.status??"active") === "active")
       .map((m) => {
         const open = tasks.filter((t) => t.assigneeId === m.id && t.status !== "Done");
-        const hours = open.reduce((a, t) => a + TASK_HOURS[t.priority], 0);
-        const overdue = open.filter((t) => new Date(t.dueDate).getTime() < now).length;
-        const blocked = open.filter((t) => t.status === "Blocked").length;
+        const hours = open.filter(t=>deadlineDay(t.dueDate)>=today&&deadlineDay(t.dueDate)<=upcoming).reduce((a,t)=>a+(TASK_HOURS[t.priority]??0),0);
+        const actual=timeEntries.filter(entry=>entry.memberId===m.id&&(entry.kind==="manual"||entry.endedAt)).reduce((sum,entry)=>sum+minutesInWeek(entry,week.start,week.end,0),0);
+        const overdue = open.filter((t) => !!deadlineDay(t.dueDate)&&deadlineDay(t.dueDate)<today).length;
+        const blocked = open.filter((t) => t.status === "Blocked"||isBlockedByDeps(t,byId)).length;
         const cmps = campaigns.filter((c) => c.status !== "Completed" && (c.teamIds.includes(m.id) || c.ownerId === m.id));
         const clientIds = new Set([...clients.filter((c) => c.accountManagerId === m.id).map((c) => c.id), ...cmps.map((c) => c.clientId)]);
         const capacity = m.capacityHours ?? 40;
-        const load = capacity ? (hours / capacity) * 100 : 0;
-        return { m, open: open.length, hours, overdue, blocked, campaigns: cmps.length, clients: clientIds.size, capacity, load, urgent: open.filter((t) => t.priority === "Urgent").length };
+        const load = capacity ? (hours / capacity) * 100 : hours ? 101 : 0;
+        return { m, open: open.length, hours, overdue, blocked, campaigns: cmps.length, clients: clientIds.size, capacity, load, actual, urgent: open.filter((t) => t.priority === "Urgent").length };
       })
       .sort((a, b) => (sort === "load" ? b.load - a.load : sort === "overdue" ? b.overdue - a.overdue : a.m.name.localeCompare(b.m.name)));
-  }, [team, tasks, campaigns, clients, sort, now]);
+  }, [team, tasks, campaigns, clients, sort, today,timeEntries]);
 
   const over = rows.filter((r) => r.load > 100);
 
@@ -49,7 +58,7 @@ export function WorkloadTab() {
       <Card>
         <CardHeader
           title="Workload"
-          subtitle="Open tasks converted to estimated hours vs weekly capacity"
+          subtitle="Upcoming estimates, weekly capacity and recorded time"
           action={<Segmented value={sort} onChange={setSort} options={[{ value: "load", label: "Load" }, { value: "overdue", label: "Overdue" }, { value: "name", label: "Name" }]} />}
         />
         <Table>
@@ -57,7 +66,7 @@ export function WorkloadTab() {
             <tr>
               <Th>Member</Th>
               <Th className="text-right">Open tasks</Th>
-              <Th className="text-right">Est. hours</Th>
+              <Th className="text-right">Est. next 7 days</Th><Th className="text-right">Logged this week</Th>
               <Th className="w-48">Capacity</Th>
               <Th className="text-right">Overdue</Th>
               <Th className="text-right">Campaigns</Th>
@@ -85,7 +94,7 @@ export function WorkloadTab() {
                   </Link>
                   {r.urgent > 0 && <span className="block text-[11px] text-danger">{r.urgent} urgent</span>}
                 </Td>
-                <Td className="text-right tabular-nums">{r.hours} h</Td>
+                <Td className="text-right tabular-nums">{r.hours} h</Td><Td className="text-right tabular-nums">{formatMinutes(r.actual)}</Td>
                 <Td>
                   <div className="flex items-center gap-2">
                     <Progress value={r.load} tone={r.load > 100 ? "danger" : r.load > 80 ? "warning" : "success"} className="flex-1" />
@@ -106,7 +115,7 @@ export function WorkloadTab() {
         </Table>
         <p className="flex items-start gap-1.5 px-4 py-3 text-xs text-fg-3">
           <Info className="mt-0.5 size-3.5 shrink-0" />
-          Assumption: each open task takes Urgent {TASK_HOURS.Urgent} h · High {TASK_HOURS.High} h · Medium {TASK_HOURS.Medium} h · Low {TASK_HOURS.Low} h, and the open backlog is compared against one week of capacity. Connect time tracking for actual hours.
+          Estimated load uses the priority of tasks due in the next seven calendar days. Logged time uses completed entries in the current Monday–Sunday week.
         </p>
       </Card>
     </div>

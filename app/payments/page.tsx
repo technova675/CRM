@@ -6,7 +6,8 @@ import { Plus } from "lucide-react";
 import { useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import { Button, PageHeader, Tabs } from "@/components/ui";
-import { FlowStrip } from "@/components/finance/FlowStrip";
+import { BillingResults } from "@/components/finance/BillingResults";
+import { RetainersPanel } from "@/components/finance/RetainersPanel";
 import { InvoicesPanel, NewInvoiceModal } from "@/components/finance/InvoicesPanel";
 import { OverviewPanel } from "@/components/finance/OverviewPanel";
 import { ExpensesPanel } from "@/components/finance/ExpensesPanel";
@@ -14,9 +15,10 @@ import { ProfitabilityPanel } from "@/components/finance/ProfitabilityPanel";
 import { ForecastPanel } from "@/components/finance/ForecastPanel";
 import { useFinance } from "@/components/finance/useFinance";
 
-type Tab = "overview" | "invoices" | "expenses" | "profitability" | "forecast";
+type Tab = "overview" | "retainers" | "invoices" | "expenses" | "profitability" | "forecast";
 const TABS: { value: Tab; label: string }[] = [
   { value: "overview", label: "Overview" },
+  { value: "retainers", label: "Retainers" },
   { value: "invoices", label: "Invoices" },
   { value: "expenses", label: "Expenses" },
   { value: "profitability", label: "Profitability" },
@@ -48,7 +50,7 @@ function FinanceInner() {
   return (
     <div>
       <PageHeader
-        title="Finance"
+        title="Finance & Billing"
         description="Revenue, invoices, expenses, profitability and cash-flow forecast."
         actions={
           canWrite && (
@@ -58,14 +60,15 @@ function FinanceInner() {
           )
         }
       />
-      <FlowStrip k={data.kpis} />
+
       <div className="mb-4">
         <Tabs value={tab} onChange={setTab} tabs={TABS} />
       </div>
-      {tab === "overview" && <OverviewPanel data={data} canWrite={canWrite} />}
+      {tab === "overview" && <div className="space-y-4"><BillingResults/><OverviewPanel data={data} canWrite={canWrite} /></div>}
+      {tab === "retainers" && <RetainersPanel writable={canWrite}/>}
       {tab === "invoices" && <InvoicesPanel isClient={false} canWrite={canWrite} />}
       {tab === "expenses" && <ExpensesPanel canWrite={canWrite} />}
-      {tab === "profitability" && <ProfitabilityPanel data={data} />}
+      {tab === "profitability" && <div className="space-y-4"><BillingResults details/><details className="rounded-xl border border-border bg-surface p-4"><summary className="cursor-pointer font-medium">Retainer run-rate estimates</summary><div className="mt-4"><ProfitabilityPanel data={data}/></div></details></div>}
       {tab === "forecast" && <ForecastPanel data={data} />}
       {creating && <NewInvoiceModal open onClose={() => setCreating(false)} />}
     </div>

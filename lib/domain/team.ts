@@ -10,7 +10,7 @@ import { money, uid } from "../utils";
 
 const COLORS = ["#7c3aed", "#0ea5e9", "#f97316", "#10b981", "#ec4899", "#eab308", "#06b6d4", "#84cc16", "#f43f5e", "#a855f7"];
 
-export function inviteMember(input: { name: string; email: string; role: Role; title?: string; capacityHours?: number; monthlyCost?: number; freelancer?: boolean; clientId?: string }): TeamMember | null {
+export function addMemberProfile(input: { name: string; email: string; role: Role; title?: string; capacityHours?: number; monthlyCost?: number; freelancer?: boolean; clientId?: string }): TeamMember | null {
   const s = useCRM.getState();
   const email = input.email.trim().toLowerCase();
   if (s.team.some((m) => m.email.toLowerCase() === email)) return null;
@@ -25,10 +25,10 @@ export function inviteMember(input: { name: string; email: string; role: Role; t
     monthlyCost: input.monthlyCost ?? 0,
     freelancer: input.freelancer,
     clientId: input.role === "client" ? input.clientId : undefined,
-    status: "invited",
+    status: "active",
   };
   useCRM.setState((st) => ({ team: [...st.team, member] }));
-  s.log({ actor: "human", actorId: s.currentUserId, entity: "settings", entityId: member.id, action: "Invited team member", detail: `${member.name} <${member.email}>`, after: ROLE_LABEL[member.role] });
+  s.log({ actor: "human", actorId: s.currentUserId, entity: "settings", entityId: member.id, action: "Created team profile", detail: `${member.name} <${member.email}>`, after: ROLE_LABEL[member.role] });
   return member;
 }
 

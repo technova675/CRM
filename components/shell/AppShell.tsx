@@ -8,11 +8,13 @@ import { useCRM, useMe } from "@/lib/store";
 import { can, moduleFromPath, MODULE_LABEL, ROLE_LABEL, setPermissionOverrides } from "@/lib/permissions";
 import { cn, relTime } from "@/lib/utils";
 import { Avatar, Button, EmptyState, Kbd } from "@/components/ui";
-import { CLIENT_LABELS, NAV, NAV_GROUPS, type NavGroup } from "./nav";
+import { CLIENT_LABELS, NAV, NAV_GROUPS, type NavItem } from "./nav";
 import { useUI } from "./ui-state";
 import { Toaster } from "./toast";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { CommandPalette } from "./CommandPalette";
+import { deadlineItems } from "@/lib/domain/projectTasks";
+import { useDeadlineToday } from "@/components/tasks/useDeadlineToday";
 import { AssistantPanel } from "./AssistantPanel";
 
 function useTheme() {
@@ -49,27 +51,6 @@ function Logo() {
   );
 }
 
-function useCollapsedGroups() {
-  const [collapsed, setCollapsed] = useState<NavGroup[]>([]);
-  useEffect(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem("adbibe-nav-collapsed") ?? "[]");
-      // Per-viewer convenience stored in localStorage (unavailable during SSR).
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (Array.isArray(v)) setCollapsed(v);
-    } catch {}
-  }, []);
-  const toggle = (g: NavGroup) =>
-    setCollapsed((c) => {
-      const next = c.includes(g) ? c.filter((x) => x !== g) : [...c, g];
-      try {
-        localStorage.setItem("adbibe-nav-collapsed", JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  return { collapsed, toggle };
-}
-
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const path = usePathname();
   const me = useMe();
@@ -81,45 +62,44 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const recCount = useCRM((s) => s.recommendations.filter((r) => r.status === "New" && r.priority === "High").length);
   const clientReview = useCRM((s) => s.creatives.filter((c) => c.status === "Client Review" && (me.role !== "client" || c.clientId === me.clientId)).length);
   const counts: Partial<Record<string, number>> = { inbox: me.role === "client" ? 0 : inboxCount, automations: approvalCount, performance: recCount, creative: me.role === "client" ? clientReview : 0 };
-  const { collapsed, toggle } = useCollapsedGroups();
+
   const isClient = me.role === "client";
+  const activePath=(href:string)=>path===href||path.startsWith(href+"/");
+  const renderItem=(item:NavItem)=>{
+    const active=activePath(item.href);
+    const badge=item.href==="/approvals"?approvalCount:item.href==="/automations"?0:counts[item.module]??0;
+    const label=(isClient&&CLIENT_LABELS[item.module])||item.label;
+    return <li key={item.href}>
+      <Link href={item.href} onClick={onNavigate} aria-current={active?"page":undefined}
+        className={cn("group flex min-h-9 items-center gap-2.5 rounded-lg border px-2 text-[13px] font-medium transition focus-visible:outline-2 focus-visible:outline-accent max-lg:min-h-11",
+          active?"border-border bg-surface text-fg shadow-card":"border-transparent text-fg-2 hover:bg-surface-2 hover:text-fg")}>
+        <item.icon className={cn("size-4 shrink-0",active?"text-accent":"text-fg-3")}/>
+        <span className="flex-1 truncate">{label}</span>
+        {badge>0&&<span className="rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white tabular-nums">{badge}</span>}
+      </Link>
+    </li>;
+  };
   return (
-    <nav className="flex h-full flex-col gap-3 overflow-y-auto px-3 py-4">
+    <nav aria-label="Primary navigation" className="flex h-full flex-col gap-4 overflow-y-auto px-3 py-4">
       <Logo />
-      <div className="flex flex-col gap-2">
-        {NAV_GROUPS.map((g) => {
-          const items = NAV.filter((n) => n.group === g && can(me.role, n.module));
-          if (!items.length) return null;
-          const hasActive = items.some((n) => path === n.href || path.startsWith(n.href + "/"));
-          const isCollapsed = collapsed.includes(g) && !hasActive;
-          return (
-            <div key={g}>
-              {!isClient && (
-                <button onClick={() => toggle(g)} className="flex w-full items-center gap-1 px-2 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-fg-3 hover:text-fg-2">
-                  <span className="flex-1 text-left">{g}</span>
-                  <ChevronDown className={cn("size-3 transition-transform", isCollapsed && "-rotate-90")} />
-                </button>
-              )}
-              {!isCollapsed && (
-                <ul className="space-y-0.5">
-                  {items.map((n) => {
-                    const active = path === n.href || path.startsWith(n.href + "/");
-                    const badge = counts[n.module] ?? 0;
-                    const label = (isClient && CLIENT_LABELS[n.module]) || n.label;
-                    return (
-                      <li key={n.href}>
-                        <Link href={n.href} onClick={onNavigate} className={cn("group flex h-8 items-center gap-2.5 rounded-lg px-2 text-[13px] font-medium transition", active ? "bg-surface text-fg shadow-card border border-border" : "text-fg-2 hover:bg-surface-2 hover:text-fg border border-transparent")}>
-                          <n.icon className={cn("size-4", active ? "text-accent" : "text-fg-3 group-hover:text-fg-2")} />
-                          <span className="flex-1 truncate">{label}</span>
-                          {badge > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white tabular-nums">{badge}</span>}
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          );
+      <div className="flex flex-col gap-3">
+        {NAV_GROUPS.map(group=>{
+          const items=NAV.filter(item=>item.group===group&&can(me.role,item.module)&&
+            (item.href!=="/knowledge"||(!isClient&&can(me.role,"clients"))));
+          if(!items.length)return null;
+          const main=isClient?items:items.filter(item=>!item.secondary);
+          const secondary=isClient?[]:items.filter(item=>item.secondary);
+          const show=secondary.some(item=>activePath(item.href));
+          return <section key={group} aria-label={group}>
+            {!isClient&&<h2 className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-fg-3">{group}</h2>}
+            {!!main.length&&<ul className="space-y-0.5">{main.map(renderItem)}</ul>}
+            {!!secondary.length&&<details key={group+":"+show} open={show||undefined} className="group/tools">
+              <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-xs text-fg-3 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent max-lg:min-h-11">
+                <ChevronDown className="size-3 -rotate-90 group-open/tools:rotate-0"/> More {group==="CRM & sales"?"sales":group.toLowerCase()} tools
+              </summary>
+              <ul className="ml-2 space-y-0.5 border-l border-border pl-1">{secondary.map(renderItem)}</ul>
+            </details>}
+          </section>;
         })}
       </div>
       <div className="mt-auto">
@@ -138,12 +118,26 @@ function AccountMenu() {
 
 function Notifications() {
   const [open, setOpen] = useState(false);
-  const items = useCRM((s) => s.notifications);
+  const local = useCRM((s) => s.notifications);
+  const account = useCRM((s) => s.accountNotifications);
+  const prefs = useCRM((s) => s.settings.notificationPrefs);
+  const readIds = useCRM((s) => s.settings.readNotificationIds);
   const markRead = useCRM((s) => s.markNotificationsRead);
+  const me=useMe();
+  const today=useDeadlineToday();
+  const tasks=useCRM(s=>s.tasks),projects=useCRM(s=>s.projects);
+  const overdue=useMemo(()=>me.role!=="client"&&can(me.role,"tasks")?deadlineItems(tasks,projects).filter(item=>item.owner===me.id&&!item.done&&item.day<today).length:0,[tasks,projects,today,me.id,me.role]);
+  const items = useMemo(()=>{
+    const read = new Set(readIds);
+    return [...account,...local].filter(n=>!n.category||prefs[n.category]?.inApp!==false)
+      .map(n=>({...n,read:n.read||read.has(n.id)}))
+      .sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)).slice(0,100);
+  },[account,local,prefs,readIds]);
+  const showOverdue = overdue>0 && prefs.Tasks?.inApp!==false;
   const unread = items.filter((n) => !n.read).length;
   return (
     <div className="relative">
-      <button onClick={() => setOpen((o) => !o)} className="relative grid size-8 place-items-center rounded-lg text-fg-2 hover:bg-surface-2" aria-label="Notifications">
+      <button onClick={() => setOpen((o) => !o)} className="relative grid size-8 place-items-center rounded-lg text-fg-2 hover:bg-surface-2" aria-label="Notifications" aria-expanded={open}>
         <Bell className="size-4" />
         {unread > 0 && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-danger ring-2 ring-bg" />}
       </button>
@@ -153,14 +147,16 @@ function Notifications() {
           <div className="animate-in absolute right-0 top-10 z-40 w-[min(360px,calc(100vw-2rem))] rounded-xl border border-border bg-surface shadow-pop">
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
               <span className="text-[13px] font-semibold">Notifications</span>
-              <button className="text-xs text-accent-text hover:underline" onClick={markRead}>
+              {can(me.role,"settings")&&<Link href="/settings?tab=notifications" className="text-xs text-accent-text hover:underline" onClick={()=>setOpen(false)}>Preferences</Link>}
+              <button className="text-xs text-accent-text hover:underline" onClick={()=>markRead(items.map(n=>n.id))}>
                 Mark all read
               </button>
             </div>
             <div className="max-h-96 overflow-y-auto p-1">
-              {items.length === 0 && <EmptyState title="You're all caught up" />}
+              {showOverdue&&<Link href="/tasks?tab=reminders" onClick={()=>setOpen(false)} className="flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-danger hover:bg-surface-2">{overdue} overdue {overdue===1?"deadline":"deadlines"} assigned to you</Link>}
+              {items.length === 0 && !showOverdue && <EmptyState title="You're all caught up" />}
               {items.slice(0, 30).map((n) => (
-                <Link key={n.id} href={n.href ?? "#"} onClick={() => setOpen(false)} className="flex gap-2.5 rounded-lg px-2 py-2 hover:bg-surface-2">
+                <Link key={n.id} href={n.href ?? "#"} onClick={() => {markRead([n.id]);setOpen(false);}} className="flex gap-2.5 rounded-lg px-2 py-2 hover:bg-surface-2">
                   <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", n.read ? "bg-transparent" : n.kind === "warning" ? "bg-warning" : n.kind === "success" ? "bg-success" : "bg-accent")} />
                   <span className="min-w-0">
                     <span className="block text-[13px] font-medium">{n.title}</span>

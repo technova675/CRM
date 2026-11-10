@@ -110,7 +110,8 @@ export const AGENT_LIST = Object.values(AGENTS);
 // Lightweight intent router for the Command Center: picks the specialised agent for a request.
 export function routeToAgent(q: string): AgentId {
   const t = q.toLowerCase();
-  if (/(video|reel cut|edit|footage|b-roll|caption.*video|9:16|16:9)/.test(t)) return "video";
+  if (/(workflow|automation|automate|trigger)/.test(t)) return "automation";
+  if (/(video|reel cut|\bedit\b|footage|b-roll|caption.*video|9:16|16:9)/.test(t)) return "video";
   if (/(seo|keyword|backlink|search console|ranking|content brief)/.test(t)) return "seo";
   if (/(creative|concept|hook|headline|script|storyboard|ugc|ad copy)/.test(t)) return "creative";
   if (/(content calendar|social|instagram|caption|carousel|post)/.test(t)) return "social";

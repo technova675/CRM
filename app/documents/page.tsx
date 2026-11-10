@@ -17,12 +17,12 @@ function DocumentsInner() {
   const writable = !isClient && can(me.role, "documents", "write");
 
   const stats = useMemo(() => {
-    const mine = isClient ? assets.filter((a) => a.clientId === me.clientId && a.clientVisible) : assets;
+    const mine=assets.filter(asset=>!asset.archivedAt&&(!isClient||asset.clientId===me.clientId&&asset.clientVisible));
     return {
       total: mine.length,
-      shared: mine.filter((a) => a.clientVisible && a.clientId).length,
-      versioned: mine.filter((a) => a.versions.length > 1).length,
-      size: mine.reduce((a, x) => a + x.sizeKb, 0),
+      shared: mine.filter((a) => a.clientVisible && a.clientId && a.versions.some(v=>v.file)).length,
+      versioned: mine.filter((a) => a.versions.filter(v=>v.file).length>1).length,
+      size: mine.reduce((a, x) => a + x.versions.reduce((size,version)=>size+(version.file?.size??0)/1024,0), 0),
     };
   }, [assets, isClient, me.clientId]);
 
@@ -38,7 +38,7 @@ function DocumentsInner() {
           <Stat label="Assets" value={stats.total} icon={<FileStack className="size-3.5" />} />
           <Stat label="Shared in client portal" value={stats.shared} icon={<Eye className="size-3.5" />} tone="success" />
           <Stat label="With multiple versions" value={stats.versioned} icon={<History className="size-3.5" />} />
-          <Stat label="Library size (metadata)" value={fmtSize(stats.size)} hint="files live in cloud storage" icon={<FolderOpen className="size-3.5" />} />
+          <Stat label="Stored file size" value={fmtSize(stats.size)} hint="All active file versions" icon={<FolderOpen className="size-3.5" />} />
         </div>
       )}
       {!isClient && !writable && <Readonly>You have read-only access to Documents & Assets.</Readonly>}

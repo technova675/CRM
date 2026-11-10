@@ -1,3 +1,5 @@
+import { receipts,retainerCovers,billingStatus } from "../domain/billing";
+import { deadlineDay } from "../domain/projectTasks";
 // Finance engine — pure functions (no store imports) so the Finance page, the
 // Finance Agent and the seed can all share the same profitability maths.
 import type { Campaign, Client, Expense, InsightItem, Invoice, Priority, Project, Recommendation, Role, Service, Task, TeamMember } from "../types";
@@ -216,12 +218,12 @@ export function monthlySeries({ invoices, expenses, team, months = 6, now = Date
     const exp = expenses.filter((x) => monthKey(new Date(x.date)) === key).reduce((a, e) => a + e.amount, 0);
     const revenue = inv.reduce((a, x) => a + x.amount, 0);
     const cost = payroll + exp;
-    out.push({ month: d.toLocaleDateString("en-IN", { month: "short" }), key, revenue, collected: inv.reduce((a, x) => a + x.paid, 0), teamCost: payroll, expenses: exp, cost, net: revenue - cost });
+    out.push({ month: d.toLocaleDateString("en-IN", { month: "short" }), key, revenue, collected: invoices.flatMap(receipts).filter(receipt=>receipt.receivedOn.slice(0,7)===deadlineDay(+d).slice(0,7)).reduce((sum,receipt)=>sum+receipt.amount,0), teamCost: payroll, expenses: exp, cost, net: revenue - cost });
   }
   return out;
 }
 
-export const activeClients = (clients: Client[], now = Date.now()) => clients.filter((c) => new Date(c.contractEnd).getTime() >= now);
+export const activeClients = (clients: Client[], now = Date.now()) => clients.filter(c=>retainerCovers(c,deadlineDay(now)));
 export const mrr = (clients: Client[], now = Date.now()) => activeClients(clients, now).reduce((a, c) => a + c.retainer, 0);
 
 export interface ForecastRow {
@@ -280,7 +282,7 @@ export function financeInsights(input: FinanceInput): InsightItem[] {
   const name = (id: string) => input.clients.find((c) => c.id === id)?.company ?? id;
 
   // Overdue risk
-  const overdue = input.invoices.filter((i) => i.status === "Overdue" || (i.status !== "Paid" && new Date(i.dueDate).getTime() < now && i.paid < i.amount));
+  const overdue = input.invoices.filter((i) => billingStatus(i,deadlineDay(now))==="Overdue");
   const overdueAmt = overdue.reduce((a, i) => a + i.amount - i.paid, 0);
   if (overdue.length) {
     const byClient = new Map<string, { amt: number; n: number; reminders: number; oldest: number }>();

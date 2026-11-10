@@ -1,27 +1,11 @@
-import { generateText } from "ai";
-import { AI_MODEL, aiConfigured, SAFETY_RULES } from "@/lib/ai/provider";
+import { POST as runAgent } from "../agent/route";
+import { boundedJSON } from "@/lib/outreachServer";
+import { sameOrigin } from "@/lib/auth/server";
 
-export async function POST(req: Request) {
-  if (!aiConfigured()) return Response.json({ error: "AI provider not configured" }, { status: 503 });
-  const { question, snapshot, history } = (await req.json()) as {
-    question: string;
-    snapshot: unknown;
-    history?: { role: "user" | "assistant"; content: string }[];
-  };
-  if (!question || typeof question !== "string") return Response.json({ error: "question required" }, { status: 400 });
-
-  try {
-    const { text } = await generateText({
-      model: AI_MODEL,
-      instructions: `${SAFETY_RULES}
-You answer questions for the agency team using ONLY the CRM snapshot below (JSON). If the data doesn't contain the answer, say so.
-When listing leads or clients, use short bullet points with the company name first. Use ₹ for money.
-CRM snapshot:
-${JSON.stringify(snapshot).slice(0, 60_000)}`,
-      messages: [...(history ?? []).slice(-8), { role: "user", content: question }],
-    });
-    return Response.json({ text });
-  } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : "AI request failed" }, { status: 502 });
-  }
+export async function POST(req:Request) {
+  if(!sameOrigin(req))return Response.json({error:"Request origin is not allowed."},{status:403});
+  const body = await boundedJSON(req,80000).catch(()=>null) as {question?:unknown;clientId?:unknown}|null;
+  if(typeof body?.question!=="string")return Response.json({error:"A question is required."},{status:400});
+  return runAgent(new Request(req.url,{method:"POST",headers:req.headers,signal:req.signal,
+    body:JSON.stringify({task:body.question,clientId:body.clientId,format:"text"})}));
 }

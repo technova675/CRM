@@ -1,11 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { requestOrigin } from "@/lib/auth/origin";
+import { staffOwner } from "@/lib/auth/staffIdentity";
+import { portalOwner } from "@/lib/auth/portalIdentity";
 import { resilientFetch } from "@/lib/auth/resilientFetch";
 
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
-  if (path === "/login" || path.startsWith("/auth/") || path === "/api/auth" || path === "/api/outreach/webhook") return NextResponse.next();
+  if (path === "/staff/join" || path === "/api/staff/join" || path === "/api/workspace/summary" || path === "/portal/login" || path === "/api/portal/session" || path === "/login" || path.startsWith("/auth/") || path === "/api/auth" || path === "/api/outreach/webhook") return NextResponse.next();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return new NextResponse("Supabase authentication is not configured.", { status: 503 });
@@ -28,8 +30,29 @@ export async function proxy(req: NextRequest) {
     if (error || !data?.claims?.sub || data.claims.role !== "authenticated") {
       const denied = path.startsWith("/api/")
         ? NextResponse.json({ error: "Sign in to continue.", code: "auth_required" }, { status: 401 })
-        : NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(path + req.nextUrl.search)}`, requestOrigin(req)));
+        : NextResponse.redirect(new URL(`${path === "/portal" || path.startsWith("/portal/") ? "/portal/login" : "/login"}?next=${encodeURIComponent(path + req.nextUrl.search)}`, requestOrigin(req)));
       response.cookies.getAll().forEach((cookie) => denied.cookies.set(cookie));
+      denied.headers.set("Cache-Control", "private, no-store");
+      return denied;
+    }
+    const portal = portalOwner(data.claims.app_metadata);
+    const staff=staffOwner(data.claims.app_metadata);
+    const staffPage=path==="/staff";
+    const staffApi=path==="/api/staff/workspace";
+    if(staff&&!staffPage&&!staffApi || !staff&&(staffPage||staffApi)){
+      const denied=path.startsWith("/api/")?NextResponse.json({error:"This session cannot access that workspace."},{status:403}):
+        NextResponse.redirect(new URL(staff?"/staff":"/dashboard",requestOrigin(req)));
+      response.cookies.getAll().forEach(cookie=>denied.cookies.set(cookie));
+      denied.headers.set("Cache-Control","private, no-store");
+      return denied;
+    }
+    const portalPage = path === "/portal" || path.startsWith("/portal/");
+    const portalApi = path === "/api/portal" || path.startsWith("/api/portal/");
+    if ((portal && !portalPage && !portalApi) || (!portal && (portalPage || portalApi))) {
+      const denied = path.startsWith("/api/")
+        ? NextResponse.json({ error: "This session cannot access that workspace." }, { status: 403 })
+        : NextResponse.redirect(new URL(portal ? "/portal" : "/portal/login", requestOrigin(req)));
+      response.cookies.getAll().forEach(cookie => denied.cookies.set(cookie));
       denied.headers.set("Cache-Control", "private, no-store");
       return denied;
     }
@@ -38,4 +61,4 @@ export async function proxy(req: NextRequest) {
   return response;
 }
 
-export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2)$).*)"] };
+export const config = { matcher: ["/api/:path*", "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2)$).*)"] };

@@ -1,20 +1,27 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Cloud, Download, Loader2, RefreshCw } from "lucide-react";
-import { useCRM, type CRMState } from "@/lib/store";
+import { DEFAULT_NOTIFICATION_PREFS, useCRM, type CRMState } from "@/lib/store";
+import { approvalPolicy } from "@/lib/domain/approvalPolicy";
 import type { CRMLibrary } from "@/lib/domain/crmLibrary";
 import { Button } from "@/components/ui";
 import { downloadFile } from "@/lib/utils";
 import { registerCRMFlush,registerCRMRefresh } from "@/lib/crmSync";
 
-const keys=["marketingAutomations","leads","deals","conversations","messages","activities","team","savedViews","outreach","clients","tasks","projects","knowledge","approvals","proposals","meetings","strategies","campaigns","invoices","ads","creatives","concepts","socialPosts","seoProjects","influencers","engagements","assets","reports","recommendations","reportSchedules"] as const;
-const settingsKeys=["sequences","suppressions","outreachTemplates","onboardingTemplates","proposalPriceBook"] as const;
+const keys=["expenses","timeEntries","analyticsFeeds","marketingAutomations","leads","deals","conversations","messages","activities","team","savedViews","outreach","clients","tasks","projects","knowledge","approvals","proposals","meetings","strategies","campaigns","invoices","ads","creatives","concepts","socialPosts","seoProjects","influencers","engagements","assets","reports","recommendations","reportSchedules"] as const;
+const settingsKeys=["notificationPrefs","readNotificationIds","permissionOverrides","sequences","suppressions","outreachTemplates","onboardingTemplates","proposalPriceBook"] as const;
+const cloudSettings=(data:CRMLibrary)=>{
+  const policy=approvalPolicy(data.aiApprovalPolicy);
+  return {...Object.fromEntries(settingsKeys.map(key=>[key,data[key]])),approvalModes:policy.modes,
+    allowAutonomousSpendChanges:policy.allowAutonomousSpendChanges,
+    notificationPrefs:data.notificationPrefs??DEFAULT_NOTIFICATION_PREFS,readNotificationIds:data.readNotificationIds??[]};
+};
 const snapshot=(state:CRMState):CRMLibrary=>({...Object.fromEntries(keys.map(key=>[key,state[key]])),...Object.fromEntries(settingsKeys.map(key=>[key,state.settings[key]])),customFields:state.settings.leadCustomFields}) as unknown as CRMLibrary;
 async function request(init?:RequestInit){
   const response=await fetch("/api/crm/library",{cache:"no-store",...init,signal:AbortSignal.timeout(30000)});
   const data=await response.json();
   if(!response.ok)throw Object.assign(new Error([data.error??"Could not sync CRM",...(data.issues??[])].join(" · ")),{status:response.status});
-  return data as {revision:number;data:CRMLibrary};
+  return data as {revision:number;data:CRMLibrary;notificationFeed?:import("@/lib/types").Notification[]};
 }
 
 export function CRMCloudProvider({account,children}:{account:{id:string;email:string};children:ReactNode}){
@@ -31,11 +38,11 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
     setSaving(true);setError("");
     rt.pending=(async()=>{
       try{
-        const result=await request({method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({revision:operation.revision,operationId:operation.id,data:JSON.parse(operation.json)})});
+        const result=await request({method:"PUT",headers:{"content-type":"application/json","x-workspace-account":useCRM.getState().currentUserId},body:JSON.stringify({revision:operation.revision,operationId:operation.id,data:JSON.parse(operation.json)})});
         rt.revision=result.revision;rt.operation=undefined;
         if(result.data){
           if(JSON.stringify(snapshot(useCRM.getState()))!==operation.json){rt.conflict=true;setConflict(true);throw new Error("Onboarding was saved while you made additional edits. Export unsaved changes, then reload the latest CRM to keep both versions reviewable.");}
-          rt.applying=true;useCRM.setState(state=>({...Object.fromEntries(keys.map(key=>[key,result.data[key]])),settings:{...state.settings,...Object.fromEntries(settingsKeys.map(key=>[key,result.data[key]])),leadCustomFields:result.data.customFields}}));rt.applying=false;
+          rt.applying=true;useCRM.setState(state=>({...Object.fromEntries(keys.map(key=>[key,result.data[key]])),settings:{...state.settings,...cloudSettings(result.data),leadCustomFields:result.data.customFields}}));rt.applying=false;
           rt.json=JSON.stringify(snapshot(useCRM.getState()));
         }else rt.json=operation.json;
         rt.dirty=JSON.stringify(snapshot(useCRM.getState()))!==rt.json;setDirty(rt.dirty);
@@ -47,23 +54,35 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
 
   useEffect(()=>{
     let live=true;let unsubscribe:(()=>void)|undefined;
-    const apply=(data:CRMLibrary)=>{
+    const apply=(data:CRMLibrary,notificationFeed:CRMState["accountNotifications"] = [])=>{
       const rt=runtime.current;if(rt)rt.applying=true;
-      useCRM.setState(state=>({...Object.fromEntries(keys.map(key=>[key,data[key]])),currentUserId:account.id,settings:{...state.settings,...Object.fromEntries(settingsKeys.map(key=>[key,data[key]])),leadCustomFields:data.customFields}}));
+      useCRM.setState(state=>({...Object.fromEntries(keys.map(key=>[key,data[key]])),currentUserId:account.id,notifications:state.currentUserId===account.id?state.notifications:[],accountNotifications:notificationFeed,settings:{...state.settings,...cloudSettings(data),leadCustomFields:data.customFields}}));
       if(rt)rt.applying=false;
     };
     void(async()=>{
       try{
+        const localKey="adbibe-os-v3:"+account.id;
+        try{
+          const legacy=localStorage.getItem("adbibe-os-v3");
+          if(!localStorage.getItem(localKey)&&legacy&&JSON.parse(legacy).state?.currentUserId===account.id)localStorage.setItem(localKey,legacy);
+        }catch{/* Private browsing can block persistence. */}
+        useCRM.persist.setOptions({name:localKey});
         await useCRM.persist.rehydrate();
-        try{if(!localStorage.getItem("adbibe-creative-browser-backup-v1"))localStorage.setItem("adbibe-creative-browser-backup-v1",JSON.stringify({concepts:useCRM.getState().concepts,creatives:useCRM.getState().creatives}));}catch{}
-        try{if(!localStorage.getItem("adbibe-client360-browser-backup-v1"))localStorage.setItem("adbibe-client360-browser-backup-v1",JSON.stringify(snapshot(useCRM.getState())));}catch{}
-        try{if(!localStorage.getItem("adbibe-proposal-browser-backup-v1"))localStorage.setItem("adbibe-proposal-browser-backup-v1",JSON.stringify(snapshot(useCRM.getState())));}catch{}
-        try{if(!localStorage.getItem("adbibe-pipeline-onboarding-browser-backup-v1"))localStorage.setItem("adbibe-pipeline-onboarding-browser-backup-v1",JSON.stringify(snapshot(useCRM.getState())));}catch{}
+        try {
+          const saved=useCRM.getState();
+          const key="adbibe-expense-backup-v1:"+account.id;
+          if(saved.currentUserId===account.id&&saved.expenses.length&&!localStorage.getItem(key))
+            localStorage.setItem(key,JSON.stringify(saved.expenses));
+        } catch {}
+        try{if(!localStorage.getItem("adbibe-creative-browser-backup-v1:"+account.id))localStorage.setItem("adbibe-creative-browser-backup-v1:"+account.id,JSON.stringify({concepts:useCRM.getState().concepts,creatives:useCRM.getState().creatives}));}catch{}
+        try{if(!localStorage.getItem("adbibe-client360-browser-backup-v1:"+account.id))localStorage.setItem("adbibe-client360-browser-backup-v1:"+account.id,JSON.stringify(snapshot(useCRM.getState())));}catch{}
+        try{if(!localStorage.getItem("adbibe-proposal-browser-backup-v1:"+account.id))localStorage.setItem("adbibe-proposal-browser-backup-v1:"+account.id,JSON.stringify(snapshot(useCRM.getState())));}catch{}
+        try{if(!localStorage.getItem("adbibe-pipeline-onboarding-browser-backup-v1:"+account.id))localStorage.setItem("adbibe-pipeline-onboarding-browser-backup-v1:"+account.id,JSON.stringify(snapshot(useCRM.getState())));}catch{}
         // Preserve pre-cloud browser data for recovery; never silently attach it to an account.
-        try{if(!localStorage.getItem("adbibe-crm-browser-backup-v1"))localStorage.setItem("adbibe-crm-browser-backup-v1",JSON.stringify(snapshot(useCRM.getState())));}catch{}
+        try{if(!localStorage.getItem("adbibe-crm-browser-backup-v1:"+account.id))localStorage.setItem("adbibe-crm-browser-backup-v1:"+account.id,JSON.stringify(snapshot(useCRM.getState())));}catch{}
         const result=await request();if(!live)return;
         runtime.current={revision:result.revision,json:JSON.stringify(result.data),applying:false,dirty:false,conflict:false};
-        apply(result.data);setReady(true);setError("");setDirty(false);setConflict(false);
+        apply(result.data,result.notificationFeed);runtime.current.json=JSON.stringify(snapshot(useCRM.getState()));setReady(true);setError("");setDirty(false);setConflict(false);
         unsubscribe=useCRM.subscribe((state,previous)=>{
           const rt=runtime.current;if(!rt||rt.applying)return;
           if(keys.every(key=>state[key]===previous[key])&&settingsKeys.every(key=>state.settings[key]===previous.settings[key])&&state.settings.leadCustomFields===previous.settings.leadCustomFields)return;
@@ -73,7 +92,7 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
     })();
     const refresh=async()=>{
       const rt=runtime.current;if(!rt||rt.dirty||rt.pending||document.visibilityState==="hidden")return;
-      try{const result=await request();if(!live||rt.dirty||rt.pending)return;if(result.revision!==rt.revision){apply(result.data);rt.revision=result.revision;rt.json=JSON.stringify(result.data);}setError("");}catch(err){if(live)setError(err instanceof Error?err.message:"Could not refresh CRM");}
+      try{const result=await request();if(!live||rt.dirty||rt.pending)return;if(result.revision!==rt.revision){apply(result.data,result.notificationFeed);rt.revision=result.revision;rt.json=JSON.stringify(snapshot(useCRM.getState()));}else if(result.notificationFeed)useCRM.setState({accountNotifications:result.notificationFeed});setError("");}catch(err){if(live)setError(err instanceof Error?err.message:"Could not refresh CRM");}
     };
     const beforeUnload=(event:BeforeUnloadEvent)=>{if(runtime.current?.dirty){event.preventDefault();event.returnValue="";}};
     const interval=setInterval(()=>void refresh(),15000);

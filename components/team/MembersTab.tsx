@@ -1,12 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Mail, Pencil, Plus, UserCheck, UserX, Users } from "lucide-react";
+import { Pencil, Plus, UserCheck, UserX, Users } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { ROLE_LABEL } from "@/lib/permissions";
 import type { Role, TeamMember } from "@/lib/types";
 import { cn, money } from "@/lib/utils";
-import { inviteMember, setMemberStatus, updateMember } from "@/lib/domain/team";
+import { addMemberProfile, setMemberStatus, updateMember } from "@/lib/domain/team";
 import { Avatar, Badge, Button, Card, Checkbox, EmptyState, Field, Input, Modal, SearchInput, Select, Table, Td, Th } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 
@@ -28,18 +28,18 @@ function MemberForm({ initial, onClose }: { initial: TeamMember | null; onClose:
   });
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }));
   const lockRole = initial?.id === me.id; // can't change your own role
-  const valid = f.name.trim() && /\S+@\S+\.\S+/.test(f.email);
+  const valid = f.name.trim() && /\S+@\S+\.\S+/.test(f.email) && Number.isFinite(f.capacityHours) && f.capacityHours>=0 && f.capacityHours<=80;
   const save = () => {
     if (initial) {
       updateMember(initial.id, { name: f.name.trim(), role: f.role, title: f.title.trim(), capacityHours: f.capacityHours, monthlyCost: f.monthlyCost, freelancer: f.freelancer, clientId: f.role === "client" ? f.clientId : undefined });
       toast("Member updated", f.name);
     } else {
-      const m = inviteMember({ ...f });
+      const m = addMemberProfile({ ...f });
       if (!m) {
         toast("Already a member", `${f.email} is already on the team.`, "warning");
         return;
       }
-      toast("Invite created", `${m.name} will appear as "invited" until they accept. Email delivery needs an auth provider.`);
+      toast("Team profile added", m.name);
     }
     onClose();
   };
@@ -47,15 +47,15 @@ function MemberForm({ initial, onClose }: { initial: TeamMember | null; onClose:
     <Modal
       open
       onClose={onClose}
-      title={initial ? `Edit ${initial.name}` : "Invite member"}
-      subtitle={initial ? initial.email : "Adds the person with status “invited”. Access follows their role's permissions."}
+      title={initial ? `Edit ${initial.name}` : "Add team profile"}
+      subtitle={initial ? initial.email : "Add an active profile for task assignments, capacity and time tracking."}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" disabled={!valid} onClick={save} icon={initial ? undefined : <Mail className="size-3.5" />}>
-            {initial ? "Save" : "Send invite"}
+          <Button variant="primary" disabled={!valid} onClick={save}>
+            {initial ? "Save" : "Add profile"}
           </Button>
         </>
       }
@@ -69,7 +69,7 @@ function MemberForm({ initial, onClose }: { initial: TeamMember | null; onClose:
         </Field>
         <Field label="Role" hint={lockRole ? "You can't change your own role." : undefined}>
           <Select value={f.role} disabled={lockRole} onChange={(e) => set({ role: e.target.value as Role })}>
-            {ROLES.map((r) => (
+            {ROLES.filter(r=>r!=="client"||initial?.role==="client").map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABEL[r]}
               </option>
@@ -152,7 +152,7 @@ export function MembersTab({ writable, showCost }: { writable: boolean; showCost
           {showCost && <span className="text-xs text-fg-3">Payroll {money(payroll)}/mo</span>}
           {writable && (
             <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => setEditing("new")}>
-              Invite member
+              Add team profile
             </Button>
           )}
         </div>
@@ -204,21 +204,17 @@ export function MembersTab({ writable, showCost }: { writable: boolean; showCost
                   {writable && (
                     <Td>
                       <div className="flex justify-end gap-1">
-                        {st === "invited" && (
-                          <Button size="xs" variant="ghost" onClick={() => toast("Invite re-sent (simulated)", `Email delivery needs an auth provider such as Clerk — ${m.email}`, "info")}>
-                            Resend
-                          </Button>
-                        )}
+
                         <Button size="xs" variant="ghost" icon={<Pencil className="size-3" />} onClick={() => setEditing(m)}>
                           Edit
                         </Button>
                         {m.id !== me.id &&
-                          (st === "disabled" ? (
+                          (st !== "active" ? (
                             <Button size="xs" variant="ghost" icon={<UserCheck className="size-3" />} onClick={() => { setMemberStatus(m.id, "active"); toast("Member re-enabled", m.name); }}>
                               Enable
                             </Button>
                           ) : (
-                            <Button size="xs" variant="ghost" icon={<UserX className="size-3" />} onClick={() => { setMemberStatus(m.id, "disabled"); toast("Member disabled", `${m.name} can no longer sign in.`, "info"); }}>
+                            <Button size="xs" variant="ghost" icon={<UserX className="size-3" />} onClick={() => { setMemberStatus(m.id, "disabled"); toast("Profile disabled",m.name,"info"); }}>
                               Disable
                             </Button>
                           ))}

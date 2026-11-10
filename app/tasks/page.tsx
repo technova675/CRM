@@ -7,14 +7,19 @@ import { AlarmClock, Bot, CheckCircle2, Circle, Lock, MessageSquare, Paperclip, 
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import type { Task, TaskStatus } from "@/lib/types";
-import { cn, fmtShort, isPast, isSameDay } from "@/lib/utils";
+import { cn, fmtShort } from "@/lib/utils";
 import { Badge, Button, Card, Checkbox, EmptyState, MemberAvatar, PageHeader, Readonly, SearchInput, Segmented, Select, StatusBadge, Table, Tabs, Td, Th } from "@/components/ui";
+import { toast } from "@/components/shell/toast";
+import {taskDependencyIssue} from "@/lib/domain/projectTasks";
 import { TaskDrawer, PRIORITIES, TASK_STATUSES } from "@/components/tasks/TaskDrawer";
 import { isBlockedByDeps, REL_TYPES, useRelatedIndex } from "@/components/tasks/related";
 import { ProjectsView } from "@/components/tasks/ProjectsView";
+import { DeadlineView } from "@/components/tasks/DeadlineView";
+import { useDeadlineToday } from "@/components/tasks/useDeadlineToday";
+import {deadlineDay} from "@/lib/domain/projectTasks";
 import { WorkloadView } from "@/components/tasks/WorkloadView";
 
-type Tab = "tasks" | "projects" | "workload";
+type Tab = "tasks" | "projects" | "workload" | "calendar" | "reminders";
 
 function CreatedBy({ by }: { by: Task["createdBy"] }) {
   const Icon = by === "ai" ? Bot : by === "automation" ? Workflow : User;
@@ -49,7 +54,9 @@ function TasksInner() {
   const clientView = me.role === "client";
   const writable = can(me.role, "tasks", "write") && !clientView;
 
-  const [tab, setTab] = useState<Tab>("tasks");
+  const selectedTab=params.get("tab");
+  const tab:Tab=!clientView&&(selectedTab==="projects"||selectedTab==="workload"||selectedTab==="calendar"||selectedTab==="reminders")?selectedTab:"tasks";
+  const today=useDeadlineToday();
   const [view, setView] = useState<"list" | "board">("list");
   const [q, setQ] = useState("");
   const [assignee, setAssignee] = useState("All");
@@ -72,8 +79,8 @@ function TasksInner() {
   // Client portal: only tasks attached to their own client record, read-only.
   const scoped = useMemo(() => (clientView ? tasks.filter((t) => t.related?.type === "client" && t.related.id === me.clientId) : tasks), [tasks, clientView, me.clientId]);
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
-  const overdue = useMemo(() => scoped.filter((t) => t.status !== "Done" && isPast(t.dueDate) && !isSameDay(t.dueDate)), [scoped]);
-  const dueToday = useMemo(() => scoped.filter((t) => t.status !== "Done" && isSameDay(t.dueDate)), [scoped]);
+  const overdue = useMemo(() => scoped.filter((t) => t.status !== "Done" && !!deadlineDay(t.dueDate) && deadlineDay(t.dueDate)<today), [scoped,today]);
+  const dueToday = useMemo(() => scoped.filter((t) => t.status !== "Done" && deadlineDay(t.dueDate)===today), [scoped,today]);
   const blockedCount = useMemo(() => scoped.filter((t) => t.status !== "Done" && isBlockedByDeps(t, byId)).length, [scoped, byId]);
 
   const list = useMemo(
@@ -90,17 +97,24 @@ function TasksInner() {
             if (status !== "Open" && status !== "All" && t.status !== status) return false;
           }
           if (relType !== "All" && t.related?.type !== relType) return false;
-          if (overdueOnly && !(t.status !== "Done" && isPast(t.dueDate))) return false;
+          if (overdueOnly && !(t.status !== "Done" && !!deadlineDay(t.dueDate) && deadlineDay(t.dueDate)<today)) return false;
           if (blockedOnly && !(t.status !== "Done" && isBlockedByDeps(t, byId))) return false;
           return true;
         })
         .sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
-    [scoped, q, mine, me.id, assignee, priority, status, relType, overdueOnly, blockedOnly, view, projectId, byId],
+    [scoped, q, mine, me.id, assignee, priority, status, relType, overdueOnly, blockedOnly, view, projectId, byId, today],
   );
 
+  const changeStatus = (id:string,status:TaskStatus) => {
+    const task=byId.get(id);
+    if(!task||!writable)return;
+    const issue=taskDependencyIssue({...task,status},byId);
+    if(issue){toast(issue,undefined,"warning");return;}
+    updateTask(id,{status});
+  };
   const toggleDone = (t: Task) => {
     if (!writable) return;
-    updateTask(t.id, { status: t.status === "Done" ? "Todo" : "Done" });
+    changeStatus(t.id,t.status === "Done" ? "Todo" : "Done");
   };
   const project = projects.find((p) => p.id === projectId);
 
@@ -112,21 +126,26 @@ function TasksInner() {
         actions={
           <>
             {tab === "tasks" && <Segmented value={view} onChange={setView} options={[{ value: "list", label: "List" }, { value: "board", label: "Board" }]} />}
-            {writable && <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => setParam({ new: "1" })}>New task</Button>}
+            {writable && <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => setParam({ new: "1", tab:null })}>New task</Button>}
           </>
         }
       />
       {clientView && <Readonly>Showing tasks related to your account (read-only).</Readonly>}
       {!clientView && (
         <div className="mb-4">
-          <Tabs value={tab} onChange={setTab} tabs={[{ value: "tasks", label: "Tasks", count: list.length }, { value: "projects", label: "Projects", count: projects.length }, { value: "workload", label: "Team workload" }]} />
+          <Tabs value={tab} onChange={value=>setParam({tab:value==="tasks"?null:value, milestone:null})} tabs={[{ value: "tasks", label: "Tasks", count: list.length }, { value: "projects", label: "Projects", count: projects.length }, { value: "calendar", label: "Calendar" }, { value: "reminders", label: "Reminders" }, { value: "workload", label: "Team workload" }]} />
         </div>
       )}
 
       {tab === "projects" && !clientView ? (
-        <ProjectsView writable={writable} onOpenProject={(id) => { setTab("tasks"); setParam({ project: id }); }} />
+        <ProjectsView writable={writable} milestoneProject={params.get("milestone")??undefined} onMilestones={id=>setParam({milestone:id})} onOpenProject={id=>setParam({tab:null,project:id,milestone:null})} />
       ) : tab === "workload" && !clientView ? (
-        <WorkloadView onPickMember={(id) => { setAssignee(id); setTab("tasks"); }} />
+        <WorkloadView onPickMember={id=>{setAssignee(id);setMine(false);setStatus("Open");setParam({tab:null,project:null});}} />
+      ) : tab==="calendar"||tab==="reminders" ? (
+        <DeadlineView key={tab} reminders={tab==="reminders"} onOpen={item=>{
+          if(item.kind==="Task"){setEditing(byId.get(item.id)??null);return;}
+          setParam(item.kind==="Milestone"?{tab:"projects",milestone:item.projectId??null}:{tab:null,project:item.projectId??null});
+        }}/>
       ) : (
         <>
           {(overdue.length > 0 || dueToday.length > 0 || blockedCount > 0) && (
@@ -193,7 +212,7 @@ function TasksInner() {
                   <tbody>
                     {list.map((t) => {
                       const rel = related.get(t.related);
-                      const late = t.status !== "Done" && isPast(t.dueDate) && !isSameDay(t.dueDate);
+                      const late = t.status !== "Done" && !!deadlineDay(t.dueDate) && deadlineDay(t.dueDate)<today;
                       const blocked = isBlockedByDeps(t, byId);
                       return (
                         <tr key={t.id} className="cursor-pointer hover:bg-surface-2/60" onClick={() => setEditing(t)}>
@@ -209,10 +228,10 @@ function TasksInner() {
                           <Td className="hidden md:table-cell text-xs">{rel ? <Link onClick={(e) => e.stopPropagation()} href={clientView ? "/dashboard" : rel.href} className="text-fg-2 hover:text-accent-text hover:underline"><span className="text-fg-3">{REL_TYPES.find((r) => r.value === t.related?.type)?.label}: </span>{rel.label}</Link> : <span className="text-fg-3">—</span>}</Td>
                           <Td><MemberAvatar id={t.assigneeId} showName /></Td>
                           <Td><StatusBadge status={t.priority} /></Td>
-                          <Td className={cn("whitespace-nowrap text-xs tabular-nums", late ? "font-medium text-danger" : isSameDay(t.dueDate) ? "font-medium text-warning" : "text-fg-2")}>{isSameDay(t.dueDate) ? "Today" : fmtShort(t.dueDate)}</Td>
+                          <Td className={cn("whitespace-nowrap text-xs tabular-nums", late ? "font-medium text-danger" : deadlineDay(t.dueDate)===today ? "font-medium text-warning" : "text-fg-2")}>{deadlineDay(t.dueDate)===today ? "Today" : fmtShort(t.dueDate)}</Td>
                           <Td>
                             {writable ? (
-                              <Select onClick={(e) => e.stopPropagation()} value={t.status} onChange={(e) => updateTask(t.id, { status: e.target.value as TaskStatus })} className="h-7 w-32 text-xs">
+                              <Select onClick={(e) => e.stopPropagation()} value={t.status} onChange={(e) => changeStatus(t.id,e.target.value as TaskStatus)} className="h-7 w-32 text-xs">
                                 {TASK_STATUSES.map((s) => <option key={s}>{s}</option>)}
                               </Select>
                             ) : <StatusBadge status={blocked && t.status !== "Done" ? "Blocked" : t.status} />}
@@ -234,7 +253,7 @@ function TasksInner() {
                       key={col}
                       onDragOver={(e) => writable && e.preventDefault()}
                       onDrop={() => {
-                        if (dragId && writable) updateTask(dragId, { status: col });
+                        if (dragId && writable) changeStatus(dragId,col);
                         setDragId(null);
                       }}
                       className="min-h-60 rounded-xl border border-border bg-surface-2/60 p-2"
@@ -246,7 +265,7 @@ function TasksInner() {
                       <div className="space-y-2">
                         {items.map((t) => {
                           const rel = related.get(t.related);
-                          const late = t.status !== "Done" && isPast(t.dueDate) && !isSameDay(t.dueDate);
+                          const late = t.status !== "Done" && !!deadlineDay(t.dueDate) && deadlineDay(t.dueDate)<today;
                           const blocked = isBlockedByDeps(t, byId);
                           return (
                             <div key={t.id} draggable={writable} onDragStart={() => setDragId(t.id)} onClick={() => setEditing(t)} className={cn("cursor-pointer rounded-lg border border-border bg-surface p-2.5 shadow-card hover:border-border-strong", dragId === t.id && "opacity-50")}>

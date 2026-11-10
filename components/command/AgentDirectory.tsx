@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { Bot, MessageSquarePlus, ShieldCheck } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can, MODULE_LABEL } from "@/lib/permissions";
+import { AGENT_WORKSPACES } from "@/lib/ai/agentWorkspaces";
 import { AGENT_LIST, AGENTS } from "@/lib/ai/agents";
 import type { AgentId, AITask } from "@/lib/types";
 import { relTime, sum } from "@/lib/utils";
@@ -27,7 +28,8 @@ export function AgentDirectory({ onAsk }: { onAsk: (a: AgentId) => void }) {
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {AGENT_LIST.map((a) => {
         const tasks = byAgent.get(a.id) ?? [];
-        const allowed = a.modules.some((m) => can(me.role, m));
+        const workspace = AGENT_WORKSPACES[a.id];
+        const allowed = can(me.role, workspace.module);
         const mode = modes[a.action];
         return (
           <Card key={a.id} className="flex flex-col p-4">
@@ -48,7 +50,7 @@ export function AgentDirectory({ onAsk }: { onAsk: (a: AgentId) => void }) {
             <dl className="mt-3 space-y-1.5 text-xs">
               <div className="flex gap-2">
                 <dt className="w-24 shrink-0 text-fg-3">Knowledge</dt>
-                <dd className="text-fg-2">{a.knowledge.join(" · ")}</dd>
+                <dd className="text-fg-2">{a.knowledge.join(" · ")} · role-scoped client knowledge</dd>
               </div>
               <div className="flex gap-2">
                 <dt className="w-24 shrink-0 text-fg-3">Modules</dt>
@@ -80,10 +82,11 @@ export function AgentDirectory({ onAsk }: { onAsk: (a: AgentId) => void }) {
               ))}
               {!tasks.length && <p className="text-xs text-fg-3">No tasks yet.</p>}
             </div>
-            <div className="mt-3 flex items-center gap-2">
-              <Button size="xs" variant={allowed ? "primary" : "secondary"} disabled={!allowed} icon={<MessageSquarePlus className="size-3" />} onClick={() => onAsk(a.id)}>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button size="sm" className="min-h-11" variant={allowed ? "primary" : "secondary"} disabled={!allowed} icon={<MessageSquarePlus className="size-3" />} onClick={() => onAsk(a.id)}>
                 Ask this agent
               </Button>
+              {allowed && <Button href={workspace.href} size="sm" className="min-h-11">Open workspace</Button>}
               {!allowed && <span className="text-[11px] text-fg-3">No access for your role</span>}
             </div>
           </Card>

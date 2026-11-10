@@ -11,12 +11,12 @@ export const maxDuration=120;
 const finding=z.object({text:z.string().max(1500),kind:z.enum(["verified","assumption","recommendation"]),sourceId:z.string().nullable(),quote:z.string().max(280).nullable()});
 const schema=z.object({analysis:z.array(z.object({topic:z.enum(["website","social","business_model","products","audience","marketing","ads","content","competitors","growth"]),findings:z.array(finding).max(3)})).max(10),problems:z.array(finding).max(4),opportunities:z.array(finding).max(4),recommendedServices:z.array(z.object({service:z.enum(SERVICES),reason:z.string().max(1000),sourceId:z.string().nullable(),quote:z.string().max(280).nullable()})).max(4),outreachAngle:z.string().max(1500)});
 const active=new Map<string,Promise<LeadResearch>>();
-async function research(lead:Lead,signal:AbortSignal){
+async function research(owner:string,lead:Lead,signal:AbortSignal){
   const evidence=await collectPublicEvidence(lead,AbortSignal.any([signal,AbortSignal.timeout(40000)]));
   const readable=evidence.documents.filter(document=>document.status==="ok");
   if(!aiConfigured()||!readable.length)return evidenceResearch(lead,evidence.documents,null,[...evidence.limitations,...(!aiConfigured()?["No AI provider is configured. Public evidence can still be read, but no AI synthesis has been generated."]:[])]);
   try{
-    const result=await withModelFallback(async(model,label)=>{
+    const result=await withModelFallback(owner,async(model,label)=>{
       let remaining=16000;
       const sources=readable.map(({id,url,title,text})=>{const excerpt=text.slice(0,Math.min(2500,remaining));remaining-=excerpt.length;return{id,url,title,text:excerpt};}).filter(source=>source.text.length>0);
       const {output}=await generateText({model,abortSignal:AbortSignal.any([signal,AbortSignal.timeout(35000)]),maxOutputTokens:3500,
@@ -49,7 +49,7 @@ export async function POST(req:Request){
     const key=`${identity.userId}:${lead.id}`;
     if(!active.has(key)){
       if([...active.keys()].filter(key=>key.startsWith(`${identity.userId}:`)).length>=2)return Response.json({error:"Two research requests are already running. Try this lead when one completes."},{status:429});
-      const task=research(lead,AbortSignal.timeout(100000));active.set(key,task);void task.finally(()=>{if(active.get(key)===task)active.delete(key);}).catch(()=>{});
+      const task=research(identity.userId,lead,AbortSignal.timeout(100000));active.set(key,task);void task.finally(()=>{if(active.get(key)===task)active.delete(key);}).catch(()=>{});
     }
     const result=await active.get(key)!;
     return Response.json({research:result},{headers:{"Cache-Control":"private, no-store"}});

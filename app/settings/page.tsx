@@ -38,7 +38,7 @@ const TITLES: Partial<Record<Section, { title: string; desc: string }>> = {
   ai: { title: "AI human-approval system", desc: "Decide, per AI action, whether the AI only recommends, prepares for approval, or executes." },
   notifications: { title: "Notifications", desc: "Where each category of event reaches you." },
   plan: { title: "Plan & usage", desc: "Organization, subscription plan and metered usage." },
-  security: { title: "Security", desc: "Access control, sessions, network restrictions, retention and backups." },
+  security: { title: "Security", desc: "Manage workspace access, credentials, API keys, and recovery." },
   audit: { title: "Activity & audit log", desc: "Who did what, when — with before and after values." },
 };
 

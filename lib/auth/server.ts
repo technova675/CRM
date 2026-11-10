@@ -1,6 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { accountWorkspace, AuthenticationRequiredError, AuthenticationUnavailableError } from "./identity";
+import { accountWorkspace, AuthenticationRequiredError, AuthenticationUnavailableError, WorkspaceAccessError } from "./identity";
+import { staffOwner } from "./staffIdentity";
+import { portalOwner } from "./portalIdentity";
 import { requestOrigin } from "./origin";
 import { resilientFetch } from "./resilientFetch";
 
@@ -16,7 +18,7 @@ export async function authClient(req: Request) {
   });
 }
 
-export async function reportIdentity(req: Request) {
+export async function sessionIdentity(req: Request) {
   const client = await authClient(req);
   // getClaims verifies the signature and expiry; never authorize from getSession().user or client headers.
   const { data, error } = await client.auth.getClaims();
@@ -26,7 +28,13 @@ export async function reportIdentity(req: Request) {
   }
   const claims = data?.claims;
   if (!claims?.sub || claims.role !== "authenticated") throw new AuthenticationRequiredError();
-  return { userId: claims.sub, email: typeof claims.email === "string" ? claims.email : "", workspace: accountWorkspace(claims.sub) };
+  return { userId: claims.sub, email: typeof claims.email === "string" ? claims.email : "", workspace: accountWorkspace(claims.sub), portalOwner: portalOwner(claims.app_metadata), staffOwner: staffOwner(claims.app_metadata) };
+}
+
+export async function reportIdentity(req: Request) {
+  const identity = await sessionIdentity(req);
+  if (identity.portalOwner || identity.staffOwner) throw new WorkspaceAccessError();
+  return identity;
 }
 
 export function sameOrigin(req: Request) {

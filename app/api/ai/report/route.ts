@@ -1,3 +1,6 @@
+import {reportIdentity,sameOrigin} from "@/lib/auth/server";
+import {boundedJSON} from "@/lib/outreachServer";
+import {dbError} from "@/lib/db";
 import { generateText, isStepCount, Output, tool } from "ai";
 import { z } from "zod";
 import { aiConfigured, SAFETY_RULES, withModelFallback } from "@/lib/ai/provider";
@@ -37,12 +40,16 @@ const reportSchema = z.object({
 // Tool-calling reporting agent: the model investigates one client's numbers through tools
 // (all arithmetic happens in lib/ai/reporting.ts), then writes the report as structured output.
 export async function POST(req: Request) {
+  if(!sameOrigin(req))return Response.json({error:"Request origin is not allowed."},{status:403});
+  let identity;
+  try{identity=await reportIdentity(req);}catch(error){return dbError(error);}
   if (!aiConfigured()) return Response.json({ error: "AI provider not configured" }, { status: 503 });
-  const parsed = datasetSchema.safeParse(await req.json().catch(() => null));
+  const parsed = datasetSchema.safeParse(await boundedJSON(req,2_000_000).catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid report dataset" }, { status: 400 });
   const ds: ReportDataset = parsed.data;
   const facts = buildFacts(ds);
   if (!facts.daysWithData) return Response.json({ error: "No performance data in this period" }, { status: 422 });
+
 
   const steps: AgentReportContent["steps"] = [];
   const evidence: Record<string, unknown> = {};
@@ -73,7 +80,7 @@ Money is in Indian rupees: write ₹ directly before the number. Never do arithm
   // Phase 1 — investigate with tools. A failure here is not fatal: the core tools are run below regardless.
   let notes = "";
   try {
-    const res = await withModelFallback((model) =>
+    const res = await withModelFallback(identity.userId,(model) =>
       generateText({
         model,
         instructions: `${role}
@@ -95,7 +102,7 @@ When you have enough evidence, reply with short analyst notes (under 150 words):
 
   // Phase 2 — write the report from the evidence gathered.
   try {
-    const { output, model } = await withModelFallback(async (model, label) => {
+    const { output, model } = await withModelFallback(identity.userId,async (model, label) => {
       const res = await generateText({
         model,
         instructions: `${role}

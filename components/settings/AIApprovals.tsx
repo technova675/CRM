@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { recommendedModes as RECOMMENDED_MODES } from "@/lib/domain/approvalPolicy";
+import { flushCRMChanges, refreshCRMChanges } from "@/lib/crmSync";
 import { AlertTriangle, CheckCircle2, Hand, Lock, RotateCcw, ShieldCheck, Zap } from "lucide-react";
 import { AI_ACTIONS, useCRM } from "@/lib/store";
 import type { AIActionKind, ApprovalMode } from "@/lib/types";
@@ -9,24 +12,6 @@ import { toast } from "@/components/shell/toast";
 
 // Recommended defaults (spec): content & client-facing output needs approval, budget changes need approval,
 // routine internal task creation can run automatically.
-export const RECOMMENDED_MODES: Record<AIActionKind, ApprovalMode> = {
-  Outreach: "Approval Required",
-  "Follow-ups": "Automatic",
-  "Campaign changes": "Approval Required",
-  "Campaign recommendations": "Approval Required",
-  "Client communication": "Approval Required",
-  Reports: "Approval Required",
-  "Payment reminders": "Approval Required",
-  "Creative generation": "Approval Required",
-  "Social publishing": "Approval Required",
-  "Video exports": "Approval Required",
-  "Strategy documents": "Approval Required",
-  Proposals: "Approval Required",
-  "Task creation": "Automatic",
-  "SEO changes": "Approval Required",
-  "Influencer outreach": "Approval Required",
-};
-
 const INFO: Record<AIActionKind, string> = {
   Outreach: "First-touch messages drafted by the Sales Agent",
   "Follow-ups": "Scheduled sequence follow-ups to leads who haven't replied",
@@ -56,25 +41,27 @@ const SPEND_ACTIONS: AIActionKind[] = ["Campaign changes"];
 export function AIApprovals({ admin }: { admin: boolean }) {
   const modes = useCRM((s) => s.settings.approvalModes);
   const allowSpend = useCRM((s) => s.settings.allowAutonomousSpendChanges);
-  const setMode = useCRM((s) => s.setApprovalMode);
-  const updateSettings = useCRM((s) => s.updateSettings);
-  const log = useCRM((s) => s.log);
-  const me = useCRM((s) => s.currentUserId);
-  const diff = AI_ACTIONS.filter((k) => modes[k] !== RECOMMENDED_MODES[k]);
-
-  const reset = () => {
-    updateSettings({ approvalModes: { ...RECOMMENDED_MODES } });
-    log({ actor: "human", actorId: me, entity: "settings", action: "Reset AI approval modes to recommended", before: `${diff.length} custom mode(s)`, after: "recommended" });
-    toast("Approval modes reset to recommended");
-  };
-  const toggleSpend = (v: boolean) => {
-    updateSettings({ allowAutonomousSpendChanges: v });
-    log({ actor: "human", actorId: me, entity: "settings", action: "Autonomous spend changes", before: allowSpend ? "enabled" : "disabled", after: v ? "enabled" : "disabled" });
-    toast(v ? "Autonomous spend changes enabled" : "Autonomous spend changes disabled", v ? "Campaign changes set to Automatic will now execute without approval." : undefined, v ? "warning" : "success");
-  };
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState("");
+  const diff = AI_ACTIONS.filter(k=>modes[k]!==RECOMMENDED_MODES[k]);
+  async function save(next:typeof modes,spend:boolean){
+    setBusy(true);
+    setError("");
+    try{
+      await flushCRMChanges();
+      const response=await fetch("/api/approvals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"policy",modes:next,allowAutonomousSpendChanges:spend,expected:{modes,allowAutonomousSpendChanges:allowSpend}})});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error);
+      await refreshCRMChanges();
+      toast("Approval policy saved");
+    }catch(cause){setError(cause instanceof Error?cause.message:"The policy could not be saved.");}
+    finally{setBusy(false);}
+  }
 
   return (
     <div className="space-y-4">
+      {error&&<p role="alert" className="text-sm text-danger">{error}</p>}
+      {busy&&<p role="status" className="text-sm text-fg-2">Saving policy…</p>}
       <Card className="p-4">
         <div className="grid gap-3 sm:grid-cols-3">
           {MODES.map((m) => (
@@ -90,7 +77,7 @@ export function AIApprovals({ admin }: { admin: boolean }) {
           ))}
         </div>
         <p className="mt-3 text-xs text-fg-3">
-          Recommended: Creative generation → Approval · Client report → Approval · Campaign recommendation → Approval · Campaign budget change → Approval · Routine internal task creation → Automatic. Approvals appear in Automations → Approvals; every AI action is written to the audit log.
+          Recommended: Creative generation → Approval · Client report → Approval · Campaign recommendation → Approval · Campaign budget change → Approval · Routine internal task creation → Automatic. Review requests in the central AI Approvals queue. External delivery uses the approval and connector rules in each workspace.
         </p>
       </Card>
 
@@ -102,11 +89,11 @@ export function AIApprovals({ admin }: { admin: boolean }) {
           <div className="flex-1">
             <p className="text-[13px] font-semibold">Allow autonomous spend changes</p>
             <p className="mt-0.5 text-xs text-fg-2">
-              Consequential ad-platform changes (budgets, bids, pausing ads) can&apos;t run Automatic unless this is enabled — they are downgraded to Approval. Enable only if you accept that the AI can change live client spend without a human in the loop.
+              Automatic campaign changes require this additional opt-in. The supported automatic budget action updates the internal campaign plan.
             </p>
             {!admin && <p className="mt-1 text-[11px] text-fg-3">Admin only.</p>}
           </div>
-          <Toggle checked={allowSpend} onChange={toggleSpend} label="Allow autonomous spend changes" />
+          <fieldset disabled={!admin||busy}><Toggle checked={allowSpend} onChange={value=>void save(modes,value)} label="Allow autonomous spend changes" /></fieldset>
         </div>
       </Card>
 
@@ -116,7 +103,7 @@ export function AIApprovals({ admin }: { admin: boolean }) {
           subtitle={`${AI_ACTIONS.length} AI actions · ${diff.length ? `${diff.length} differ from recommended` : "all on recommended settings"}`}
           action={
             admin && (
-              <Button size="sm" icon={<RotateCcw className="size-3.5" />} disabled={!diff.length} onClick={reset}>
+              <Button size="sm" icon={<RotateCcw className="size-3.5" />} disabled={busy||!diff.length} onClick={()=>void save(RECOMMENDED_MODES,allowSpend)}>
                 Reset to recommended
               </Button>
             )
@@ -154,13 +141,10 @@ export function AIApprovals({ admin }: { admin: boolean }) {
                         type="button"
                         role="radio"
                         aria-checked={active}
-                        disabled={!admin || (locked && !active)}
+                        disabled={!admin || busy || (locked && !active)}
                         title={locked ? "Enable autonomous spend changes first" : m.help}
-                        onClick={() => {
-                          setMode(k, m.value);
-                          toast(`${k}: ${m.label}`, m.help);
-                        }}
-                        className={cn("inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition disabled:cursor-not-allowed", active ? "bg-surface text-fg shadow-card" : "text-fg-3 hover:text-fg disabled:hover:text-fg-3")}
+                        onClick={()=>void save({...modes,[k]:m.value},allowSpend)}
+                        className={cn("inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition disabled:cursor-not-allowed", active ? "bg-surface text-fg shadow-card" : "text-fg-3 hover:text-fg disabled:hover:text-fg-3")}
                       >
                         {locked && <Lock className="size-3" />}
                         {m.label}

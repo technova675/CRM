@@ -1,3 +1,7 @@
+import {readCredential} from "./workspaceVault";
+import {checkTenantQuota} from "./domain/tenant";
+import {tenantPlan} from "./tenantPlan";
+import {trimAudit} from "./auditServer";
 import {createHash,createHmac,timingSafeEqual} from "node:crypto";
 import {supabaseRequest} from "./db";
 import type {CRMLibrary} from "./domain/crmLibrary";
@@ -10,10 +14,46 @@ export function signMediaRecommendation(owner:string,rec:Recommendation){return 
 export function validMediaRecommendation(owner:string,rec:Recommendation){try{const expected=Buffer.from(sign(owner,rec),"hex"),actual=Buffer.from(rec.mediaPlan?.signature??"","hex");return expected.length===actual.length&&timingSafeEqual(expected,actual);}catch{return false;}}
 export async function mutateMedia(owner:string,operation:string,change:(data:CRMLibrary)=>CRMLibrary){
  for(let attempt=0;attempt<3;attempt++){const [row]=await supabaseRequest<{revision:number;data:CRMLibrary;last_operation?:string}[]>("crm_libraries",{query:{owner_id:`eq.${owner}`,select:"revision,data,last_operation",limit:"1"}});if(!row)throw new Error("Campaign or recommendation not found in this account. Open the CRM library first.");if(row.last_operation===operation)return row;
- const data=change(structuredClone(row.data));if(Buffer.byteLength(JSON.stringify(data))>8000000)throw new Error("The CRM library exceeds its save limit; reduce the import size.");const revision=await supabaseRequest<number>("rpc/save_crm_library",{method:"POST",body:{p_owner:owner,p_revision:row.revision,p_operation:operation,p_data:data}});if(revision>=0)return {revision,data};}
+ const data=change(structuredClone(row.data));checkTenantQuota(row.data,data,tenantPlan(owner,row.data));trimAudit(data);if(Buffer.byteLength(JSON.stringify(data))>8000000)throw new Error("The CRM library exceeds its save limit; reduce the import size.");const revision=await supabaseRequest<number>("rpc/save_crm_library",{method:"POST",body:{p_owner:owner,p_revision:row.revision,p_operation:operation,p_data:data}});if(revision>=0)return {revision,data};}
  throw new Error("The CRM changed on another laptop. Reload and retry.");
 }
-export function mediaConnectorConfigured(){try{const url=new URL(process.env.MEDIA_CONNECTOR_URL??"");return url.protocol==="https:"&&!url.username&&!url.password&&!!process.env.MEDIA_CONNECTOR_TOKEN;}catch{return false;}}
-export async function callMediaConnector(path:string,owner:string,body?:unknown){if(!mediaConnectorConfigured())throw new Error("Live platform connector is not configured. Import a platform CSV or configure an authorized server connector.");const url=new URL(path,(process.env.MEDIA_CONNECTOR_URL??"").replace(/\/?$/,"/"));if(!body)url.searchParams.set("ownerId",owner);const response=await fetch(url,{method:body?"POST":"GET",headers:{Authorization:`Bearer ${process.env.MEDIA_CONNECTOR_TOKEN}`,"Content-Type":"application/json"},body:body?JSON.stringify({ownerId:owner,...body as object}):undefined,cache:"no-store",redirect:"error",signal:AbortSignal.timeout(30000)});if(!response.ok)throw new Error("Platform connector could not complete the request. Check authorization and retry.");return response.json();}
+async function mediaConnection(owner:string){
+  let base:URL;
+  try{
+    base=new URL(process.env.MEDIA_CONNECTOR_URL??"");
+    if(base.protocol!=="https:"||base.username||base.password||base.search||base.hash)return;
+  }catch{return;}
+  const saved=await readCredential(owner,"media");
+  const token=saved??(process.env.MEDIA_CONNECTOR_ALLOWED_OWNER_ID===owner?process.env.MEDIA_CONNECTOR_TOKEN:undefined);
+  if(token)return {base:base.href.replace(/\/?$/,"/"),token};
+}
+export async function mediaConnectorConfigured(owner:string){return !!(await mediaConnection(owner));}
+export async function callMediaConnector(path:string,owner:string,body?:unknown){
+  const connection=await mediaConnection(owner);
+  if(!connection)throw new Error("Live platform connector is not configured. Save your workspace token or import a platform CSV.");
+  const url=new URL(path,connection.base);
+  if(!body)url.searchParams.set("ownerId",owner);
+  const response=await fetch(url,{method:body?"POST":"GET",headers:{Authorization:`Bearer ${connection.token}`,"Content-Type":"application/json"},body:body?JSON.stringify({...body as object,ownerId:owner}):undefined,cache:"no-store",redirect:"error",signal:AbortSignal.timeout(30000)});
+  if(!response.ok)throw new Error("Platform connector could not complete the request. Check authorization and retry.");
+  return response.json();
+}
 
-
+export function executeMediaPlan(data:CRMLibrary,rec:Recommendation,campaign:Campaign,owner:string,at:string){
+  const plan=rec.mediaPlan!;
+  if(plan.action==="budget_change"){
+    const value=plan.budget;
+    if(value===undefined||!Number.isFinite(value)||value<0||Math.abs(value-campaign.budget)>Math.max(1,campaign.budget)*.101)
+      throw new Error("This budget proposal is outside its reviewed limit.");
+    campaign.budget=value;campaign.updatedAt=at;
+    rec.mediaExecution={at,actorId:owner,kind:"internal_budget",note:"Internal campaign planning budget updated."};
+  }else{
+    const taskId="media_"+rec.id;
+    if(!data.tasks.some(task=>task.id===taskId))data.tasks.unshift({
+      id:taskId,title:rec.title,description:[rec.finding,rec.recommendation,rec.test].filter(Boolean).join("\n\n"),
+      assigneeId:campaign.ownerId??owner,status:"Todo",priority:rec.priority,dueDate:new Date(Date.parse(at)+2*86400000).toISOString(),
+      createdAt:at,createdBy:"automation",related:{type:"campaign",id:campaign.id},
+    });
+    rec.mediaExecution={at,actorId:owner,kind:"task",taskId,note:"Implementation task created."};
+  }
+  rec.status="Executed";rec.resolvedAt=at;rec.resolvedBy=owner;
+}

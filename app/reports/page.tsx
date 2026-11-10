@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Building2, FileSpreadsheet, FileText, Presentation, Printer, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { ClientReporting } from "@/components/reports/ClientReporting";
 import { ReportAccount } from "@/components/reports/ReportAccount";
 import { type ReportFileDetail, type ReportFileKind, type ReportFileSummary } from "@/lib/domain/reportFiles";
 import { fmtDateTime } from "@/lib/utils";
@@ -90,6 +91,7 @@ function ReportsInner() {
         title="Reports"
         description="Upload an Excel, CSV, PowerPoint or PDF report and read it as one dashboard. No demo data is used."
         actions={<div className="no-print flex flex-wrap items-center gap-2">
+          <Button className="min-h-11" variant="primary" href="/reports?view=client">AI Client Reporting</Button>
           <Button loading={loading || (!!selectedId && !shown && !detailError)} icon={<RefreshCw className="size-3.5" aria-hidden="true" />} disabled={loading} onClick={() => { setDetailError(""); setRetry((n) => n + 1); void refresh(); }}>Refresh</Button>
           <Button icon={<Printer className="size-3.5" aria-hidden="true" />} disabled={!shown} onClick={() => window.print()}>Print / PDF</Button>
           {writable && <Button variant="primary" icon={<Upload className="size-3.5" aria-hidden="true" />} onClick={() => setUploadOpen(true)}>Upload report</Button>}
@@ -121,4 +123,5 @@ function ReportsInner() {
   );
 }
 
-export default function ReportsPage() { return <Suspense><ReportsInner /></Suspense>; }
+function ReportsView() { return useSearchParams().get("view") === "client" ? <ClientReporting /> : <ReportsInner />; }
+export default function ReportsPage() { return <Suspense><ReportsView /></Suspense>; }

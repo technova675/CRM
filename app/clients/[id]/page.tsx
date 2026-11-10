@@ -518,11 +518,11 @@ function Meetings({ client }: { client: Client }) {
   );
 }
 
-export default function ClientProfilePage({ params }: { params: Promise<{ id: string }> }) {
+export default function ClientProfilePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{tab?: string}> }) {
   const { id } = use(params);
   const client = useCRM((s) => s.clients.find((c) => c.id === id));
   const me = useMe();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(use(searchParams).tab === "knowledge" ? "knowledge" : "overview");
   const isClient = me.role === "client";
   const internal = !isClient && can(me.role, "clients", "write");
 

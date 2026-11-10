@@ -1,215 +1,108 @@
 "use client";
 
-import Link from "next/link";
-import { useMemo, useState } from "react";
-import { ArrowRight, Bot, Cog, Download, History, Plug } from "lucide-react";
-import { useCRM } from "@/lib/store";
-import { AGENTS } from "@/lib/ai/agents";
-import type { Activity } from "@/lib/types";
-import { downloadFile, fmtDateTime, relTime, toCSV } from "@/lib/utils";
-import { AgentChip, Avatar, Badge, Button, Card, EmptyState, Input, SearchInput, Select, Table, Td, Th } from "@/components/ui";
-import { toast } from "@/components/shell/toast";
+import {useEffect,useState} from "react";
+import {Download,History} from "lucide-react";
+import {AGENTS,AGENT_LIST} from "@/lib/ai/agents";
+import type {Activity} from "@/lib/types";
+import {downloadFile,toCSV} from "@/lib/utils";
+import {Badge,Button,Card,CardHeader,EmptyState,Field,Input,Select,Table,Td,Th} from "@/components/ui";
 
-const PAGE = 100;
+type Row=Activity&{company?:string;person?:string;approver?:string};
+type Results={rows:Row[];total:number;entities:string[];clients:{id:string;company:string}[]};
+const blank={actor:"",agent:"",client:"",entity:"",changes:"",from:"",to:"",q:""};
+const pageSize=50;
+const format=new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"medium",timeStyle:"short"});
+const when=(value:string)=>format.format(new Date(value));
+const actorName=(row:Row)=>row.actor==="ai"&&row.agent?AGENTS[row.agent]?.name??"AI":row.actor==="human"?row.person??"Human":row.actor==="api"?"API":row.actor==="system"?"System":"AI";
+const safeCSV=(value:unknown)=>typeof value==="string"&&/^[\s\uFEFF]*[=+\-@]/.test(value)?"'"+value:value;
 
-const hrefFor = (a: Activity): string | undefined => {
-  const id = a.entityId;
-  switch (a.entity) {
-    case "lead":
-      return id?.startsWith("l_") ? `/leads/${id}` : "/leads";
-    case "client":
-      return id?.startsWith("c_") ? `/clients/${id}` : "/clients";
-    case "campaign":
-      return id?.startsWith("cmp_") ? `/campaigns?c=${id}` : "/campaigns";
-    case "invoice":
-      return "/payments?tab=invoices";
-    case "expense":
-      return "/payments?tab=expenses";
-    case "deal":
-      return "/pipeline";
-    case "task":
-      return "/tasks";
-    case "meeting":
-      return "/meetings";
-    case "outreach":
-      return "/outreach";
-    case "automation":
-      return "/automations";
-    case "influencer":
-      return "/influencers";
-    case "integration":
-      return "/integrations";
-    case "organization":
-      return "/settings?tab=plan";
-    case "settings":
-      return "/settings";
-    default:
-      return undefined;
+export function AuditLog(){
+  const [filters,setFilters]=useState(blank),[applied,setApplied]=useState(blank),[page,setPage]=useState(0);
+  const [result,setResult]=useState<Results>({rows:[],total:0,clients:[],entities:[]});
+  const [selected,setSelected]=useState<string>(),[error,setError]=useState(""),[busy,setBusy]=useState(true),[exporting,setExporting]=useState(false),[refresh,setRefresh]=useState(0);
+  const active=result.rows.find(row=>row.id===selected);
+  useEffect(()=>{
+    const controller=new AbortController();
+    const params=new URLSearchParams({offset:String(page*pageSize)});
+    for(const [key,value] of Object.entries(applied))if(value)params.set(key,value);
+    fetch("/api/audit?"+params,{cache:"no-store",signal:controller.signal}).then(async response=>{
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error);
+      if(!controller.signal.aborted){setResult(data);setError("");}
+    }).catch(error=>{if(!controller.signal.aborted)setError(error.message);})
+      .finally(()=>{if(!controller.signal.aborted)setBusy(false);});
+    return()=>controller.abort();
+  },[applied,page,refresh]);
+  const set=(key:keyof typeof blank,value:string)=>setFilters({...filters,[key]:value});
+  function load(next:typeof blank,pageNumber=0){
+    setApplied(next);setPage(pageNumber);setSelected(undefined);setBusy(true);setRefresh(value=>value+1);
   }
-};
-
-function Who({ a }: { a: Activity }) {
-  const member = useCRM((s) => (a.actorId ? s.team.find((t) => t.id === a.actorId) : undefined));
-  if (a.actor === "ai") {
-    const def = a.agent ? AGENTS[a.agent] : undefined;
-    return def ? <AgentChip name={def.name} color={def.color} /> : <Badge tone="accent"><Bot className="size-3" /> AI</Badge>;
+  async function csv(){
+    setExporting(true);
+    try{
+      const params=new URLSearchParams({export:"1"});
+      for(const [key,value] of Object.entries(applied))if(value)params.set(key,value);
+      const response=await fetch("/api/audit?"+params,{cache:"no-store"});
+      const data:Results&{error?:string}=await response.json();
+      if(!response.ok)throw new Error(data.error??"Could not export the audit log.");
+      const values=data.rows.map(row=>({when:row.at,who:actorName(row),actor_type:row.actor,agent:row.agent??"",client:row.company??"",what:row.action,
+        entity:row.entity,entity_id:row.entityId??"",detail:row.detail??"",outcome:row.outcome??"",sources:row.sources?.join(" | ")??"",
+        approved_by:row.approver??"",approved_at:row.approvedAt??"",before:row.before??"",after:row.after??""}));
+      downloadFile("audit-log.csv",toCSV(values.map(row=>Object.fromEntries(Object.entries(row).map(([key,value])=>[key,safeCSV(value)])))),"text/csv");
+    }catch(cause){setError(cause instanceof Error?cause.message:"Could not export the audit log.");}
+    finally{setExporting(false);}
   }
-  if (a.actor === "api") return <Badge tone="info"><Plug className="size-3" /> API</Badge>;
-  if (a.actor === "system") return <Badge><Cog className="size-3" /> System</Badge>;
-  if (!member) return <span className="text-xs text-fg-3">Human</span>;
-  return (
-    <span className="flex items-center gap-1.5 whitespace-nowrap">
-      <Avatar name={member.name} color={member.avatarColor} size={20} />
-      <span className="text-[13px]">{member.name}</span>
-    </span>
-  );
-}
-
-export function AuditLog() {
-  const activities = useCRM((s) => s.activities);
-  const team = useCRM((s) => s.team);
-  const [actor, setActor] = useState<Activity["actor"] | "all">("all");
-  const [entity, setEntity] = useState<Activity["entity"] | "all">("all");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [q, setQ] = useState("");
-  const [onlyChanges, setOnlyChanges] = useState(false);
-  const [limit, setLimit] = useState(PAGE);
-
-  const entities = useMemo(() => [...new Set(activities.map((a) => a.entity))].sort(), [activities]);
-  const nameOf = useMemo(() => new Map(team.map((t) => [t.id, t.name])), [team]);
-  const who = (a: Activity) => (a.actor === "ai" ? (a.agent ? AGENTS[a.agent]?.name : "AI") ?? "AI" : a.actor === "human" ? (nameOf.get(a.actorId ?? "") ?? "Human") : a.actor === "api" ? "API" : "System");
-
-  const rows = useMemo(() => {
-    const f = from ? new Date(`${from}T00:00:00`).getTime() : 0;
-    const t = to ? new Date(`${to}T23:59:59`).getTime() : Infinity;
-    const needle = q.toLowerCase();
-    return activities
-      .filter((a) => {
-        const at = new Date(a.at).getTime();
-        if (at < f || at > t) return false;
-        if (actor !== "all" && a.actor !== actor) return false;
-        if (entity !== "all" && a.entity !== entity) return false;
-        if (onlyChanges && a.before === undefined && a.after === undefined) return false;
-        if (needle && !`${a.action} ${a.detail ?? ""} ${a.before ?? ""} ${a.after ?? ""} ${a.entity} ${nameOf.get(a.actorId ?? "") ?? ""} ${a.agent ?? ""}`.toLowerCase().includes(needle)) return false;
-        return true;
-      })
-      .sort((a, b) => b.at.localeCompare(a.at));
-  }, [activities, from, to, actor, entity, q, onlyChanges, nameOf]);
-
-  const exportCSV = () => {
-    downloadFile(
-      `audit-log-${new Date().toISOString().slice(0, 10)}.csv`,
-      toCSV(rows.map((a) => ({ when: a.at, who: who(a), actor_type: a.actor, agent: a.agent ?? "", action: a.action, entity: a.entity, entity_id: a.entityId ?? "", detail: a.detail ?? "", before: a.before ?? "", after: a.after ?? "" }))),
-      "text/csv",
-    );
-    toast("Audit log exported", `${rows.length} entries`);
-  };
-
-  return (
+  return <div className="space-y-4">
     <Card>
-      <div className="flex flex-col gap-2 border-b border-border p-3">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-          <SearchInput value={q} onChange={setQ} placeholder="Search action, detail, values…" className="lg:w-64" />
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-            <Select value={actor} onChange={(e) => setActor(e.target.value as typeof actor)} className="sm:w-32">
-              <option value="all">All actors</option>
-              <option value="human">Human</option>
-              <option value="ai">AI agent</option>
-              <option value="api">API</option>
-              <option value="system">System</option>
-            </Select>
-            <Select value={entity} onChange={(e) => setEntity(e.target.value as typeof entity)} className="sm:w-36">
-              <option value="all">All entities</option>
-              {entities.map((x) => (
-                <option key={x} value={x}>
-                  {x.charAt(0).toUpperCase() + x.slice(1)}
-                </option>
-              ))}
-            </Select>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="sm:w-36" aria-label="From date" />
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="sm:w-36" aria-label="To date" />
-          </div>
-          <Button size="sm" className="lg:ml-auto" icon={<Download className="size-3.5" />} disabled={!rows.length} onClick={exportCSV}>
-            Export CSV
-          </Button>
+      <CardHeader title="Filter activity" subtitle="Dates and timestamps use India Standard Time."/>
+      <form onSubmit={event=>{event.preventDefault();load({...filters});}} className="grid gap-3 px-4 pb-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Field label="Agent"><Select value={filters.agent} onChange={e=>set("agent",e.target.value)}><option value="">All agents</option>{AGENT_LIST.map(agent=><option key={agent.id} value={agent.id}>{agent.name}</option>)}</Select></Field>
+        <Field label="Client"><Select value={filters.client} onChange={e=>set("client",e.target.value)}><option value="">All clients</option>{result.clients.map(client=><option key={client.id} value={client.id}>{client.company}</option>)}</Select></Field>
+        <Field label="Actor"><Select value={filters.actor} onChange={e=>set("actor",e.target.value)}><option value="">All actors</option><option value="human">Human</option><option value="ai">AI agent</option><option value="api">API</option><option value="system">System</option></Select></Field>
+        <Field label="From date"><Input type="date" value={filters.from} onChange={e=>set("from",e.target.value)}/></Field>
+        <Field label="To date"><Input type="date" value={filters.to} onChange={e=>set("to",e.target.value)}/></Field>
+        <Field label="Search activity"><Input value={filters.q} onChange={e=>set("q",e.target.value)} maxLength={150} placeholder="Action, source or outcome"/></Field>
+        <Field label="Entity"><Select value={filters.entity} onChange={e=>set("entity",e.target.value)}><option value="">All entities</option>{result.entities.map(entity=><option key={entity} value={entity}>{entity}</option>)}</Select></Field>
+        <label className="flex min-h-11 items-center gap-2 text-sm text-fg-2 sm:col-span-2"><input type="checkbox" checked={filters.changes==="1"} onChange={e=>set("changes",e.target.checked?"1":"")}/>Only entries with before or after values</label>
+        <div className="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-3">
+          <Button type="submit" className="min-h-11" variant="primary">Apply filters</Button>
+          <Button type="button" className="min-h-11" onClick={()=>{setFilters(blank);load(blank);}}>Clear filters</Button>
+          <Button type="button" className="min-h-11" icon={<Download className="size-4"/>} disabled={busy||!!error||!result.rows.length} loading={exporting} onClick={()=>void csv()}>Export CSV</Button>
         </div>
-        <label className="flex items-center gap-2 text-xs text-fg-2">
-          <input type="checkbox" checked={onlyChanges} onChange={(e) => setOnlyChanges(e.target.checked)} className="size-3.5 accent-[var(--accent)]" />
-          Only entries with before/after values
-          <span className="ml-auto text-fg-3">{rows.length} entries · last {activities.length} kept locally</span>
-        </label>
-      </div>
-      {rows.length === 0 ? (
-        <EmptyState icon={<History className="size-5" />} title="No activity matches" description="Widen the date range or clear filters." />
-      ) : (
-        <>
-          <Table>
-            <thead>
-              <tr>
-                <Th>Who</Th>
-                <Th>What</Th>
-                <Th>Entity</Th>
-                <Th>When</Th>
-                <Th>Before → After</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, limit).map((a) => {
-                const href = hrefFor(a);
-                return (
-                  <tr key={a.id} className="hover:bg-surface-2">
-                    <Td>
-                      <Who a={a} />
-                    </Td>
-                    <Td className="min-w-52">
-                      <p className="font-medium">{a.action}</p>
-                      {a.detail && <p className="max-w-80 truncate text-xs text-fg-3" title={a.detail}>{a.detail}</p>}
-                    </Td>
-                    <Td className="whitespace-nowrap">
-                      {href ? (
-                        <Link href={href} className="text-[13px] capitalize text-accent-text hover:underline">
-                          {a.entity}
-                        </Link>
-                      ) : (
-                        <span className="capitalize text-fg-2">{a.entity}</span>
-                      )}
-                      {a.entityId && <span className="block max-w-32 truncate font-mono text-[10px] text-fg-3">{a.entityId}</span>}
-                    </Td>
-                    <Td className="whitespace-nowrap" >
-                      <span className="text-[13px]">{relTime(a.at)}</span>
-                      <span className="block text-[11px] text-fg-3">{fmtDateTime(a.at)}</span>
-                    </Td>
-                    <Td className="min-w-48">
-                      {a.before !== undefined || a.after !== undefined ? (
-                        <span className="flex flex-wrap items-center gap-1 text-xs">
-                          <span className="max-w-40 truncate rounded bg-danger-soft px-1.5 py-0.5 text-danger line-through decoration-danger/40" title={a.before}>
-                            {a.before ?? "—"}
-                          </span>
-                          <ArrowRight className="size-3 text-fg-3" />
-                          <span className="max-w-40 truncate rounded bg-success-soft px-1.5 py-0.5 text-success" title={a.after}>
-                            {a.after ?? "—"}
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="text-xs text-fg-3">—</span>
-                      )}
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
-          {rows.length > limit && (
-            <div className="flex justify-center border-t border-border p-3">
-              <Button size="sm" variant="ghost" onClick={() => setLimit((l) => l + PAGE)}>
-                Show {Math.min(PAGE, rows.length - limit)} more
-              </Button>
-            </div>
-          )}
-        </>
-      )}
-      <p className="border-t border-border px-4 py-3 text-[11px] text-fg-3">Every human, AI-agent, API and system action is recorded. In production the audit log is append-only and stored server-side for the retention period set in Security.</p>
+      </form>
     </Card>
-  );
+    {error&&<p role="alert" className="text-sm text-danger">{error}</p>}
+    {busy&&<p role="status" className="text-sm text-fg-2">Loading audit entries…</p>}
+    {active&&!busy&&!error&&<Card>
+      <CardHeader title={active.action} subtitle={[actorName(active),active.company,when(active.at)].filter(Boolean).join(" · ")} action={<Button onClick={()=>setSelected(undefined)}>Close details</Button>}/>
+      <div className="grid gap-4 px-4 pb-4 sm:grid-cols-2">
+        {([
+          ["Outcome",active.outcome??active.detail??"No outcome recorded."],
+          ["Record type",active.origin==="server"?"Server-recorded event":"Workspace activity"],
+          ["Approved by",active.approver?[active.approver,active.approvedAt?when(active.approvedAt):""].filter(Boolean).join(" · "):"No approver recorded."],
+          ["Data used",active.sources?.join("\n")??"Source details were not recorded for this entry."],
+          ["Initiated by",active.person??actorName(active)],
+          ["Before",active.before??"No value recorded."],["After",active.after??"No value recorded."],
+        ] as const).map(([label,value])=><div key={label}><p className="text-xs font-medium text-fg-3">{label}</p><p className="mt-1 whitespace-pre-wrap break-words text-sm">{value}</p></div>)}
+      </div>
+    </Card>}
+    {!busy&&!error&&<Card>
+      <CardHeader title="Activity timeline" subtitle={result.total+" matching entries · Newest first"}/>
+      {!result.rows.length?<EmptyState icon={<History className="size-5"/>} title="No matching activity" description="Try a wider date range or clear the filters."/>:
+      <Table><thead><tr><Th>Who</Th><Th>What</Th><Th>When</Th><Th>Client</Th><Th>Outcome</Th></tr></thead>
+        <tbody>{result.rows.map(row=><tr key={row.id} className="hover:bg-surface-2">
+          <Td className="whitespace-nowrap"><span className="block">{actorName(row)}</span>{row.agent&&row.actor!=="ai"&&<span className="text-xs text-fg-3">{AGENTS[row.agent]?.name}</span>}</Td>
+          <Td className="min-w-52"><button type="button" aria-pressed={selected===row.id} className="min-h-11 text-left font-medium text-accent-text hover:underline" onClick={()=>setSelected(row.id)}>{row.action}</button><span className="block text-xs text-fg-3">{row.entity}</span></Td>
+          <Td className="whitespace-nowrap">{when(row.at)}</Td>
+          <Td>{row.company??"—"}</Td>
+          <Td>{row.outcome?<Badge>{row.outcome}</Badge>:<span className="text-fg-3">—</span>}</Td>
+        </tr>)}</tbody>
+      </Table>}
+      {result.total>pageSize&&<div className="flex items-center justify-between gap-2 border-t border-border p-3">
+        <Button className="min-h-11" disabled={page===0} onClick={()=>load(applied,page-1)}>Previous</Button>
+        <span className="text-xs text-fg-3">Page {page+1} of {Math.ceil(result.total/pageSize)}</span>
+        <Button className="min-h-11" disabled={(page+1)*pageSize>=result.total} onClick={()=>load(applied,page+1)}>Next</Button>
+      </div>}
+    </Card>}
+  </div>;
 }

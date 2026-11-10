@@ -2,7 +2,8 @@ import type { CRMState } from "../store";
 import type { AdStats, AgentId, Campaign, Client, DailyMetric, InsightItem, Lead, Priority, Recommendation, Service, TeamMember } from "../types";
 import { SERVICES } from "../types";
 import { can, type Module } from "../permissions";
-import { routeToAgent } from "./agents";
+import { AGENTS, routeToAgent } from "./agents";
+import { AGENT_WORKSPACES } from "./agentWorkspaces";
 import { recommendServices } from "./research";
 import { effectiveScore } from "./scoring";
 import { personalizeFirstMessage } from "./outreach";
@@ -39,6 +40,7 @@ export interface CommandAction {
   primary?: boolean;
 }
 export interface CommandAnswer {
+  denied?: boolean;
   agent: AgentId;
   content: string;
   steps: string[];
@@ -127,7 +129,7 @@ export function scopeState(s: CmdState, me: TeamMember): Scoped {
     socialPosts: gate(acc.social, own(s.socialPosts)),
     seoProjects: gate(acc.seo, own(s.seoProjects)),
     strategies: gate(acc.strategy && !portal, own(s.strategies)),
-    knowledge: gate(!portal, own(s.knowledge)),
+    knowledge: gate(acc.clients && !portal, own(s.knowledge)),
     assets: gate(acc.documents, portal ? s.assets.filter((a) => a.clientId === me.clientId && a.clientVisible) : s.assets),
     influencers: gate(acc.influencers && !portal, s.influencers),
     engagements: gate(acc.influencers && !portal, own(s.engagements)),
@@ -391,6 +393,7 @@ const ans = (agent: AgentId, a: Omit<CommandAnswer, "agent">): CommandAnswer => 
 const deny = (agent: AgentId, what: string, s: Scoped): CommandAnswer =>
   ans(agent, {
     content: `Your role (**${s.me.role.replace("_", " ")}**) doesn't have access to ${what}, so I can't answer this from agency data. Ask an admin to update permissions in Team → Permissions.`,
+    denied: true,
     steps: ["Checked your permissions"],
     insights: [d(`${what} is not authorized for your role`, "Role permissions")],
     items: [],
@@ -1088,13 +1091,44 @@ function help(s: Scoped): CommandAnswer {
 
 // ---------- Router ----------
 export function answerCommand(q: string, state: CmdState, me: TeamMember, opts: CommandOpts = {}): CommandAnswer {
-  const s = scopeState(state, me);
-  const t = q.toLowerCase();
-  const c: Ctx = { q, t, s, opts };
-  const pin = opts.agent;
-  const res = route(c);
-  // A pinned agent answers in its own name (the analysis itself is the same authorized data).
-  return pin ? { ...res, agent: pin } : res;
+  const authorized = scopeState(state, me);
+  const named = resolveClients(q, authorized.clients);
+  const clientId = opts.clientId || (named.length === 1 ? named[0]?.id : undefined);
+  const requested = opts.agent ?? routeToAgent(q);
+  const workspace = AGENT_WORKSPACES[requested];
+  if (clientId && (!authorized.access.clients || !authorized.clients.some(client=>client.id===clientId))) {
+    return deny(requested, "the selected client", authorized);
+  }
+  const scoped = <T extends {clientId?:string}>(rows:T[])=>rows.filter(row=>row.clientId===clientId);
+  const deals = clientId ? scoped(authorized.deals) : authorized.deals;
+  const leadIds = new Set(deals.map(deal=>deal.leadId));
+  const dealIds = new Set(deals.map(deal=>deal.id));
+  const conversations = clientId ? scoped(authorized.conversations) : authorized.conversations;
+  const conversationIds = new Set(conversations.map(item=>item.id));
+  const s:Scoped = clientId ? {
+    ...authorized, clients:authorized.clients.filter(client=>client.id===clientId),
+    campaigns:scoped(authorized.campaigns), ads:scoped(authorized.ads), knowledge:scoped(authorized.knowledge),
+    invoices:scoped(authorized.invoices), expenses:[], tasks:authorized.tasks.filter(task=>task.related?.type==="client"&&task.related.id===clientId),
+    leads:authorized.leads.filter(lead=>leadIds.has(lead.id)), deals, proposals:authorized.proposals.filter(item=>dealIds.has(item.dealId)),
+    meetings:scoped(authorized.meetings), conversations, messages:authorized.messages.filter(item=>conversationIds.has(item.conversationId)),
+    recommendations:scoped(authorized.recommendations), creatives:scoped(authorized.creatives), concepts:scoped(authorized.concepts),
+    socialPosts:scoped(authorized.socialPosts), seoProjects:scoped(authorized.seoProjects), strategies:scoped(authorized.strategies),
+    assets:scoped(authorized.assets), influencers:[], engagements:scoped(authorized.engagements), reports:scoped(authorized.reports),
+    aiTasks:scoped(authorized.aiTasks), approvals:[], automations:[],
+  } : authorized;
+  if(opts.agent && !can(me.role,workspace.module)) return deny(requested,"this specialist workspace",s);
+  const result = route({q,t:q.toLowerCase(),s,opts:{...opts,clientId}});
+  const agent = opts.agent ?? (["video","seo","automation"].includes(requested) || !result.steps.length ? requested : result.agent);
+  const target = AGENT_WORKSPACES[agent];
+  if(!can(me.role,target.module))return deny(agent,"this specialist workspace",s);
+  if(agent!==result.agent || !result.steps.length && agent!=="sales"){
+    return ans(agent,{
+      clientId,content:AGENTS[agent].description+" Open its workspace for specialist tools, or ask a question about this scope.",
+      actions:[{label:"Open "+AGENTS[agent].short+" workspace",href:target.href}],
+      insights:[],items:[],steps:["Selected the "+AGENTS[agent].short+" specialist"],
+    });
+  }
+  return {...result,clientId:clientId??result.clientId};
 }
 
 function route(c: Ctx): CommandAnswer {
@@ -1135,29 +1169,6 @@ function route(c: Ctx): CommandAnswer {
   if (resolveClients(c.q, s.clients).length === 1) return summarize(c);
   return help(s);
 }
-
-// ---------- Model snapshot (RBAC-filtered, compact) ----------
-export function buildCommandSnapshot(state: CmdState, me: TeamMember, local: CommandAnswer) {
-  const s = scopeState(state, me);
-  return {
-    today: new Date().toISOString().slice(0, 10),
-    role: me.role,
-    periods: "curr = last 30 days, prev = previous 30 days (campaign metrics); ads use this week vs last week",
-    clients: s.clients.slice(0, 30).map((c) => {
-      const p = s.access.media ? groupPerf(s.campaigns.filter((x) => x.clientId === c.id)) : undefined;
-      return { id: c.id, company: c.company, industry: c.industry, health: c.health, services: c.services, retainer: c.retainer, spend: p && Math.round(p.curr.spend), roas: p && +p.curr.roas.toFixed(2), roasPrev: p && +p.prev.roas.toFixed(2), cpa: p && Math.round(p.curr.cpa), cpaPrev: p && Math.round(p.prev.cpa), leads: p?.curr.leads };
-    }),
-    campaigns: s.campaigns.slice(0, 50).map((c) => {
-      const p = campPerf(c);
-      return { id: c.id, name: c.name, status: c.status, budget: c.budget, spend: Math.round(p.curr.spend), roas: +p.curr.roas.toFixed(2), roasPrev: +p.prev.roas.toFixed(2), cpa: Math.round(p.curr.cpa), cpaPrev: Math.round(p.prev.cpa), kpis: c.kpis };
-    }),
-    invoicesOpen: s.access.payments ? s.invoices.filter((i) => i.status !== "Paid").map((i) => ({ clientId: i.clientId, outstanding: i.amount - i.paid, status: i.status })) : "not authorized",
-    leadsDue: s.access.leads ? s.leads.filter((l) => l.nextFollowUpAt && isPast(l.nextFollowUpAt)).length : "not authorized",
-    localFindings: local.insights.map((i) => `[${i.kind}] ${i.text}${i.source ? ` (${i.source})` : ""}`),
-    localSteps: local.steps,
-  };
-}
-
 
 // ---------- Command Center home ("What is happening?") ----------
 export function homeSnapshot(state: CmdState, me: TeamMember) {

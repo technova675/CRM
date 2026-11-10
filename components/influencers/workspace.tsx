@@ -23,6 +23,7 @@ export function InfluencerWorkspace(){
  const filtered=creators.filter(i=>{const p=creatorDraft(i);return `${p.name} ${p.instagram} ${p.youtube} ${p.email}`.toLowerCase().includes(search.toLowerCase())&&(platform==="All"||p.platform===platform)&&(!category||p.category.toLowerCase().includes(category.toLowerCase()))&&(!geo||p.location.toLowerCase().includes(geo.toLowerCase()))&&(availability==="All"||p.availability===availability);});
  const pipeline=ownEngagements.filter(e=>clientFilter==="All"||e.clientId===clientFilter),changedEng=!!currentEng&&JSON.stringify(engagementDraft(currentEng))!==JSON.stringify(engForm?.data);
  const stale=!!report&&(requirementsKey(report.requirements)!==requirementsKey(req)||creatorCampaignKey(activeCampaign!)!==report.campaignKey||Object.keys(report.creatorKeys).length!==all.length||all.some(i=>report.creatorKeys[i.id]!==creatorKey(i)));
+ // eslint-disable-next-line react-hooks/set-state-in-effect -- setState runs after an async fetch, not synchronously in the effect
  useEffect(()=>{const c=ownCampaigns.find(c=>c.id===campaignId)||ownCampaigns[0];setReq(c?.creatorMatch?.requirements??{...blankRequirements(),objective:c?.objective??""});setMatchContent(c?.creatorMatch?.requirements.contentTypes.join(", ")??"");setSelected([]);},[campaignId,ownCampaigns.length]); // Keep edited requirements while an action refreshes the library.
  useEffect(()=>{if(error)errorRef.current?.focus();},[error]);
  const notify=(s:string)=>{setError(s);setNotice("");};
