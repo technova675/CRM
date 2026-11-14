@@ -215,7 +215,7 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
   const [industry, setIndustry] = useState("All");
   const [tag,setTag]=useState("");
   const [companySize,setCompanySize]=useState("All");
-  const [minScore, setMinScore] = useState(40);
+  const [minScore, setMinScore] = useState(0);
   const [busy, setBusy] = useState(false);
   const [abTpl, setAbTpl] = useState("");
   const usePreset = !!presetIds?.length;
@@ -290,7 +290,7 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
           <div className="rounded-lg bg-surface-2 p-3"><p className="text-[11px] text-fg-3">Will be contacted</p><p className="text-lg font-semibold tabular-nums">{selected.length}</p></div>
           <div className="rounded-lg bg-surface-2 p-3"><p className="text-[11px] text-fg-3">Avg. score</p><p className="text-lg font-semibold tabular-nums">{avg}</p></div>
         </div>
-        {!usePreset && n !== Infinity && eligible.length < n && <p className="text-xs text-warning">Only {eligible.length} leads match — widen filters or import more leads to reach {n}.</p>}
+        {!usePreset && n !== Infinity && eligible.length < n && <p className="text-xs text-warning">Only {eligible.length} leads match — widen filters or import more leads to reach {n}.{eligible.length===0&&leads.length>0&&" Unresearched leads have a score of 0, so lower the minimum AI score, or include more statuses."}</p>}
         <p className="text-xs text-fg-2">Opted-out and suppressed contacts are excluded. Drafts are generated in batches of 10. Every first message and follow-up needs human approval and a separate send action, regardless of global automation mode.</p>
       </div>
     </Modal>
