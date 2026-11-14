@@ -206,6 +206,7 @@ export interface Activity {
 
 export interface Deal {
   id: ID;
+  clientRemoved?: boolean;
   title: string;
   leadId?: ID;
   clientId?: ID;

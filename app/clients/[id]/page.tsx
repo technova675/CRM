@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { use, useMemo, useState } from "react";
 import { ArrowLeft, Check, CheckCircle2, ChevronRight, Circle, ExternalLink, FileText, Globe, Mail, MapPin, Phone } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
@@ -32,6 +33,8 @@ function Info({ label, children }: { label: string; children: React.ReactNode })
 
 function Overview({ client, internal }: { client: Client; internal: boolean }) {
   const update = useCRM((s) => s.updateClient);
+  const remove = useCRM((s) => s.deleteClient);
+  const router = useRouter();
   const team = useCRM((s) => s.team);
   const deals = useCRM((s) => s.deals);
   const fromDeal = deals.find((d) => d.id === client.fromDealId);
@@ -136,6 +139,17 @@ function Overview({ client, internal }: { client: Client; internal: boolean }) {
             <Field label="Monthly retainer (₹)">
               <Input type="number" value={client.retainer} onChange={(e) => update(client.id, { retainer: Number(e.target.value) })} />
             </Field>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (!confirm(`Delete ${client.company}? This removes the client profile and its knowledge base. Tasks, projects, invoices and other records are kept. This cannot be undone.`)) return;
+                remove(client.id);
+                toast("Client deleted");
+                router.push("/clients");
+              }}
+            >
+              Delete client
+            </Button>
           </Card>
         )}
       </div>

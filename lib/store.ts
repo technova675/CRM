@@ -167,6 +167,7 @@ export interface CRMState extends SeedData {
   // Clients
   addClient: (details: Pick<Client, "company" | "industry" | "location" | "website" | "contacts" | "services" | "accountManagerId" | "socialProfiles">) => string;
   updateClient: (id: string, patch: Partial<Client>) => void;
+  deleteClient: (id: string) => void;
   toggleOnboardingStep: (clientId: string, key: string) => void;
   createClientFromDeal: (dealId: string) => string | undefined;
   initializeOnboarding:(clientId:string)=>void;
@@ -611,6 +612,17 @@ export const useCRM = create<CRMState>()(
           if (c && keys.length === 1 && ["health", "retainer", "accountManagerId", "services", "contractEnd"].includes(keys[0]!)) {
             log({ actor: "human", actorId: me(), entity: "client", entityId: id, action: `Updated ${String(keys[0])}`, detail: c.company, before: short(c[keys[0]!]), after: short(patch[keys[0]!]) });
           }
+        },
+        deleteClient: (id) => {
+          const c = get().clients.find((x) => x.id === id);
+          if (!c) return;
+          // Won deals are marked so automatic onboarding does not recreate the client.
+          set((s) => ({
+            clients: s.clients.filter((x) => x.id !== id),
+            knowledge: s.knowledge.filter((k) => k.clientId !== id),
+            deals: s.deals.map((d) => (d.clientId === id || c.fromDealId === d.id ? { ...d, clientId: undefined, clientRemoved: true } : d)),
+          }));
+          log({ actor: "human", actorId: me(), entity: "client", entityId: id, action: "Deleted client", detail: c.company });
         },
         toggleOnboardingStep: (clientId, key) =>
           set((s) => ({

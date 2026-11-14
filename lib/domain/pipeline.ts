@@ -17,7 +17,7 @@ export interface OnboardingLibrary {deals:Deal[];leads:Lead[];team:TeamMember[];
 export function ensureWonOnboarding<T extends OnboardingLibrary>(input:T,templates:OnboardingTemplate[]=DEFAULT_ONBOARDING_TEMPLATES,at=new Date().toISOString(),actor?:string):{data:T;changed:boolean}{
  let data=input,changed=false;
  for(const deal of input.deals){
-  if(deal.stage!=="Won")continue;
+  if(deal.stage!=="Won"||deal.clientRemoved)continue;
   const linked=data.clients.find(c=>c.id===deal.clientId)||data.clients.find(c=>c.fromDealId===deal.id);
   if(linked){if(deal.clientId!==linked.id){data={...data,deals:data.deals.map(d=>d.id===deal.id?{...d,clientId:linked.id}:d)};changed=true;}const initialized=initializeClientOnboarding(data,linked.id,at);if(initialized.changed){data=initialized.data;changed=true;}continue;}
   const id=crypto.randomUUID(),projectId=crypto.randomUUID(),lead=data.leads.find(l=>l.id===deal.leadId);

@@ -74,6 +74,6 @@ export function dbError(error: unknown) {
     }
     if (error.status === 401 || error.status === 403) return Response.json({ error: "Supabase denied server access. Check the server service key and apply the reporting migration.", code: "db_auth" }, { status: 503 });
     if (error.status === 503) return Response.json({ error: "Could not reach Supabase. Check the project URL, project status and network connection.", code: "db_unavailable" }, { status: 503 });
-  } else console.error("[db] Unexpected database failure");
+  } else console.error("[db] Unexpected database failure", error);
   return Response.json({ error: "Supabase could not complete this request. Please try again.", code: "db_error" }, { status: 500 });
 }
