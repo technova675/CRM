@@ -7,6 +7,7 @@ import type { CRMLibrary } from "@/lib/domain/crmLibrary";
 import { Button } from "@/components/ui";
 import { downloadFile } from "@/lib/utils";
 import { registerCRMFlush,registerCRMRefresh } from "@/lib/crmSync";
+import {rebaseResearchSave} from "@/lib/domain/rebaseResearchSave";
 
 const keys=["expenses","timeEntries","analyticsFeeds","marketingAutomations","leads","deals","conversations","messages","activities","team","savedViews","outreach","clients","tasks","projects","knowledge","approvals","proposals","meetings","strategies","campaigns","invoices","ads","creatives","concepts","socialPosts","seoProjects","influencers","engagements","assets","reports","recommendations","reportSchedules"] as const;
 const settingsKeys=["notificationPrefs","readNotificationIds","permissionOverrides","sequences","suppressions","outreachTemplates","onboardingTemplates","proposalPriceBook"] as const;
@@ -30,7 +31,16 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
   const save=useCallback(async function saveChanges(){
     const rt=runtime.current;if(!rt||!rt.dirty)return;
     if(rt.pending){await rt.pending;return saveChanges();}
-    if(rt.conflict)throw new Error("Export unsaved changes and reload the CRM before saving again.");
+    if(rt.conflict){
+      const latest=await request();
+      const rebased=rebaseResearchSave(JSON.parse(rt.json) as CRMLibrary,snapshot(useCRM.getState()),latest.data);
+      if(!rebased)throw new Error("The same CRM record changed on both laptops. Export unsaved changes, then review the latest CRM before re-entering them.");
+      rt.revision=latest.revision;rt.operation=undefined;rt.json=JSON.stringify(latest.data);
+      rt.applying=true;
+      try{useCRM.setState(state=>({...Object.fromEntries(keys.map(key=>[key,rebased[key]])),settings:{...state.settings,...cloudSettings(rebased),leadCustomFields:rebased.customFields}}));}
+      finally{rt.applying=false;}
+      rt.conflict=false;setConflict(false);rt.dirty=true;setDirty(true);setError("");
+    }
     const json=JSON.stringify(snapshot(useCRM.getState()));
     if(json===rt.json){rt.dirty=false;setDirty(false);return;}
     // Preserve the operation ID on uncertain network failures, even if more edits arrive.
@@ -46,7 +56,23 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
           rt.json=JSON.stringify(snapshot(useCRM.getState()));
         }else rt.json=operation.json;
         rt.dirty=JSON.stringify(snapshot(useCRM.getState()))!==rt.json;setDirty(rt.dirty);
-      }catch(err){if((err as {status?:number}).status===409){rt.conflict=true;setConflict(true);}setError(err instanceof Error?err.message:"Could not sync CRM");throw err;}
+      }catch(err){
+        if((err as {status?:number}).status===409&&JSON.stringify(snapshot(useCRM.getState()))===operation.json){
+          try{
+            const latest=await request();
+            const rebased=rebaseResearchSave(JSON.parse(rt.json) as CRMLibrary,JSON.parse(operation.json) as CRMLibrary,latest.data);
+            if(rebased){
+              rt.revision=latest.revision;rt.operation=undefined;rt.json=JSON.stringify(latest.data);
+              rt.applying=true;
+              try{useCRM.setState(state=>({...Object.fromEntries(keys.map(key=>[key,rebased[key]])),settings:{...state.settings,...cloudSettings(rebased),leadCustomFields:rebased.customFields}}));}
+              finally{rt.applying=false;}
+              rt.dirty=true;setDirty(true);setError("");return;
+            }
+          }catch{/* Preserve local edits and show the original conflict for manual review. */}
+        }
+        if((err as {status?:number}).status===409){rt.conflict=true;setConflict(true);}
+        setError(err instanceof Error?err.message:"Could not sync CRM");throw err;
+      }
       finally{rt.pending=undefined;setSaving(false);}
     })();
     await rt.pending;if(rt.dirty)await saveChanges();
@@ -102,5 +128,5 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
   },[account.id,attempt,save]);
 
   if(!ready)return <div className="grid min-h-dvh place-items-center p-6"><div className="max-w-lg space-y-4 text-center">{error?<><p role="alert">{error}</p><Button onClick={()=>{setError("");setAttempt(value=>value+1);}}>Retry CRM connection</Button></>:<p className="flex items-center gap-2 text-sm text-fg-2" role="status"><Loader2 size={18} className="motion-safe:animate-spin" aria-hidden="true"/>Opening your CRM library…</p>}</div></div>;
-  return <>{children}<aside aria-label="CRM sync status" className="no-print fixed bottom-4 right-4 z-40 max-w-[min(440px,calc(100vw-32px))] rounded-xl border border-border bg-surface p-3 shadow-pop"><div className="flex items-center gap-2 text-xs text-fg-2" role="status">{saving?<Loader2 size={15} className="motion-safe:animate-spin" aria-hidden="true"/>:<Cloud size={15} aria-hidden="true"/>}{saving?"Saving CRM changes…":error?"CRM sync needs attention":dirty?"CRM changes waiting to save":"CRM saved to your account"}</div>{error&&<div className="mt-2 space-y-2"><p role="alert" className="text-xs leading-6 text-danger">{error}</p><div className="flex flex-wrap gap-2"><Button size="xs" icon={<Download size={14}/>} onClick={()=>downloadFile("crm-unsaved-backup.json",JSON.stringify(snapshot(useCRM.getState()),null,2),"application/json")}>Export unsaved changes</Button>{conflict?<Button size="xs" onClick={()=>{if(confirm("Reload the cloud CRM? Export your unsaved changes first; they will be replaced.")) {setReady(false);setError("");setAttempt(value=>value+1);}}}>Reload latest CRM</Button>:<Button size="xs" icon={<RefreshCw size={14}/>} onClick={()=>void save().catch(()=>{})}>Retry save</Button>}</div></div>}</aside></>;
+  return <>{children}<aside aria-label="CRM sync status" className="no-print fixed bottom-4 right-4 z-40 max-w-[min(440px,calc(100vw-32px))] rounded-xl border border-border bg-surface p-3 shadow-pop"><div className="flex items-center gap-2 text-xs text-fg-2" role="status">{saving?<Loader2 size={15} className="motion-safe:animate-spin" aria-hidden="true"/>:<Cloud size={15} aria-hidden="true"/>}{saving?"Saving CRM changes…":error?"CRM sync needs attention":dirty?"CRM changes waiting to save":"CRM saved to your account"}</div>{error&&<div className="mt-2 space-y-2"><p role="alert" className="text-xs leading-6 text-danger">{error}</p><div className="flex flex-wrap gap-2"><Button size="xs" icon={<Download size={14}/>} onClick={()=>downloadFile("crm-unsaved-backup.json",JSON.stringify(snapshot(useCRM.getState()),null,2),"application/json")}>Export unsaved changes</Button>{conflict?<><Button size="xs" icon={<RefreshCw size={14}/>} onClick={()=>void save().catch(cause=>setError(cause instanceof Error?cause.message:"Safe merge failed"))}>Try safe merge</Button><Button size="xs" onClick={()=>{if(confirm("Reload the cloud CRM? Export your unsaved changes first; they will be replaced.")) {setReady(false);setError("");setAttempt(value=>value+1);}}}>Reload latest CRM</Button></>:<Button size="xs" icon={<RefreshCw size={14}/>} onClick={()=>void save().catch(()=>{})}>Retry save</Button>}</div></div>}</aside></>;
 }

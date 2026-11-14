@@ -55,6 +55,15 @@ test("target audience coverage includes the actual sourced finding",()=>{
   assert.ok(audience.findings[0].text.includes("independent retailers"));
   assert.equal(audience.findings[0].source,source.url);
 });
+test("unverified company identity suppresses company-specific findings and explains the conflict",()=>{
+  const result=evidenceResearch(lead,[{...source,tracking:["Meta tracking reference"]}],{...proposal,identity:{status:"not_verified",reason:"The page may belong to a similarly named company.",conflicts:["Website branding differs from the CRM company."]},analysis:[{topic:"audience",findings:[{text:"Independent retailers",kind:"verified",sourceId:source.id,quote:"We make scheduling software for independent retailers."}]}],recommendedServices:[{service:"SEO",reason:"SEO may help",sourceId:source.id,quote:"We make scheduling software for independent retailers."}]});
+  assert.equal(result.identityAssessment.status,"not_verified");
+  assert.equal(result.coverage.find(item=>item.topic==="audience").status,"unavailable");
+  assert.equal(result.recommendedServices.length,0);
+  assert.ok(result.summary.includes("Identity Not Verified"));
+  assert.ok(result.limitations.some(item=>item.includes("Website branding differs")));
+  assert.ok(!result.sections.flatMap(section=>section.findings).some(finding=>finding.kind==="verified"));
+});
 test("tracking references do not establish active ads, and inferred competitors are rejected",()=>{
   const result=evidenceResearch(lead,[{...source,tracking:["Meta tracking reference"]}],{...proposal,analysis:[{topic:"competitors",findings:[{text:"Google competes with this business",kind:"assumption",sourceId:source.id,quote:source.text}]},{topic:"ads",findings:[{text:"Active ads",kind:"verified",sourceId:source.id,quote:"We make scheduling software for independent retailers."}]}]});
   assert.equal(result.coverage.find(item=>item.topic==="ads").status,"unavailable");assert.equal(result.coverage.find(item=>item.topic==="competitors").status,"unavailable");

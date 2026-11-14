@@ -112,6 +112,7 @@ export interface LeadResearch {
   outreachAngle?: string;
   mode?: "public_ai" | "public_evidence" | "crm_only";
   model?: string;
+  identityAssessment?: {status:"verified"|"not_verified";reason:string;conflicts:string[]};
   startedAt?: string;
   error?: string;
   sources?: { id:string;url:string;title:string;status:"ok"|"unavailable";checkedAt:string;reason?:string }[];
