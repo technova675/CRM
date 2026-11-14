@@ -8,7 +8,7 @@ import {aiConfigured,withModelFallback,SAFETY_RULES} from "@/lib/ai/provider";
 import {SERVICES} from "@/lib/types";
 export const maxDuration=90;
 const active=new Set<string>();
-const schema=z.object({targetKind:z.enum(["deal","lead","client"]),targetId:z.string().min(1).max(150),services:z.array(z.enum(SERVICES)).min(1).max(13),discoveryNotes:z.string().max(15000),strategySummary:z.string().max(10000),deliverableRequirements:z.string().max(10000),timelineRequirements:z.string().max(5000),priceBook:z.array(z.object({service:z.enum(SERVICES),setup:z.number().finite().min(0).max(1e9),monthly:z.number().finite().min(0).max(1e9)})).max(13),durationMonths:z.number().int().min(1).max(36)});
+const schema=z.object({targetKind:z.enum(["deal","lead","client"]),targetId:z.string().min(1).max(150),services:z.array(z.enum(SERVICES)).min(1).max(SERVICES.length),discoveryNotes:z.string().max(15000),strategySummary:z.string().max(10000),deliverableRequirements:z.string().max(10000),timelineRequirements:z.string().max(5000),priceBook:z.array(z.object({service:z.enum(SERVICES),setup:z.number().finite().min(0).max(1e9),monthly:z.number().finite().min(0).max(1e9)})).max(SERVICES.length),durationMonths:z.number().int().min(1).max(36)});
 const output=z.object({title:z.string().min(1).max(300),strategySummary:z.string().min(1).max(6000),deliverables:z.array(z.string().min(1).max(500)).min(1).max(40),timeline:z.array(z.object({phase:z.string().min(1).max(150),weeks:z.string().min(1).max(150),detail:z.string().min(1).max(1000)})).min(1).max(15)});
 export async function POST(req:Request){
  if(!sameOrigin(req))return Response.json({error:"Request origin is not allowed."},{status:403});

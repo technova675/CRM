@@ -6,7 +6,7 @@ import { outreachAngle, recommendServices } from "./research";
 const HOOKS: Record<Service, string> = {
   "Meta Ads": "a creative and measurement review", "Google Ads": "a search-intent and conversion review", "LinkedIn Ads": "a B2B audience and lead-quality review",
   Programmatic: "a channel-fit and measurement discussion", "Retail Media": "a product-listing and retail campaign review", "Quick Commerce": "a listing and local-demand review",
-  SEO: "a search-discovery and content review", "Social Media": "a content and community discussion", "Influencer Marketing": "a creator-fit and measurement discussion",
+  SEO: "a search-discovery and content review", "AI Search Visibility (GEO / AEO)": "an AI answer visibility review", "Social Media": "a content and community discussion", "Influencer Marketing": "a creator-fit and measurement discussion",
   "AI Automation": "a review of repetitive sales and marketing work", "Video Production": "a video-content and audience discussion", "Brand Strategy": "a positioning and customer-message discussion", Consulting: "a short discovery conversation",
 };
 

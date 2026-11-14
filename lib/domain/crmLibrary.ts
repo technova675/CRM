@@ -4,6 +4,8 @@ import {DEFAULT_ONBOARDING_TEMPLATES,type OnboardingLibrary} from "./pipeline";
 import type {OnboardingTemplate,Meeting} from "../types";
 
 export interface CRMLibrary extends OnboardingLibrary {
+  indiaCommerce?: import("./indiaCommerce").IndiaCommerceState;
+  aiVisibility?: import("./aiVisibility").VisibilityState;
   credentialVault?: Partial<Record<import("../workspaceVault").VaultSlot,import("../workspaceVault").SealedCredential>>;
   workspaceApiKeys?: {id:string;name:string;prefix:string;hash:string;createdAt:string;revokedAt?:string}[];
   staffInvites?: {memberId:string;hash:string;expiresAt:string}[];

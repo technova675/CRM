@@ -73,6 +73,8 @@ export const NAV: NavItem[] = [
   { href: "/social", label: "Social", icon: Share2, module: "social", group: "Execution", phase: 3 },
   { href: "/influencers", label: "Influencers", icon: Star, module: "influencers", group: "Execution", phase: 3 },
   { href: "/seo", label: "SEO", icon: Search, module: "seo", group: "Execution", phase: 3 },
+  { href: "/india-commerce", label: "India Commerce", icon: Megaphone, module: "india-commerce", group: "Execution" },
+  { href: "/ai-visibility", label: "AI Search Visibility", icon: Sparkles, module: "ai-visibility", group: "Intelligence" },
 
   { href: "/analytics", label: "Analytics", icon: LineChart, module: "analytics", group: "Intelligence", phase: 2 },
   { href: "/reports", label: "Reports", icon: FileBarChart, module: "reports", group: "Intelligence" },

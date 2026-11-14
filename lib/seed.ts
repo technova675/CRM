@@ -394,7 +394,7 @@ export function buildSeed(): SeedData {
   // ---- Campaigns ----
   const PLATFORM: Record<Service, string> = {
     "Meta Ads": "Meta (FB + IG)", "Google Ads": "Google Search + PMax", "LinkedIn Ads": "LinkedIn Campaign Manager", Programmatic: "DV360",
-    "Retail Media": "Amazon Ads", "Quick Commerce": "Blinkit + Zepto Ads", SEO: "Organic Search",
+    "Retail Media": "Amazon Ads", "Quick Commerce": "Blinkit + Zepto Ads", SEO: "Organic Search", "AI Search Visibility (GEO / AEO)": "AI answers",
     "Social Media": "Instagram + LinkedIn", "Influencer Marketing": "Instagram creators", "AI Automation": "WhatsApp + CRM",
     "Video Production": "Reels + YouTube", "Brand Strategy": "Multi-channel", Consulting: "—",
   };

@@ -58,6 +58,7 @@ export const SERVICES = [
   "Retail Media",
   "Quick Commerce",
   "SEO",
+  "AI Search Visibility (GEO / AEO)",
   "Social Media",
   "Influencer Marketing",
   "AI Automation",

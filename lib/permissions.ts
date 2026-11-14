@@ -6,7 +6,7 @@ export const MODULES = [
   "command", "dashboard",
   "leads", "research", "outreach", "inbox", "pipeline", "proposals", "meetings",
   "clients", "onboarding", "strategy", "documents",
-  "campaigns", "performance", "creative", "video", "social", "influencers", "seo",
+  "campaigns", "performance", "creative", "video", "social", "influencers", "seo", "ai-visibility", "india-commerce",
   "analytics", "reports",
   "tasks", "payments", "team", "automations", "integrations", "settings",
 ] as const;
@@ -19,7 +19,7 @@ export const MODULE_LABEL: Record<Module, string> = {
   inbox: "Communication Inbox", pipeline: "Sales Pipeline", proposals: "Proposals", meetings: "Meetings", clients: "Client Management",
   onboarding: "Client Onboarding", strategy: "Marketing Strategy", documents: "Documents & Assets", campaigns: "Campaign Management",
   performance: "Performance Marketing", creative: "Creative Studio", video: "AI Video Editor", social: "Social Media",
-  influencers: "Influencer Marketing", seo: "SEO", analytics: "Analytics & AI Insights", reports: "Reporting", tasks: "Tasks & Projects",
+  influencers: "Influencer Marketing", seo: "SEO", "ai-visibility": "AI Search Visibility", "india-commerce": "India Commerce", analytics: "Analytics & AI Insights", reports: "Reporting", tasks: "Tasks & Projects",
   payments: "Finance & Billing", team: "Team Management", automations: "Automation Builder", integrations: "Integrations", settings: "Settings",
 };
 
@@ -63,7 +63,7 @@ export const DEFAULT_PERMISSIONS: Record<Role, Record<Module, Access>> = {
   }),
   video_editor: row("none", { command: "full", dashboard: "full", clients: "read", documents: "read", creative: "read", video: "full", social: "read", tasks: "full" }),
   designer: row("none", { command: "full", dashboard: "full", clients: "read", documents: "full", creative: "full", video: "read", social: "read", tasks: "full" }),
-  seo: row("none", { command: "full", dashboard: "full", clients: "read", strategy: "read", documents: "read", seo: "full", analytics: "read", reports: "read", tasks: "full" }),
+  seo: row("none", { command: "full", dashboard: "full", clients: "read", strategy: "read", documents: "read", seo: "full", "ai-visibility": "full", "india-commerce": "read", analytics: "read", reports: "read", tasks: "full" }),
   social_media: row("none", {
     command: "full", dashboard: "full", clients: "read", strategy: "read", documents: "read", creative: "full", video: "read", social: "full", influencers: "read", analytics: "read", tasks: "full",
   }),
