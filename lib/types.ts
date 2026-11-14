@@ -96,6 +96,7 @@ export interface ResearchFinding {
   text: string;
   kind: "verified" | "assumption" | "recommendation" | "record" | "unavailable";
   source?: string;
+  sourceId?: string;
   evidenceQuote?: string;
 }
 
@@ -116,7 +117,7 @@ export interface LeadResearch {
   startedAt?: string;
   error?: string;
   sources?: { id:string;url:string;title:string;status:"ok"|"unavailable";checkedAt:string;reason?:string }[];
-  coverage?: {topic:string;label:string;status:"evidence"|"inference"|"unavailable";findings?:ResearchFinding[]}[];
+  coverage?: {topic:string;label:string;status:"evidence"|"inference"|"unavailable";findings?:ResearchFinding[];reason?:string}[];
   limitations?: string[];
 }
 

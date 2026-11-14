@@ -134,7 +134,7 @@ export default function ResearchPage() {
                   {queue === "running" ? <Loader2 className="size-4 animate-spin text-accent" /> : <ScorePill score={effectiveScore(l)} overridden={l.score?.override !== undefined} />}
                   {l.research?.status==="failed"&&<span className="text-xs text-danger">{l.research.error??"Research failed; retry"}</span>}
                   {queue === "done" && <span className="shrink-0 text-xs font-medium text-accent-text">{open === l.id ? "Hide results" : "View results"}</span>}
-                  {queue === "todo" && canWrite && <Button size="xs" onClick={(e) => { e.stopPropagation(); void runSelected([l.id]); }}>Research</Button>}
+                  {(queue === "todo" || queue === "done") && canWrite && <Button size="xs" onClick={(e) => { e.stopPropagation(); void runSelected([l.id]); }}>{queue === "done" ? "Re-research" : "Research"}</Button>}
                 </div>
                 {open === l.id && l.research?.status === "done" && (
                   <div className="animate-in space-y-3 bg-surface-2/40 px-4 py-4">

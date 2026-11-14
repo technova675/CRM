@@ -8,6 +8,7 @@ import { Button } from "@/components/ui";
 import { downloadFile } from "@/lib/utils";
 import { registerCRMFlush,registerCRMRefresh } from "@/lib/crmSync";
 import {rebaseResearchSave} from "@/lib/domain/rebaseResearchSave";
+import {mergeLibraries} from "@/lib/domain/mergeLibraries";
 
 const keys=["expenses","timeEntries","analyticsFeeds","marketingAutomations","leads","deals","conversations","messages","activities","team","savedViews","outreach","clients","tasks","projects","knowledge","approvals","proposals","meetings","strategies","campaigns","invoices","ads","creatives","concepts","socialPosts","seoProjects","influencers","engagements","assets","reports","recommendations","reportSchedules"] as const;
 const settingsKeys=["notificationPrefs","readNotificationIds","permissionOverrides","sequences","suppressions","outreachTemplates","onboardingTemplates","proposalPriceBook"] as const;
@@ -33,7 +34,7 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
     if(rt.pending){await rt.pending;return saveChanges();}
     if(rt.conflict){
       const latest=await request();
-      const rebased=rebaseResearchSave(JSON.parse(rt.json) as CRMLibrary,snapshot(useCRM.getState()),latest.data);
+      const rebased=rebaseResearchSave(JSON.parse(rt.json) as CRMLibrary,snapshot(useCRM.getState()),latest.data)??mergeLibraries(JSON.parse(rt.json) as CRMLibrary,snapshot(useCRM.getState()),latest.data);
       if(!rebased)throw new Error("The same CRM record changed on both laptops. Export unsaved changes, then review the latest CRM before re-entering them.");
       rt.revision=latest.revision;rt.operation=undefined;rt.json=JSON.stringify(latest.data);
       rt.applying=true;
@@ -60,7 +61,7 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
         if((err as {status?:number}).status===409&&JSON.stringify(snapshot(useCRM.getState()))===operation.json){
           try{
             const latest=await request();
-            const rebased=rebaseResearchSave(JSON.parse(rt.json) as CRMLibrary,JSON.parse(operation.json) as CRMLibrary,latest.data);
+            const rebased=rebaseResearchSave(JSON.parse(rt.json) as CRMLibrary,JSON.parse(operation.json) as CRMLibrary,latest.data)??mergeLibraries(JSON.parse(rt.json) as CRMLibrary,JSON.parse(operation.json) as CRMLibrary,latest.data);
             if(rebased){
               rt.revision=latest.revision;rt.operation=undefined;rt.json=JSON.stringify(latest.data);
               rt.applying=true;
@@ -117,7 +118,7 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
       }catch(err){if(live)setError(err instanceof Error?err.message:"Could not open CRM library");}
     })();
     const refresh=async()=>{
-      const rt=runtime.current;if(!rt||rt.dirty||rt.pending||document.visibilityState==="hidden")return;
+      const rt=runtime.current;if(!rt||rt.dirty||rt.pending||document.visibilityState==="hidden"||useCRM.getState().leads.some(lead=>lead.research?.status==="running"))return;
       try{const result=await request();if(!live||rt.dirty||rt.pending)return;if(result.revision!==rt.revision){apply(result.data,result.notificationFeed);rt.revision=result.revision;rt.json=JSON.stringify(snapshot(useCRM.getState()));}else if(result.notificationFeed)useCRM.setState({accountNotifications:result.notificationFeed});setError("");}catch(err){if(live)setError(err instanceof Error?err.message:"Could not refresh CRM");}
     };
     const beforeUnload=(event:BeforeUnloadEvent)=>{if(runtime.current?.dirty){event.preventDefault();event.returnValue="";}};

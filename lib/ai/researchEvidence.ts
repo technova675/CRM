@@ -8,6 +8,21 @@ export type EvidenceDocument={id:string;url:string;title:string;text:string;stat
 export type ProposedFinding={text:string;kind:"verified"|"assumption"|"recommendation";sourceId:string|null;quote:string|null};
 export type ProposedResearch={identity?:{status:"verified"|"not_verified";reason:string;conflicts:string[]};analysis:{topic:string;findings:ProposedFinding[]}[];problems:ProposedFinding[];opportunities:ProposedFinding[];recommendedServices:{service:Service;reason:string;sourceId:string|null;quote:string|null}[];outreachAngle:string};
 const normalize=(value:string)=>value.replace(/\s+/g," ").trim();
+function sameWebsite(a:string,b:string){try{return new URL(a).hostname.replace(/^www\./i,"").toLowerCase()===new URL(b).hostname.replace(/^www\./i,"").toLowerCase();}catch{return false;}}
+function officialSiteFinding(source:EvidenceDocument,quote:string):ResearchFinding|null{
+  const exact=normalize(quote);
+  return exact.length>=12&&exact.length<=280&&normalize(source.text).includes(exact)?{kind:"verified",text:`The source states: “${exact}”`,source:source.url,sourceId:source.id,evidenceQuote:exact}:null;
+}
+function explicitOfficialFacts(lead:Pick<Lead,"company"|"website">,documents:EvidenceDocument[]){
+  const home=documents.find(document=>document.id==="site-1"&&document.status==="ok"&&lead.website&&sameWebsite(document.url,lead.website));
+  if(!home)return{};
+  const text=normalize(home.text),escaped=lead.company.trim().replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const businessQuote=escaped?text.slice(0,800).match(new RegExp(`\\b${escaped}\\b\\s*(?:(?:is|are)\\s+|[|:–—-]\\s*)[^.!?]{0,120}\\b(?:agency|consultancy|consulting firm|platform|marketplace|manufacturer|retailer|software company|SaaS company)\\b[^.!?]{0,40}`,"i"))?.[0]:undefined;
+  const websiteQuote=escaped?text.match(new RegExp(`[^.!?]{0,60}\\b${escaped}\\b[^.!?]{0,160}\\b(?:website|site|agency|platform|services)\\b[^.!?]{0,40}`,"i"))?.[0]:undefined;
+  const website=websiteQuote?officialSiteFinding(home,websiteQuote):null;
+  const business_model=businessQuote?officialSiteFinding(home,businessQuote):null;
+  return{website,business_model};
+}
 function adTransparencySource(value:string){
   try{const url=new URL(value),host=url.hostname.replace(/^www\./,"");return host==="adstransparency.google.com"||(host==="facebook.com"&&/^\/ads\/library(?:\/|$)/.test(url.pathname))||(host==="linkedin.com"&&/^\/ad-library(?:\/|$)/.test(url.pathname));}catch{return false;}
 }
@@ -18,11 +33,11 @@ export function groundFinding(finding:ProposedFinding,documents:EvidenceDocument
   const source=documents.find(document=>document.id===finding.sourceId&&document.status==="ok");
   const quote=normalize(finding.quote??"");
   const grounded=!!source&&quote.length>=12&&quote.length<=280&&normalize(source.text).includes(quote);
-  if(finding.kind==="verified")return grounded?{kind:"verified",text:`The source states: “${quote}”`,source:source!.url,evidenceQuote:quote}:null;
+  if(finding.kind==="verified")return grounded?{kind:"verified",text:`The source states: “${quote}”`,source:source!.url,sourceId:source!.id,evidenceQuote:quote}:null;
   if(!finding.text.trim()||finding.text.length>1500||/guaranteed?\b|\d+(?:\.\d+)?\s*%/i.test(finding.text))return null;
   if(finding.kind==="assumption"&&!grounded)return null;
   if(finding.kind==="assumption"&&!/\b(may|might|could|if|possible|suggests|potential)\b/i.test(finding.text))return null;
-  return{kind:finding.kind,text:finding.kind==="assumption"?`AI inference — confirm before use: ${finding.text}`:finding.text,...(grounded?{source:source!.url,evidenceQuote:quote}:{source:"General recommendation; not an observed company problem"})};
+  return{kind:finding.kind,text:finding.kind==="assumption"?`AI inference — confirm before use: ${finding.text}`:finding.text,...(grounded?{source:source!.url,sourceId:source!.id,evidenceQuote:quote}:{source:"General recommendation; not an observed company problem"})};
 }
 
 const unavailable=(text:string):ResearchFinding=>({kind:"unavailable",text});
@@ -31,15 +46,23 @@ export function evidenceResearch(lead:Pick<Lead,"company"|"industry"|"location"|
   const identityUnverified=proposal?.identity?.status==="not_verified";
   const clean=(findings:ProposedFinding[]=[])=>findings.flatMap(finding=>{const result=groundFinding(finding,documents);if(!result)rejected++;return result?[result]:[];});
   const analysis=new Map<string,ResearchFinding[]>();
+  const topicReasons=new Map<string,string>();
   for(const [topic]of RESEARCH_TOPICS){
     const proposed=identityUnverified?[]:proposal?.analysis.filter(item=>item.topic===topic).flatMap(item=>item.findings)??[];
-    analysis.set(topic,clean(proposed).filter(finding=>{
+    const findings=clean(proposed).filter(finding=>{
       if(topic==="competitors")return finding.kind==="verified"&&/competitor|alternative|compete|competing|versus|\bvs\b/i.test(finding.evidenceQuote??"");
       if(topic==="ads"&&finding.kind==="verified")return adTransparencySource(finding.source??"");
+      if(topic==="growth"&&finding.kind==="verified")return false;
       return true;
-    }));
+    });
+    analysis.set(topic,findings);
+    if(!findings.length&&proposed.length)topicReasons.set(topic,"An AI finding was omitted because its quote, source or topic did not pass verification.");
   }
   const read=documents.filter(document=>document.status==="ok");
+  if(proposal?.identity?.status==="verified"){
+    const official=explicitOfficialFacts(lead,documents);
+    for(const [topic,finding]of Object.entries(official))if(finding&&!analysis.get(topic)?.length){analysis.set(topic,[finding]);topicReasons.delete(topic);}
+  }
   if(!proposal&&read.length){analysis.set("website",read.filter(document=>document.id.startsWith("site")).slice(0,2).map(document=>({kind:"verified",text:`Readable public page: ${document.title}`,source:document.url,evidenceQuote:document.text.slice(0,220)})));}
   const record:ResearchFinding[]=[{kind:"record",text:`Company supplied in CRM: ${lead.company}.`,source:"CRM record — not independently verified"},
     ...[["Industry",lead.industry],["Location",lead.location],["Company size",lead.companySize]].filter(([,value])=>value&&value!=="Unknown").map(([label,value])=>({kind:"record" as const,text:`${label} supplied in CRM: ${value}.`,source:"CRM record — not independently verified"}))];
@@ -66,7 +89,7 @@ export function evidenceResearch(lead:Pick<Lead,"company"|"industry"|"location"|
     mode:proposal?"public_ai":read.length?"public_evidence":"crm_only",...(model?{model}:{}),
     ...(proposal?.identity?{identityAssessment:proposal.identity}:{}),
     sources:documents.map(document=>({id:document.id,url:document.url,title:document.title,status:document.status,checkedAt:document.checkedAt,...(document.reason?{reason:document.reason}:{})})),
-    coverage:RESEARCH_TOPICS.map(([topic,label])=>({topic,label,status:(analysis.get(topic)??[]).some(finding=>finding.kind==="verified")?"evidence":(analysis.get(topic)??[]).some(finding=>finding.kind==="assumption"||finding.kind==="recommendation")?"inference":"unavailable",findings:[...(analysis.get(topic)??[])].sort((a,b)=>Number(b.kind==="verified")-Number(a.kind==="verified")).slice(0,2)})),
+    coverage:RESEARCH_TOPICS.map(([topic,label])=>({topic,label,status:(analysis.get(topic)??[]).some(finding=>finding.kind==="verified")?"evidence":(analysis.get(topic)??[]).some(finding=>finding.kind==="assumption"||finding.kind==="recommendation")?"inference":"unavailable",findings:[...(analysis.get(topic)??[])].sort((a,b)=>Number(b.kind==="verified")-Number(a.kind==="verified")).slice(0,1),...(topicReasons.has(topic)?{reason:topicReasons.get(topic)}:{})})),
     limitations:[...limitations,...(identityUnverified?[`Identity Not Verified: ${proposal?.identity?.reason??"Source association is uncertain."}`,...(proposal?.identity?.conflicts??[]).map(conflict=>`Identity conflict: ${conflict}`)]:[]),...(!proposal?["AI synthesis was unavailable or not requested; no model-generated audit is presented as completed research."]:[]),...(rejected?[`${rejected} unsupported model finding(s) were omitted because evidence or grounding requirements were not met.`]:[])],
   };
 }

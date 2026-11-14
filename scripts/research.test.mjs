@@ -55,6 +55,37 @@ test("target audience coverage includes the actual sourced finding",()=>{
   assert.ok(audience.findings[0].text.includes("independent retailers"));
   assert.equal(audience.findings[0].source,source.url);
 });
+
+test("confirmed official-site statements fill only matching research topics",()=>{
+  const official={...source,text:"Example is a performance marketing agency for independent retailers. Our services include paid acquisition and CRO."};
+  const result=evidenceResearch(lead,[official],{...proposal,identity:{status:"verified",reason:"The official site identifies Example as the agency.",conflicts:[]}});
+  assert.equal(result.coverage.find(item=>item.topic==="business_model").status,"evidence");
+  assert.equal(result.coverage.find(item=>item.topic==="website").status,"evidence");
+  assert.equal(result.coverage.find(item=>item.topic==="ads").status,"unavailable");
+  assert.equal(result.coverage.find(item=>item.topic==="competitors").status,"unavailable");
+});
+
+test("an official-site brand heading can establish the stated business model",()=>{
+  const official={...source,text:"Example | Founder-led performance marketing agency in Mumbai. We help independent retailers grow."};
+  const result=evidenceResearch(lead,[official],{...proposal,identity:{status:"verified",reason:"The official site identifies Example.",conflicts:[]}});
+  assert.equal(result.coverage.find(item=>item.topic==="business_model").status,"evidence");
+  assert.equal(result.coverage.find(item=>item.topic==="business_model").findings[0].sourceId,"site-1");
+});
+
+test("official-site fallback requires a matching host and verified identity",()=>{
+  const official={...source,text:"Example is a performance marketing agency for independent retailers."};
+  for(const [document,identity] of [[{...official,url:"https://unrelated.example"},"verified"],[official,"not_verified"]]){
+    const result=evidenceResearch(lead,[document],{...proposal,identity:{status:identity,reason:"Identity check",conflicts:[]}});
+    assert.equal(result.coverage.find(item=>item.topic==="business_model").status,"unavailable");
+  }
+});
+
+test("rejected category findings explain why they were omitted",()=>{
+  const result=evidenceResearch(lead,[source],{...proposal,analysis:[{topic:"products",findings:[{text:"Products",kind:"verified",sourceId:source.id,quote:"This quote is invented and does not appear on the page."}]}]});
+  const products=result.coverage.find(item=>item.topic==="products");
+  assert.equal(products.status,"unavailable");
+  assert.match(products.reason,/omitted.*verification/);
+});
 test("unverified company identity suppresses company-specific findings and explains the conflict",()=>{
   const result=evidenceResearch(lead,[{...source,tracking:["Meta tracking reference"]}],{...proposal,identity:{status:"not_verified",reason:"The page may belong to a similarly named company.",conflicts:["Website branding differs from the CRM company."]},analysis:[{topic:"audience",findings:[{text:"Independent retailers",kind:"verified",sourceId:source.id,quote:"We make scheduling software for independent retailers."}]}],recommendedServices:[{service:"SEO",reason:"SEO may help",sourceId:source.id,quote:"We make scheduling software for independent retailers."}]});
   assert.equal(result.identityAssessment.status,"not_verified");
