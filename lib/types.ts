@@ -287,6 +287,7 @@ export interface ClientContact {
 }
 
 export interface Client {
+  socialProfiles?: { platform: string; handle: string }[];
   creativeIntelligence?: CreativeIntelligenceReport[];
   id: ID;
   company: string;

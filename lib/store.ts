@@ -165,7 +165,7 @@ export interface CRMState extends SeedData {
   setProposalStatus: (id: string, s: ProposalStatus) => void;
 
   // Clients
-  addClient: (details: Pick<Client, "company" | "industry" | "location" | "website" | "contacts" | "services" | "accountManagerId">) => string;
+  addClient: (details: Pick<Client, "company" | "industry" | "location" | "website" | "contacts" | "services" | "accountManagerId" | "socialProfiles">) => string;
   updateClient: (id: string, patch: Partial<Client>) => void;
   toggleOnboardingStep: (clientId: string, key: string) => void;
   createClientFromDeal: (dealId: string) => string | undefined;

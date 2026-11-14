@@ -11,6 +11,7 @@ import { SERVICES, type Client, type Service } from "@/lib/types";
 import { cn, compactMoney, daysBetween, fmtShort, relTime, sum } from "@/lib/utils";
 import { clientHealth, type HealthResult } from "@/lib/ai/client-success";
 import { useHealthData } from "@/components/clients/useClientHealth";
+import { completeSocialProfiles, SocialProfilesFields } from "@/components/clients/SocialProfilesFields";
 import { Avatar, Badge, Button, Card, EmptyState, Field, Input, MemberAvatar, Modal, PageHeader, Progress, SearchInput, Segmented, Select, Stat, StatusBadge, Table, Td, Th } from "@/components/ui";
 
 function NewClientModal({onClose,onCreated}:{onClose:()=>void;onCreated:(id:string)=>void}){
@@ -21,6 +22,7 @@ function NewClientModal({onClose,onCreated}:{onClose:()=>void;onCreated:(id:stri
   const [industry,setIndustry]=useState("");
   const [location,setLocation]=useState("");
   const [website,setWebsite]=useState("");
+  const [socialProfiles,setSocialProfiles]=useState<NonNullable<Client["socialProfiles"]>>([]);
   const [contactName,setContactName]=useState("");
   const [contactEmail,setContactEmail]=useState("");
   const [contactPhone,setContactPhone]=useState("");
@@ -35,18 +37,20 @@ function NewClientModal({onClose,onCreated}:{onClose:()=>void;onCreated:(id:stri
     try{
       const id=addClient({company:company.trim(),industry:industry.trim(),location:location.trim(),website:website.trim()||undefined,
         contacts:contactName.trim()?[{name:contactName.trim(),email:contactEmail.trim(),phone:contactPhone.trim(),role:"Primary contact"}]:[],
-        services,accountManagerId:manager});
+        services,accountManagerId:manager,socialProfiles:socialProfiles.map(profile=>({platform:profile.platform.trim(),handle:profile.handle.trim()}))});
       onCreated(id);
     }catch(cause){setError(cause instanceof Error?cause.message:"Could not add client.");}
   }
   return <Modal open onClose={onClose} title="Add client" subtitle="Create a client profile directly. A deal is optional." size="lg"
-    footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!company.trim()||!manager||!websiteValid||!contactValid||!emailValid} onClick={create}>Add client</Button></>}>
+    footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!company.trim()||!manager||!websiteValid||!contactValid||!emailValid||!completeSocialProfiles(socialProfiles)} onClick={create}>Add client</Button></>}>
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label="Company" className="sm:col-span-2"><Input autoFocus value={company} maxLength={500} required onChange={event=>setCompany(event.target.value)}/></Field>
       <Field label="Industry"><Input value={industry} maxLength={500} onChange={event=>setIndustry(event.target.value)}/></Field>
       <Field label="Location"><Input value={location} maxLength={500} onChange={event=>setLocation(event.target.value)}/></Field>
       <Field label="Website" className="sm:col-span-2"><Input type="url" value={website} maxLength={2000} placeholder="https://example.com" aria-invalid={!websiteValid} onChange={event=>setWebsite(event.target.value)}/></Field>
       {!websiteValid&&<p className="text-xs text-danger sm:col-span-2">Enter a public website URL.</p>}
+      <div className="sm:col-span-2"><SocialProfilesFields value={socialProfiles} onChange={setSocialProfiles}/></div>
+      {!completeSocialProfiles(socialProfiles)&&<p className="text-xs text-danger sm:col-span-2">Complete or remove each social profile row.</p>}
       <Field label="Primary contact name"><Input value={contactName} maxLength={500} onChange={event=>setContactName(event.target.value)}/></Field>
       <Field label="Contact email"><Input type="email" value={contactEmail} maxLength={500} aria-invalid={!emailValid} onChange={event=>setContactEmail(event.target.value)}/></Field>
       <Field label="Contact phone"><Input type="tel" value={contactPhone} maxLength={500} onChange={event=>setContactPhone(event.target.value)}/></Field>
