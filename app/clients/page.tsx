@@ -3,13 +3,60 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Building2, FileBarChart, LayoutGrid, List, Megaphone, TrendingUp, Wallet } from "lucide-react";
+import { Building2, FileBarChart, LayoutGrid, List, Megaphone, Plus, TrendingUp, Wallet } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
+import { can } from "@/lib/permissions";
+import { safeClientLink } from "@/lib/domain/clientProfile";
 import { SERVICES, type Client, type Service } from "@/lib/types";
 import { cn, compactMoney, daysBetween, fmtShort, relTime, sum } from "@/lib/utils";
 import { clientHealth, type HealthResult } from "@/lib/ai/client-success";
 import { useHealthData } from "@/components/clients/useClientHealth";
-import { Avatar, Badge, Card, EmptyState, MemberAvatar, PageHeader, Progress, SearchInput, Segmented, Select, Stat, StatusBadge, Table, Td, Th } from "@/components/ui";
+import { Avatar, Badge, Button, Card, EmptyState, Field, Input, MemberAvatar, Modal, PageHeader, Progress, SearchInput, Segmented, Select, Stat, StatusBadge, Table, Td, Th } from "@/components/ui";
+
+function NewClientModal({onClose,onCreated}:{onClose:()=>void;onCreated:(id:string)=>void}){
+  const addClient=useCRM(state=>state.addClient);
+  const team=useCRM(state=>state.team);
+  const me=useMe();
+  const [company,setCompany]=useState("");
+  const [industry,setIndustry]=useState("");
+  const [location,setLocation]=useState("");
+  const [website,setWebsite]=useState("");
+  const [contactName,setContactName]=useState("");
+  const [contactEmail,setContactEmail]=useState("");
+  const [contactPhone,setContactPhone]=useState("");
+  const [services,setServices]=useState<Service[]>([]);
+  const [manager,setManager]=useState(me.id);
+  const [error,setError]=useState("");
+  const websiteValid=!website.trim()||!!safeClientLink(website.trim());
+  const contactValid=(!contactEmail&&!contactPhone)||!!contactName.trim();
+  const emailValid=!contactEmail||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim());
+  function create(){
+    setError("");
+    try{
+      const id=addClient({company:company.trim(),industry:industry.trim(),location:location.trim(),website:website.trim()||undefined,
+        contacts:contactName.trim()?[{name:contactName.trim(),email:contactEmail.trim(),phone:contactPhone.trim(),role:"Primary contact"}]:[],
+        services,accountManagerId:manager});
+      onCreated(id);
+    }catch(cause){setError(cause instanceof Error?cause.message:"Could not add client.");}
+  }
+  return <Modal open onClose={onClose} title="Add client" subtitle="Create a client profile directly. A deal is optional." size="lg"
+    footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!company.trim()||!manager||!websiteValid||!contactValid||!emailValid} onClick={create}>Add client</Button></>}>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field label="Company" className="sm:col-span-2"><Input autoFocus value={company} maxLength={500} required onChange={event=>setCompany(event.target.value)}/></Field>
+      <Field label="Industry"><Input value={industry} maxLength={500} onChange={event=>setIndustry(event.target.value)}/></Field>
+      <Field label="Location"><Input value={location} maxLength={500} onChange={event=>setLocation(event.target.value)}/></Field>
+      <Field label="Website" className="sm:col-span-2"><Input type="url" value={website} maxLength={2000} placeholder="https://example.com" aria-invalid={!websiteValid} onChange={event=>setWebsite(event.target.value)}/></Field>
+      {!websiteValid&&<p className="text-xs text-danger sm:col-span-2">Enter a public website URL.</p>}
+      <Field label="Primary contact name"><Input value={contactName} maxLength={500} onChange={event=>setContactName(event.target.value)}/></Field>
+      <Field label="Contact email"><Input type="email" value={contactEmail} maxLength={500} aria-invalid={!emailValid} onChange={event=>setContactEmail(event.target.value)}/></Field>
+      <Field label="Contact phone"><Input type="tel" value={contactPhone} maxLength={500} onChange={event=>setContactPhone(event.target.value)}/></Field>
+      <Field label="Account manager"><Select value={manager} onChange={event=>setManager(event.target.value)}>{team.filter(member=>member.role!=="client"&&member.status!=="disabled"&&member.status!=="invited").map(member=><option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+      {!contactValid&&<p className="text-xs text-danger sm:col-span-2">Add a contact name when entering an email or phone.</p>}
+      <fieldset className="sm:col-span-2"><legend className="mb-2 text-xs font-medium text-fg-2">Services</legend><div className="flex flex-wrap gap-2">{SERVICES.map(service=><label key={service} className="flex min-h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs"><input type="checkbox" checked={services.includes(service)} onChange={event=>setServices(current=>event.target.checked?[...current,service]:current.filter(item=>item!==service))}/>{service}</label>)}</div></fieldset>
+      {error&&<p role="alert" className="text-sm text-danger sm:col-span-2">{error}</p>}
+    </div>
+  </Modal>;
+}
 
 interface Row {
   c: Client;
@@ -45,6 +92,7 @@ export default function ClientsPage() {
   const [health, setHealth] = useState("all");
   const [service, setService] = useState<Service | "all">("all");
   const [view, setView] = useState<"grid" | "list">("grid");
+  const [adding,setAdding]=useState(false);
 
   useEffect(() => {
     if (me.role === "client" && me.clientId) router.replace(`/clients/${me.clientId}`);
@@ -86,16 +134,16 @@ export default function ClientsPage() {
     <div>
       <PageHeader
         title="Clients"
-        description="Every won deal becomes a client profile with onboarding, campaigns, billing and reports."
+        description="Add a client directly or convert a won deal into a client with onboarding."
         actions={
-          <Segmented
+          <div className="flex items-center gap-2"><Segmented
             value={view}
             onChange={setView}
             options={[
               { value: "grid", label: <LayoutGrid className="size-3.5" /> },
               { value: "list", label: <List className="size-3.5" /> },
             ]}
-          />
+          />{can(me.role,"clients","write")&&<Button variant="primary" className="min-h-11" icon={<Plus className="size-4"/>} onClick={()=>setAdding(true)}>Add client</Button>}</div>
         }
       />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -123,7 +171,7 @@ export default function ClientsPage() {
 
       {rows.length === 0 ? (
         <Card>
-          <EmptyState icon={<Building2 className="size-5" />} title="No clients match" description="Clients are created automatically when a deal is moved to Won." />
+          <EmptyState icon={<Building2 className="size-5" />} title="No clients match" description={clients.length?"Try clearing your filters.":"Add a client here or move a sales deal to Won."} action={!clients.length&&can(me.role,"clients","write")?<Button onClick={()=>setAdding(true)}>Add client</Button>:undefined}/>
         </Card>
       ) : view === "grid" ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -243,6 +291,7 @@ export default function ClientsPage() {
           </Table>
         </Card>
       )}
+      {adding&&<NewClientModal onClose={()=>setAdding(false)} onCreated={id=>{setAdding(false);router.push(`/clients/${id}`);}}/>}
     </div>
   );
 }

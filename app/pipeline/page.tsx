@@ -430,7 +430,7 @@ function PipelineInner() {
       )}
 
       <DealDrawer dealId={openId} onClose={() => setOpen(null)} />
-      <NewDealModal open={newOpen} onClose={() => setNewOpen(false)} />
+      {newOpen && <NewDealModal open onClose={() => setNewOpen(false)} />}
     </div>
   );
 }

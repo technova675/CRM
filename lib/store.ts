@@ -165,6 +165,7 @@ export interface CRMState extends SeedData {
   setProposalStatus: (id: string, s: ProposalStatus) => void;
 
   // Clients
+  addClient: (details: Pick<Client, "company" | "industry" | "location" | "website" | "contacts" | "services" | "accountManagerId">) => string;
   updateClient: (id: string, patch: Partial<Client>) => void;
   toggleOnboardingStep: (clientId: string, key: string) => void;
   createClientFromDeal: (dealId: string) => string | undefined;
@@ -590,6 +591,19 @@ export const useCRM = create<CRMState>()(
         },
 
         // ---------------- Clients ----------------
+        addClient: (details) => {
+          const company=details.company.trim();
+          if (!company) throw new Error("Enter a company name.");
+          if (get().clients.some(client=>client.company.trim().toLocaleLowerCase()===company.toLocaleLowerCase())) {
+            throw new Error("A client with this company name already exists. Open its profile instead.");
+          }
+          const id=uid("cl"),at=now();
+          const client:Client={...details,id,company,retainer:0,contractStart:"",contractEnd:"",health:"Healthy",onboarding:[],documents:[],createdAt:at};
+          const initialized=initializeClientOnboarding({...get(),clients:[client,...get().clients]},id,at);
+          set(initialized.data);
+          log({actor:"human",actorId:me(),entity:"client",entityId:id,action:"Created client",detail:company});
+          return id;
+        },
         updateClient: (id, patch) => {
           const c = get().clients.find((x) => x.id === id);
           set((s) => ({ clients: s.clients.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
