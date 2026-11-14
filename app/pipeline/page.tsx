@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRightLeft, CalendarClock, FileText, KanbanSquare, PartyPopper, Plus, Sparkles, TrendingUp, Trophy, Wallet, X } from "lucide-react";
+import { ArrowRightLeft, CalendarClock, FileText, KanbanSquare, PartyPopper, Plus, Sparkles, TrendingUp, Trophy, Upload, Wallet, X } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import { PROPOSAL_STATUSES, SERVICES, type Deal, type DealStage, type ProposalStatus, type Service } from "@/lib/types";
@@ -12,6 +12,7 @@ import { cn, compactMoney, fmtDate, fmtShort, money, pct, sum } from "@/lib/util
 import { Badge, Button, Card, EmptyState, Field, Input, MemberAvatar, Modal, PageHeader, SearchInput, Segmented, Select, Stat, StatusBadge, Table, Td, Th } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import { DealDrawer, ServicePicker } from "@/components/deals/DealDrawer";
+import { DealImportModal } from "@/components/deals/DealImportModal";
 import styles from "./pipeline.module.css";
 
 const STAGE_DOT: Record<DealStage, string> = {
@@ -277,6 +278,7 @@ function PipelineInner() {
   const [service, setService] = useState<Service | "all">("all");
   const [q, setQ] = useState("");
   const [newOpen, setNewOpen] = useState(false);
+  const [importOpen,setImportOpen]=useState(false);
   const [dragOver, setDragOver] = useState<DealStage | null>(null);
   const [won, setWon] = useState<{ company: string; clientId?: string } | null>(null);
 
@@ -332,6 +334,9 @@ function PipelineInner() {
                 { value: "proposals", label: "Proposals" },
               ]}
             />
+            {canWrite && (
+              <Button icon={<Upload className="size-3.5" />} onClick={() => setImportOpen(true)}>Import deals</Button>
+            )}
             {canWrite && (
               <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => setNewOpen(true)}>
                 New deal
@@ -431,6 +436,7 @@ function PipelineInner() {
 
       <DealDrawer dealId={openId} onClose={() => setOpen(null)} />
       {newOpen && <NewDealModal open onClose={() => setNewOpen(false)} />}
+      {importOpen && <DealImportModal onClose={() => setImportOpen(false)} />}
     </div>
   );
 }

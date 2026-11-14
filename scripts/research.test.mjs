@@ -47,6 +47,14 @@ test("all requested outputs and coverage areas remain explicit when public evide
   assert.equal(result.mode,"crm_only");assert.ok(!result.sections.flatMap(section=>section.findings).some(finding=>finding.kind==="verified"));
   assert.ok(!result.summary.includes("Active on"));assert.ok(!result.outreachAngle.includes("300%"));
 });
+test("target audience coverage includes the actual sourced finding",()=>{
+  const quote="We make scheduling software for independent retailers.";
+  const result=evidenceResearch(lead,[source],{...proposal,analysis:[{topic:"audience",findings:[{text:"Independent retailers",kind:"verified",sourceId:source.id,quote}]}]});
+  const audience=result.coverage.find(item=>item.topic==="audience");
+  assert.equal(audience.status,"evidence");
+  assert.ok(audience.findings[0].text.includes("independent retailers"));
+  assert.equal(audience.findings[0].source,source.url);
+});
 test("tracking references do not establish active ads, and inferred competitors are rejected",()=>{
   const result=evidenceResearch(lead,[{...source,tracking:["Meta tracking reference"]}],{...proposal,analysis:[{topic:"competitors",findings:[{text:"Google competes with this business",kind:"assumption",sourceId:source.id,quote:source.text}]},{topic:"ads",findings:[{text:"Active ads",kind:"verified",sourceId:source.id,quote:"We make scheduling software for independent retailers."}]}]});
   assert.equal(result.coverage.find(item=>item.topic==="ads").status,"unavailable");assert.equal(result.coverage.find(item=>item.topic==="competitors").status,"unavailable");

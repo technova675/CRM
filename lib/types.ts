@@ -115,7 +115,7 @@ export interface LeadResearch {
   startedAt?: string;
   error?: string;
   sources?: { id:string;url:string;title:string;status:"ok"|"unavailable";checkedAt:string;reason?:string }[];
-  coverage?: {topic:string;label:string;status:"evidence"|"inference"|"unavailable"}[];
+  coverage?: {topic:string;label:string;status:"evidence"|"inference"|"unavailable";findings?:ResearchFinding[]}[];
   limitations?: string[];
 }
 

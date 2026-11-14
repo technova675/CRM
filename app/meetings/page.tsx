@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, ListTodo, Plus, Video } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock, ListTodo, Plus, Upload, Video } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import type { Meeting, MeetingOutcome } from "@/lib/types";
 import { cn, DAY, fmtDate, fmtShort, fmtTime, isSameDay, startOfDay } from "@/lib/utils";
 import { Badge, Button, Card, Drawer, EmptyState, Field, Input, MemberAvatar, Modal, PageHeader, Segmented, Select, StatusBadge, Textarea } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
+import {MeetingImportModal} from "@/components/sales/MeetingImportModal";
 
 const OUTCOMES: MeetingOutcome[] = ["Pending", "Positive", "Needs Follow-up", "Not Interested", "No Show"];
 const OUTCOME_EFFECT: Record<MeetingOutcome, string> = {
@@ -363,6 +364,7 @@ export default function MeetingsPage() {
   const [tab, setTab] = useState<"today" | "upcoming" | "past">("upcoming");
   const [open, setOpen] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState(false);
+  const [importing,setImporting]=useState(false);
 
   const [now] = useState(() => Date.now());
   const meetings = useMemo(() => (me.role === "client" ? all.filter((m) => m.clientId === me.clientId) : all), [all, me]);
@@ -392,6 +394,9 @@ export default function MeetingsPage() {
                 { value: "week", label: "Week" },
               ]}
             />
+            {canWrite && (
+              <Button icon={<Upload className="size-3.5" />} onClick={() => setImporting(true)}>Import meetings</Button>
+            )}
             {canWrite && (
               <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => setScheduling(true)}>
                 Schedule
@@ -438,6 +443,7 @@ export default function MeetingsPage() {
       )}
       <MeetingDrawer id={open} onClose={() => setOpen(null)} />
       <ScheduleModal key={scheduling ? "open" : "closed"} open={scheduling} onClose={() => setScheduling(false)} />
+      {importing&&<MeetingImportModal onClose={()=>setImporting(false)}/>}
     </div>
   );
 }

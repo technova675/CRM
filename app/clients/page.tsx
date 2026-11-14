@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Building2, FileBarChart, LayoutGrid, List, Megaphone, Plus, TrendingUp, Wallet } from "lucide-react";
+import { Building2, FileBarChart, LayoutGrid, List, Megaphone, Plus, TrendingUp, Upload, Wallet } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import { safeClientLink } from "@/lib/domain/clientProfile";
@@ -12,6 +12,7 @@ import { cn, compactMoney, daysBetween, fmtShort, relTime, sum } from "@/lib/uti
 import { clientHealth, type HealthResult } from "@/lib/ai/client-success";
 import { useHealthData } from "@/components/clients/useClientHealth";
 import { completeSocialProfiles, SocialProfilesFields } from "@/components/clients/SocialProfilesFields";
+import { ClientImportModal } from "@/components/clients/ClientImportModal";
 import { Avatar, Badge, Button, Card, EmptyState, Field, Input, MemberAvatar, Modal, PageHeader, Progress, SearchInput, Segmented, Select, Stat, StatusBadge, Table, Td, Th } from "@/components/ui";
 
 function NewClientModal({onClose,onCreated}:{onClose:()=>void;onCreated:(id:string)=>void}){
@@ -97,6 +98,7 @@ export default function ClientsPage() {
   const [service, setService] = useState<Service | "all">("all");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [adding,setAdding]=useState(false);
+  const [importing,setImporting]=useState(false);
 
   useEffect(() => {
     if (me.role === "client" && me.clientId) router.replace(`/clients/${me.clientId}`);
@@ -140,14 +142,14 @@ export default function ClientsPage() {
         title="Clients"
         description="Add a client directly or convert a won deal into a client with onboarding."
         actions={
-          <div className="flex items-center gap-2"><Segmented
+          <div className="flex flex-wrap items-center gap-2"><Segmented
             value={view}
             onChange={setView}
             options={[
               { value: "grid", label: <LayoutGrid className="size-3.5" /> },
               { value: "list", label: <List className="size-3.5" /> },
             ]}
-          />{can(me.role,"clients","write")&&<Button variant="primary" className="min-h-11" icon={<Plus className="size-4"/>} onClick={()=>setAdding(true)}>Add client</Button>}</div>
+          />{can(me.role,"clients","write")&&<Button className="min-h-11" icon={<Upload className="size-4"/>} onClick={()=>setImporting(true)}>Import clients</Button>}{can(me.role,"clients","write")&&<Button variant="primary" className="min-h-11" icon={<Plus className="size-4"/>} onClick={()=>setAdding(true)}>Add client</Button>}</div>
         }
       />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -296,6 +298,7 @@ export default function ClientsPage() {
         </Card>
       )}
       {adding&&<NewClientModal onClose={()=>setAdding(false)} onCreated={id=>{setAdding(false);router.push(`/clients/${id}`);}}/>}
+      {importing&&<ClientImportModal onClose={()=>setImporting(false)}/>}
     </div>
   );
 }

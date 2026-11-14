@@ -316,7 +316,7 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
           {lead.research?.status === "done" && (
             <Card id="research-findings" className="scroll-mt-20">
               <CardHeader title="Research findings" subtitle="Verified facts are separated from assumptions and recommendations." />
-              <div className="space-y-4 px-4 pb-4"><ResearchEvidencePanel research={lead.research} /><ResearchSections research={lead.research} /></div>
+              <div className="space-y-4 px-4 pb-4"><ResearchEvidencePanel research={lead.research} onRerun={canWrite?()=>{void researchLead(lead.id);toast("AI research started",lead.company,"ai");}:undefined} /><ResearchSections research={lead.research} /></div>
             </Card>
           )}
 

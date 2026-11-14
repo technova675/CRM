@@ -140,7 +140,7 @@ export default function ResearchPage() {
                   <div className="animate-in space-y-3 bg-surface-2/40 px-4 py-4">
                     <p className="text-[13px] leading-relaxed">{l.research.summary}</p>
                     <ResearchSections research={l.research} />
-                    <ResearchEvidencePanel research={l.research} />
+                    <ResearchEvidencePanel research={l.research} onRerun={canWrite?()=>{void runSelected([l.id]);}:undefined} />
                     <Link href={`/leads/${l.id}`} className="text-xs text-accent-text hover:underline">Open lead →</Link>
                   </div>
                 )}

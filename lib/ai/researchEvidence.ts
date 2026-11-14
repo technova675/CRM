@@ -64,7 +64,7 @@ export function evidenceResearch(lead:Pick<Lead,"company"|"industry"|"location"|
   return{status:"done",generatedAt:new Date().toISOString(),summary,sections,recommendedServices:[...new Set(services.map(item=>item.service))].slice(0,4),outreachAngle:angle,
     mode:proposal?"public_ai":read.length?"public_evidence":"crm_only",...(model?{model}:{}),
     sources:documents.map(document=>({id:document.id,url:document.url,title:document.title,status:document.status,checkedAt:document.checkedAt,...(document.reason?{reason:document.reason}:{})})),
-    coverage:RESEARCH_TOPICS.map(([topic,label])=>({topic,label,status:(analysis.get(topic)??[]).some(finding=>finding.kind==="verified")?"evidence":(analysis.get(topic)??[]).some(finding=>finding.kind==="assumption"||finding.kind==="recommendation")?"inference":"unavailable"})),
+    coverage:RESEARCH_TOPICS.map(([topic,label])=>({topic,label,status:(analysis.get(topic)??[]).some(finding=>finding.kind==="verified")?"evidence":(analysis.get(topic)??[]).some(finding=>finding.kind==="assumption"||finding.kind==="recommendation")?"inference":"unavailable",findings:[...(analysis.get(topic)??[])].sort((a,b)=>Number(b.kind==="verified")-Number(a.kind==="verified")).slice(0,2)})),
     limitations:[...limitations,...(!proposal?["AI synthesis was unavailable or not requested; no model-generated audit is presented as completed research."]:[]),...(rejected?[`${rejected} unsupported model finding(s) were omitted because evidence or grounding requirements were not met.`]:[])],
   };
 }
