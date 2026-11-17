@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Bell, ChevronDown, LogOut, Lock, Menu, Moon, Search, Sparkles, Sun, X } from "lucide-react";
+import { Bell, ChevronDown, CircleHelp, LogOut, Lock, Menu, Moon, Search, Sparkles, Sun, X } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can, moduleFromPath, MODULE_LABEL, ROLE_LABEL, setPermissionOverrides } from "@/lib/permissions";
 import { cn, relTime } from "@/lib/utils";
@@ -16,6 +16,7 @@ import { CommandPalette } from "./CommandPalette";
 import { deadlineItems } from "@/lib/domain/projectTasks";
 import { useDeadlineToday } from "@/components/tasks/useDeadlineToday";
 import { AssistantPanel } from "./AssistantPanel";
+import { usePageTour } from "@/components/tour/useTour";
 
 function useTheme() {
   const [dark, setDark] = useState(false);
@@ -173,7 +174,7 @@ function Notifications() {
   );
 }
 
-function Topbar() {
+function Topbar({ hasTour, onTour }: { hasTour: boolean; onTour: () => void }) {
   const { dark, toggle } = useTheme();
   const setPalette = useUI((s) => s.setPalette);
   const openAssistant = useUI((s) => s.openAssistant);
@@ -197,9 +198,14 @@ function Topbar() {
           <span className={cn("size-1.5 rounded-full", aiEnabled ? "bg-success" : "bg-fg-3")} />
           {aiEnabled ? "AI live" : "AI local"}
         </span>
-        <Button variant="ai" size="sm" icon={<Sparkles className="size-3.5" />} onClick={() => openAssistant()}>
+        <span data-tour="app-ai"><Button variant="ai" size="sm" icon={<Sparkles className="size-3.5" />} onClick={() => openAssistant()}>
           <span className="hidden sm:inline">Ask AI</span>
-        </Button>
+        </Button></span>
+        {hasTour && (
+          <button data-tour="app-tour" onClick={onTour} className="grid size-8 place-items-center rounded-lg text-fg-2 hover:bg-surface-2" aria-label="Take a tour of this page" title="Take a tour of this page">
+            <CircleHelp className="size-4" />
+          </button>
+        )}
         <Notifications />
         <button onClick={toggle} className="grid size-8 place-items-center rounded-lg text-fg-2 hover:bg-surface-2" aria-label="Toggle theme">
           {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
@@ -242,6 +248,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const setPalette = useUI((s) => s.setPalette);
   const setAIEnabled = useCRM((s) => s.setAIEnabled);
   const refreshOverdue = useCRM((s) => s.refreshOverdue);
+  const tour = usePageTour(ready);
 
   useEffect(() => {
     // Storage can be blocked (private mode, embedded frames); fall back to in-memory demo data.
@@ -271,7 +278,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh">
-      <aside className="hidden lg:block fixed inset-y-0 left-0 w-60 border-r border-border bg-bg">{ready && <Sidebar />}</aside>
+      <aside data-tour="app-nav" className="hidden lg:block fixed inset-y-0 left-0 w-60 border-r border-border bg-bg">{ready && <Sidebar />}</aside>
       {mobileNav && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNav(false)} />
@@ -284,7 +291,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col lg:pl-60">
-        <Topbar />
+        <Topbar hasTour={tour.available} onTour={tour.start} />
         <main className="flex-1 px-4 py-5 lg:px-6 lg:py-6 max-w-[1600px] w-full mx-auto">
           {ready ? (
             <AccessGate>{children}</AccessGate>

@@ -29,7 +29,7 @@ export default function LoginPage() {
       const account=await refresh();
       notifyAuthChange();
       const requested = new URLSearchParams(window.location.search).get("next");
-      router.replace(account?.kind==="staff"?"/staff":safeReturnPath(requested)); router.refresh();
+      router.replace(account?.kind==="staff"?"/staff":account?.kind==="portal"?"/portal":safeReturnPath(requested)); router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not connect. Please retry."); }
     finally { setBusy(false); }
   }

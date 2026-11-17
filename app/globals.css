@@ -217,3 +217,35 @@ main .flex > .flex-1 {
     --accent-text: #1d4ed8;
   }
 }
+
+/* Guided tour (driver.js) themed to the CRM */
+.driver-popover {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 16px;
+}
+.driver-popover-title { font-size: 14px; font-weight: 600; }
+.driver-popover-description { font-size: 13px; color: var(--text-2); line-height: 1.5; }
+.driver-popover-progress-text { color: var(--text-3); font-size: 11px; }
+.driver-popover-arrow-side-left.driver-popover-arrow { border-left-color: var(--surface); }
+.driver-popover-arrow-side-right.driver-popover-arrow { border-right-color: var(--surface); }
+.driver-popover-arrow-side-top.driver-popover-arrow { border-top-color: var(--surface); }
+.driver-popover-arrow-side-bottom.driver-popover-arrow { border-bottom-color: var(--surface); }
+.driver-popover-footer button {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  text-shadow: none;
+}
+.driver-popover-footer button.driver-popover-next-btn,
+.driver-popover-footer button.driver-popover-done-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}

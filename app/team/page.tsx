@@ -7,12 +7,13 @@ import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
 import { PageHeader, Readonly, Stat, Tabs } from "@/components/ui";
 import { StaffAccess } from "@/components/team/StaffAccess";
+import { UserAccess } from "@/components/team/UserAccess";
 import { MembersTab } from "@/components/team/MembersTab";
 import { PermissionsTab } from "@/components/team/PermissionsTab";
 import { TimeTab } from "@/components/team/TimeTab";
 import { WorkloadTab } from "@/components/team/WorkloadTab";
 
-type Tab = "members" | "permissions" | "workload" | "time" | "staff";
+type Tab = "members" | "permissions" | "workload" | "time" | "staff" | "access";
 
 function TeamInner() {
   const me = useMe();
@@ -22,7 +23,7 @@ function TeamInner() {
   const writable = can(me.role, "team", "write") && me.role !== "client";
   const showCost = me.role === "admin" || me.role === "finance";
   const raw = params.get("tab");
-  const tab: Tab = raw === "permissions" || raw === "workload" || raw === "time" || raw==="staff"&&me.role==="admin" ? raw : "members";
+  const tab: Tab = raw === "permissions" || raw === "workload" || raw === "time" || (raw==="staff"||raw==="access")&&me.role==="admin" ? raw : "members";
   const setTab = (t: Tab) => router.replace(t === "members" ? "/team" : `/team?tab=${t}`, { scroll: false });
 
   const stats = useMemo(() => {
@@ -52,7 +53,7 @@ function TeamInner() {
           onChange={setTab}
           tabs={[
             { value: "members", label: "Members", count: team.length },
-            ...(me.role==="admin"?[{value:"staff" as const,label:"Staff sign-in"}]:[]),
+            ...(me.role==="admin"?[{value:"staff" as const,label:"Staff sign-in"},{value:"access" as const,label:"User access & activity"}]:[]),
             { value: "permissions", label: (<span className="inline-flex items-center gap-1"><ShieldCheck className="size-3.5" />Roles & permissions</span>) },
             { value: "workload", label: "Workload" },
             { value: "time", label: "Time tracking" },
@@ -60,6 +61,7 @@ function TeamInner() {
         />
       </div>
       {tab==="staff"&&me.role==="admin"&&<StaffAccess/>}
+      {tab==="access"&&me.role==="admin"&&<UserAccess/>}
       {tab === "members" && <MembersTab writable={writable} showCost={showCost} />}
       {tab === "permissions" && <PermissionsTab editable={me.role === "admin"} />}
       {tab === "workload" && <WorkloadTab />}

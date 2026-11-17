@@ -9,6 +9,8 @@ import {recordAudit} from "@/lib/auditServer";
 import {assetDownload} from "@/lib/assetDownload";
 import {LEAD_STATUSES} from "@/lib/types";
 import {nextTaskOccurrence,taskDependencyIssue} from "@/lib/domain/projectTasks";
+import {STAFF_PANEL_MODULE,type StaffPanel} from "@/lib/domain/staffPanels";
+import {panelOverridesFor} from "@/lib/accessServer";
 
 const reply=(data:unknown,status=200)=>Response.json(data,{status,headers:{"Cache-Control":"private, no-store"}});
 const id=z.string().min(1).max(150);
@@ -20,11 +22,14 @@ const fail=(error:unknown)=>error instanceof StaffError?reply({error:error.messa
 
 export async function GET(req:Request){
   try{
-    const {data,member,owner}=await requireStaff(req);
+    const {data,member,owner,actor}=await requireStaff(req);
     const allow=(module:Parameters<typeof knowledgeAccess>[2],write=false)=>knowledgeAccess(data,member.id,module,write);
+    // The owner can show or hide a section for one person; otherwise the role decides. Writes always follow the role.
+    const overrides=await panelOverridesFor(owner,actor);
+    const show=(panel:StaffPanel)=>overrides[panel]??allow(STAFF_PANEL_MODULE[panel]);
     const assetId=new URL(req.url).searchParams.get("asset");
     if(assetId){
-      if(!allow("documents"))return reply({error:"Document access is required."},403);
+      if(!show("documents"))return reply({error:"Document access is required."},403);
       const asset=data.assets?.find(item=>item.id===assetId&&!item.archivedAt);
       return assetDownload(asset,owner,null);
     }
@@ -32,13 +37,13 @@ export async function GET(req:Request){
     return reply({
       organization:data.tenantProfile?.name??"Agency workspace",
       member:{name:member.name,role:member.role},
-      leads:allow("leads")?{writable:allow("leads",true),rows:data.leads.slice(0,250).map(lead=>({id:lead.id,title:lead.name,company:lead.company,status:lead.status}))}:undefined,
-      clients:allow("clients")?{rows:data.clients.slice(0,250).map(client=>({id:client.id,title:client.company,industry:client.industry,status:client.health}))}:undefined,
-      campaigns:allow("campaigns")?{rows:data.campaigns.slice(0,250).map(campaign=>({id:campaign.id,title:campaign.name,company:clients.get(campaign.clientId),status:campaign.status,platform:campaign.platform}))}:undefined,
-      tasks:allow("tasks")?{writable:allow("tasks",true),rows:data.tasks.filter(task=>task.assigneeId===member.id).slice(0,250).map(task=>({id:task.id,title:task.title,status:task.status,dueDate:task.dueDate,priority:task.priority}))}:undefined,
-      invoices:allow("payments")?{rows:data.invoices.slice(0,250).map(invoice=>({id:invoice.id,title:invoice.number,company:clients.get(invoice.clientId),status:invoice.status,balance:invoice.amount-invoice.paid}))}:undefined,
-      reports:allow("reports")?{rows:(data.clientReporting?.reports??[]).slice(0,250).map(report=>({id:report.id,title:report.frequency+" report",company:report.facts.company,status:report.status}))}:undefined,
-      documents:allow("documents")?{rows:(data.assets??[]).filter(asset=>!asset.archivedAt&&asset.versions.some(version=>version.file)).slice(0,250).map(asset=>({id:asset.id,title:asset.name,company:asset.clientId?clients.get(asset.clientId):undefined,folder:asset.folder}))}:undefined,
+      leads:show("leads")?{writable:allow("leads",true),rows:data.leads.slice(0,250).map(lead=>({id:lead.id,title:lead.name,company:lead.company,status:lead.status}))}:undefined,
+      clients:show("clients")?{rows:data.clients.slice(0,250).map(client=>({id:client.id,title:client.company,industry:client.industry,status:client.health}))}:undefined,
+      campaigns:show("campaigns")?{rows:data.campaigns.slice(0,250).map(campaign=>({id:campaign.id,title:campaign.name,company:clients.get(campaign.clientId),status:campaign.status,platform:campaign.platform}))}:undefined,
+      tasks:show("tasks")?{writable:allow("tasks",true),rows:data.tasks.filter(task=>task.assigneeId===member.id).slice(0,250).map(task=>({id:task.id,title:task.title,status:task.status,dueDate:task.dueDate,priority:task.priority}))}:undefined,
+      invoices:show("invoices")?{rows:data.invoices.slice(0,250).map(invoice=>({id:invoice.id,title:invoice.number,company:clients.get(invoice.clientId),status:invoice.status,balance:invoice.amount-invoice.paid}))}:undefined,
+      reports:show("reports")?{rows:(data.clientReporting?.reports??[]).slice(0,250).map(report=>({id:report.id,title:report.frequency+" report",company:report.facts.company,status:report.status}))}:undefined,
+      documents:show("documents")?{rows:(data.assets??[]).filter(asset=>!asset.archivedAt&&asset.versions.some(version=>version.file)).slice(0,250).map(asset=>({id:asset.id,title:asset.name,company:asset.clientId?clients.get(asset.clientId):undefined,folder:asset.folder}))}:undefined,
     });
   }catch(error){return fail(error);}
 }

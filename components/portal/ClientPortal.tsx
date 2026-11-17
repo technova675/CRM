@@ -9,9 +9,10 @@ import type { portalUploads, portalUploadPreview, PortalView } from "@/lib/clien
 import { notifyAuthChange } from "@/components/auth/notify";
 
 const sections=["Dashboard","Campaigns","Performance","Reports","Creative approvals","Tasks","Documents","Invoices","Meetings","Messages"] as const;
-type ClientView=PortalView&{libraryAssets:{id:string;name:string;folder:string}[];reviewPending:number;uploads:Awaited<ReturnType<typeof portalUploads>>};
+type ClientView=PortalView&{hiddenSections?:string[];libraryAssets:{id:string;name:string;folder:string}[];reviewPending:number;uploads:Awaited<ReturnType<typeof portalUploads>>};
 type UploadPreview=Awaited<ReturnType<typeof portalUploadPreview>>;
 type Section=typeof sections[number];
+const portalPanelOf:Record<Exclude<Section,"Dashboard">,string>={Campaigns:"campaigns",Performance:"performance",Reports:"reports","Creative approvals":"creatives",Tasks:"tasks",Documents:"documents",Invoices:"invoices",Meetings:"meetings",Messages:"messages"};
 const date=(s:string)=>s.slice(0,10);
 const number=new Intl.NumberFormat("en-IN",{maximumFractionDigits:2});
 const money=(value:number)=>"INR "+number.format(value);
@@ -98,10 +99,10 @@ export function ClientPortal() {
       }}><Field label="New password" hint="Use at least 12 characters."><Input name="password" type="password" autoComplete="new-password" minLength={12} maxLength={128} required className="min-h-11"/></Field>
         <Button disabled={busy} type="submit" className="min-h-11" variant="primary">Save password</Button></form></Card>}
       <nav aria-label="Client workspace views" className="flex flex-wrap gap-2">
-        {sections.map(item=><Button key={item} aria-pressed={tab===item} variant={tab===item?"primary":"secondary"} className="min-h-11" onClick={()=>setTab(item)}>{item}</Button>)}
+        {sections.filter(item=>item==="Dashboard"||!view.hiddenSections?.includes(portalPanelOf[item])).map(item=><Button key={item} aria-pressed={tab===item} variant={tab===item?"primary":"secondary"} className="min-h-11" onClick={()=>setTab(item)}>{item}</Button>)}
       </nav>
       {tab==="Dashboard"&&<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {([["Campaigns",view.campaigns.length],["Reports",view.reports.length+view.uploads.length],["Creative approvals",view.creatives.filter(c=>!c.decision).length+view.reviewPending],["Tasks",view.tasks.filter(t=>t.status!=="Done").length]] as const).map(([name,count])=>
+        {([["Campaigns",view.campaigns.length],["Reports",view.reports.length+view.uploads.length],["Creative approvals",view.creatives.filter(c=>!c.decision).length+view.reviewPending],["Tasks",view.tasks.filter(t=>t.status!=="Done").length]] as const).filter(([name])=>!view.hiddenSections?.includes(portalPanelOf[name])).map(([name,count])=>
           <button type="button" onClick={()=>setTab(name)} key={name} className="min-h-24 rounded-xl border border-border bg-surface p-4 text-left hover:border-accent"><span className="block text-sm text-fg-2">{name}</span><span className="mt-1 block text-2xl font-semibold tabular-nums">{count}</span></button>)}
       </div>}
       {tab!=="Dashboard"&&<Card>

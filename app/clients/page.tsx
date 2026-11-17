@@ -142,24 +142,24 @@ export default function ClientsPage() {
         title="Clients"
         description="Add a client directly or convert a won deal into a client with onboarding."
         actions={
-          <div className="flex flex-wrap items-center gap-2"><Segmented
+          <div className="flex flex-wrap items-center gap-2"><span data-tour="clients-view"><Segmented
             value={view}
             onChange={setView}
             options={[
               { value: "grid", label: <LayoutGrid className="size-3.5" /> },
               { value: "list", label: <List className="size-3.5" /> },
             ]}
-          />{can(me.role,"clients","write")&&<Button className="min-h-11" icon={<Upload className="size-4"/>} onClick={()=>setImporting(true)}>Import clients</Button>}{can(me.role,"clients","write")&&<Button variant="primary" className="min-h-11" icon={<Plus className="size-4"/>} onClick={()=>setAdding(true)}>Add client</Button>}</div>
+          /></span>{can(me.role,"clients","write")&&<span data-tour="clients-import"><Button className="min-h-11" icon={<Upload className="size-4"/>} onClick={()=>setImporting(true)}>Import clients</Button></span>}{can(me.role,"clients","write")&&<span data-tour="clients-add"><Button variant="primary" className="min-h-11" icon={<Plus className="size-4"/>} onClick={()=>setAdding(true)}>Add client</Button></span>}</div>
         }
       />
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div data-tour="clients-stats" className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Active clients" value={clients.length} icon={<Building2 className="size-3.5" />} />
         <Stat label="Monthly retainers" value={compactMoney(stats.mrr)} hint="MRR" icon={<Wallet className="size-3.5" />} tone="success" />
         <Stat label="Managed ad spend" value={compactMoney(stats.adSpend)} hint="per month" icon={<TrendingUp className="size-3.5" />} />
         <Stat label="Onboarding" value={stats.onboarding} hint="in progress" icon={<Megaphone className="size-3.5" />} />
         <Stat label="At risk" value={stats.atRisk} hint={`${compactMoney(stats.outstanding)} outstanding`} icon={<FileBarChart className="size-3.5" />} tone="warning" />
       </div>
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+      <div data-tour="clients-filters" className="mb-3 flex flex-col gap-2 sm:flex-row">
         <SearchInput value={q} onChange={setQ} placeholder="Search clients…" className="sm:w-64" />
         <Select value={health} onChange={(e) => setHealth(e.target.value)} className="sm:w-40">
           <option value="all">All health</option>
@@ -180,7 +180,7 @@ export default function ClientsPage() {
           <EmptyState icon={<Building2 className="size-5" />} title="No clients match" description={clients.length?"Try clearing your filters.":"Add a client here or move a sales deal to Won."} action={!clients.length&&can(me.role,"clients","write")?<Button onClick={()=>setAdding(true)}>Add client</Button>:undefined}/>
         </Card>
       ) : view === "grid" ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div data-tour="clients-list" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map(({ c, onboarding, activeCampaigns, outstanding, overdue, health: h, renewalDays }) => (
             <Link key={c.id} href={`/clients/${c.id}`}>
               <Card className="h-full p-4 transition hover:border-border-strong hover:shadow-pop">
@@ -243,7 +243,7 @@ export default function ClientsPage() {
           ))}
         </div>
       ) : (
-        <Card>
+        <Card data-tour="clients-list">
           <Table>
             <thead>
               <tr>

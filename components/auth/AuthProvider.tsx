@@ -7,6 +7,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { CRMCloudProvider } from "@/components/sales/CRMCloudProvider";
 import { flushCRMChanges } from "@/lib/crmSync";
 import { notifyAuthChange } from "./notify";
+import { Heartbeat } from "./Heartbeat";
 
 type Account = { id: string; email: string; kind: "portal" | "agency" | "staff" };
 const AuthContext = createContext<{ user: Account | null; refresh: () => Promise<Account | null>; signOut: () => Promise<void> } | null>(null);
@@ -61,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.refresh();
   }, [router, portalPage, user?.kind]);
   return <AuthContext.Provider value={{ user, refresh, signOut }}>
+    {user && <Heartbeat path={path} />}
     {joinPage || portalPage || path === "/login" && user?.kind !== "portal" ? children : error ? <div className="grid min-h-dvh place-items-center p-6"><div className="max-w-md space-y-4 rounded-2xl border border-border bg-surface p-8"><p role="alert">{error}</p><button className="rounded-lg bg-fg px-4 py-2 text-bg" onClick={() => window.location.reload()}>Retry connection</button></div></div> : loading || !user ? <div role="status" className="grid min-h-dvh place-items-center text-sm text-fg-2"><div className="flex items-center gap-2.5"><Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />Verifying your account…</div></div> : user.kind === "portal" ? null : user.kind === "staff" ? (staffPage?children:null) : <CRMCloudProvider key={user.id} account={user}><AppShell>{children}</AppShell></CRMCloudProvider>}
   </AuthContext.Provider>;
 }

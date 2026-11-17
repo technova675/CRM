@@ -168,7 +168,7 @@ export function Field({ label, children, hint, className }: { label: string; chi
 }
 export function SearchInput({ value, onChange, placeholder = "Search…", className }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
   return (
-    <div className={cn("relative", className)}>
+    <div data-tour="page-search" className={cn("relative", className)}>
       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-fg-3" />
       <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="pl-8" />
     </div>
@@ -191,7 +191,7 @@ export function Checkbox({ checked, onChange, className, indeterminate }: { chec
 
 export function Segmented<T extends string>({ value, onChange, options, className }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; className?: string }) {
   return (
-    <div className={cn("inline-flex rounded-lg bg-surface-2 p-0.5 border border-border", className)}>
+    <div data-tour="page-segmented" className={cn("inline-flex rounded-lg bg-surface-2 p-0.5 border border-border", className)}>
       {options.map((o) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)} className={cn("h-7 px-2.5 rounded-md text-xs font-medium transition whitespace-nowrap", value === o.value ? "bg-surface text-fg shadow-card" : "text-fg-3 hover:text-fg")}>
           {o.label}
@@ -203,7 +203,7 @@ export function Segmented<T extends string>({ value, onChange, options, classNam
 
 export function Tabs<T extends string>({ value, onChange, tabs }: { value: T; onChange: (v: T) => void; tabs: { value: T; label: ReactNode; count?: number }[] }) {
   return (
-    <div className="flex gap-1 border-b border-border overflow-x-auto">
+    <div data-tour="page-tabs" className="flex gap-1 border-b border-border overflow-x-auto">
       {tabs.map((t) => (
         <button key={t.value} onClick={() => onChange(t.value)} className={cn("relative h-9 px-3 text-[13px] font-medium whitespace-nowrap transition", value === t.value ? "text-fg" : "text-fg-3 hover:text-fg-2")}>
           {t.label}
@@ -329,14 +329,14 @@ export function PageHeader({ title, description, actions, icon }: { title: React
         </h1>
         {description && <p className="text-[13px] text-fg-3 mt-1">{description}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div data-tour="page-actions" className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
 
 export function Stat({ label, value, full, delta, hint, icon, tone }: { label: string; value: ReactNode; full?: string; delta?: number; hint?: ReactNode; icon?: ReactNode; tone?: Tone }) {
   return (
-    <Card className="min-w-0 p-4">
+    <Card data-tour="page-stat" className="min-w-0 p-4">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-fg-3">{label}</span>
         {icon && <span className={cn("rounded-md p-1", tone === "danger" ? "text-danger bg-danger-soft" : tone === "warning" ? "text-warning bg-warning-soft" : tone === "success" ? "text-success bg-success-soft" : "text-accent-text bg-accent-soft")}>{icon}</span>}
@@ -393,7 +393,7 @@ export function AIBadge({ children = "AI" }: { children?: ReactNode }) {
 // ---------- Table ----------
 export function Table({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("overflow-x-auto", className)}>
+    <div data-tour="page-table" className={cn("overflow-x-auto", className)}>
       <table className="w-full text-[13px] border-separate border-spacing-0">{children}</table>
     </div>
   );

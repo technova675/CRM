@@ -2,7 +2,6 @@ import { z } from "zod";
 import { authClient, sessionIdentity, sameOrigin } from "@/lib/auth/server";
 import { AuthenticationRequiredError, safeReturnPath } from "@/lib/auth/identity";
 import { dbError } from "@/lib/db";
-import { portalOwner } from "@/lib/auth/portalIdentity";
 import { requestOrigin } from "@/lib/auth/origin";
 
 export async function GET(req: Request) {
@@ -56,17 +55,13 @@ export async function POST(req: Request) {
       return Response.json({url:authorization.url},{headers:{"Cache-Control":"private, no-store"}});
     }
     if (data.action === "signin") {
-      const { data: signedIn, error } = await client.auth.signInWithPassword({ email: data.email, password: data.password });
+      const { error } = await client.auth.signInWithPassword({ email: data.email, password: data.password });
       if (error) {
         if (error.name === "AuthRetryableFetchError" || (error.status ?? 0) >= 500) return Response.json({ error: "Could not reach the sign-in service. Please try again in a moment." }, { status: 503 });
         if (error.code === "email_not_confirmed") return Response.json({ error: "Confirm your email first, then sign in." }, { status: 401 });
         if (error.status === 429) return Response.json({ error: "Too many attempts. Please wait before trying again." }, { status: 429 });
         if (error.code === "invalid_credentials") return Response.json({ error: "Incorrect email or password. If you haven't created an account yet, choose Create an account." }, { status: 401 });
         return Response.json({ error: "Could not sign in. Please try again." }, { status: 401 });
-      }
-      if (portalOwner(signedIn.user?.app_metadata)) {
-        await client.auth.signOut({ scope: "local" });
-        return Response.json({ error: "Use the client portal sign-in for this account." }, { status: 403 });
       }
       return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
     }
