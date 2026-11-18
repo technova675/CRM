@@ -73,7 +73,9 @@ export function usePageTour(ready: boolean) {
 
   useEffect(() => {
     if (!ready || !key || hasSeen(me.id, key)) return;
-    const timer = window.setTimeout(start, 900); // let data and layout settle first
+    // Let data and layout settle first. Never open over a form or drawer the user already started:
+    // the tour would cover it and discard what they typed. It is offered again on the next visit.
+    const timer = window.setTimeout(() => { if (!document.querySelector('[role="dialog"]')) start(); }, 900);
     return () => {
       window.clearTimeout(timer);
       activeRef.current?.destroy();

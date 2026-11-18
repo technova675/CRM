@@ -195,7 +195,7 @@ function LeadsInner() {
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="min-w-0">
                         <Link href={`/leads/${l.id}`} onClick={(e) => e.stopPropagation()} className="block truncate font-medium hover:underline">{l.name}</Link>
-                        <p className="truncate text-xs text-fg-3">{l.jobTitle}<span className="md:hidden"> · {l.company}</span></p>
+                        <p className="truncate text-xs text-fg-3">{l.jobTitle}<span className="md:hidden">{l.jobTitle ? " · " : ""}{l.company}</span></p>
                       </div>
                       {l.optedOut && <span className="rounded bg-danger-soft px-1 text-[10px] text-danger">opted out</span>}
                       {l.tags.slice(0, 2).map((t) => <span key={t} className="hidden rounded bg-surface-2 px-1 text-[10px] text-fg-3 sm:inline">#{t}</span>)}

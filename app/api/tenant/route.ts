@@ -1,7 +1,7 @@
 import {z} from "zod";
 import {reportIdentity,sameOrigin} from "@/lib/auth/server";
 import {boundedJSON,ownedLibrary} from "@/lib/outreachServer";
-import {ensureTenant,reserveTenantUsage} from "@/lib/tenantServer";
+import {ensureTenant,reserveTenantUsage,withTenantMeter} from "@/lib/tenantServer";
 import {tenantPlan} from "@/lib/tenantPlan";
 import {PLAN_LIMITS,tenantPeriod,tenantUsage} from "@/lib/domain/tenant";
 import {knowledgeAccess} from "@/lib/domain/clientKnowledge";
@@ -22,7 +22,7 @@ export async function GET(req:Request){
     const data=saved??emptyCRMLibrary({id:user.userId,email:user.email}),plan=tenantPlan(user.userId,saved);
     if(!knowledgeAccess(data,user.userId,"settings"))return reply({error:"Organization settings access is required."},403);
     const profile=data.tenantProfile??{name:user.email.split("@")[0]||"My workspace",billingEmail:user.email};
-    return reply({id:user.workspace,name:profile.name,billingEmail:profile.billingEmail||user.email,plan,limits:PLAN_LIMITS[plan],usage:tenantUsage(data),period:tenantPeriod()});
+    return reply({id:user.workspace,name:profile.name,billingEmail:profile.billingEmail||user.email,plan,limits:PLAN_LIMITS[plan],usage:tenantUsage(await withTenantMeter(user.userId,data)),period:tenantPeriod()});
   }catch(error){return dbError(error);}
 }
 

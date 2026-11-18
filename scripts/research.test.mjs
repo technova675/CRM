@@ -206,14 +206,24 @@ test("Firecrawl-only collection never falls back to Tavily or Apify",async(t)=>{
   t.after(()=>{if(oldFirecrawl===undefined)delete process.env.FIRECRAWL_API_KEY;else process.env.FIRECRAWL_API_KEY=oldFirecrawl;if(oldTavily===undefined)delete process.env.TAVILY_API_KEY;else process.env.TAVILY_API_KEY=oldTavily;});
   t.mock.method(globalThis,"fetch",async()=>{throw new Error("No external provider may be called");});
   const result=await collectPublicEvidence({company:"Synthetic",website:"",linkedin:"",instagram:""},undefined,{searchProvider:"firecrawl"});
-  assert.equal(result.documents.length,0);assert.ok(result.limitations.some(item=>item.includes("Firecrawl search is not configured")));
+  assert.equal(result.documents.length,0);assert.ok(result.limitations.some(item=>item.includes("Broader public search was skipped")));
 });
 
 test("Firecrawl credit exhaustion appears as a limitation without using another service",async(t)=>{
   const previous=process.env.FIRECRAWL_API_KEY;process.env.FIRECRAWL_API_KEY="synthetic-only";
   t.after(()=>{if(previous===undefined)delete process.env.FIRECRAWL_API_KEY;else process.env.FIRECRAWL_API_KEY=previous;});
-  const calls=[];t.mock.method(globalThis,"fetch",async(url)=>{calls.push(String(url));return Response.json({error:"No credits"},{status:402});});
-  const result=await collectPublicEvidence({company:"Synthetic",website:"",linkedin:"",instagram:""},undefined,{searchProvider:"firecrawl"});
-  assert.equal(calls.length,2);assert.ok(calls.every(url=>url.startsWith("https://api.firecrawl.dev/")));
+  const page="<html><head><title>Synthetic</title></head><body><main><p>"+"Synthetic sells synthetic products to synthetic buyers. ".repeat(40)+"</p></main></body></html>";
+  const calls=[];t.mock.method(globalThis,"fetch",async(url)=>{if(!String(url).startsWith("https://api.firecrawl.dev/"))return new Response(page,{headers:{"Content-Type":"text/html"}});calls.push(String(url));return Response.json({error:"No credits"},{status:402});});
+  const result=await collectPublicEvidence({company:"Synthetic",website:"https://example.com",linkedin:"",instagram:""},undefined,{searchProvider:"firecrawl"});
+  assert.equal(result.documents[0].status,"ok");assert.equal(calls.length,2);assert.ok(calls.every(url=>url.startsWith("https://api.firecrawl.dev/")));
   assert.ok(result.limitations.some(item=>item.includes("credits are exhausted")));
+});
+
+test("an unreadable lead website never triggers a search by company name alone",async(t)=>{
+  const previous=process.env.FIRECRAWL_API_KEY;process.env.FIRECRAWL_API_KEY="synthetic-only";
+  t.after(()=>{if(previous===undefined)delete process.env.FIRECRAWL_API_KEY;else process.env.FIRECRAWL_API_KEY=previous;});
+  const calls=[];t.mock.method(globalThis,"fetch",async(url)=>{calls.push(String(url));return Response.json({success:true,data:[{url:"https://unrelated.example/synthetic"}]});});
+  const result=await collectPublicEvidence({company:"Synthetic",website:"http://127.0.0.1:3012",linkedin:"",instagram:""},undefined,{searchProvider:"firecrawl"});
+  assert.deepEqual(calls,[]);assert.ok(result.documents.every(document=>document.status==="unavailable"));
+  assert.ok(result.limitations.some(item=>item.includes("Broader public search was skipped")));
 });

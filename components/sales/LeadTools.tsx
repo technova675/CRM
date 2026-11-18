@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Bookmark, Copy, GitMerge, Plus, Send, Share2, Tag, Trash2, Users, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCRM, useMe } from "@/lib/store";
-import { LEAD_SOURCES, LEAD_STATUSES, SERVICES, type CustomFieldDef, type InsightItem, type Lead, type SavedView } from "@/lib/types";
+import { LEAD_SOURCES, LEAD_STATUSES, SERVICES, type CustomFieldDef, type Deal, type InsightItem, type Lead, type SavedView } from "@/lib/types";
 import { effectiveScore, scoreTier } from "@/lib/ai/scoring";
 import { cn, DAY, relTime, uid } from "@/lib/utils";
 import { Badge, Button, Card, CardHeader, EmptyState, Field, Input, Modal, ScorePill, Select, StatusBadge, Toggle } from "@/components/ui";
@@ -196,13 +196,35 @@ export function mergeLeads(primaryId: string, otherIds: string[]) {
   }
   const ids = new Set(otherIds);
   const re = <T extends { leadId?: string }>(x: T): T => (x.leadId && ids.has(x.leadId) ? { ...x, leadId: primaryId } : x);
+  // Every lead has its own opportunity, so a merged group would otherwise show the same lead several
+  // times on the pipeline. Keep the furthest-advanced opportunity and fold the rest into it.
+  // Opportunities that already became a client (Won) are real accounts and are never removed.
+  const rank = (stage: Deal["stage"]) => (stage === "Lost" ? -1 : LEAD_STATUSES.indexOf(stage));
+  const group = s.deals.filter((d) => d.leadId === primaryId || (d.leadId && ids.has(d.leadId)));
+  const survivor = [...group].sort((a, b) => rank(b.stage) - rank(a.stage) || Number(b.leadId === primaryId) - Number(a.leadId === primaryId))[0];
+  const folded = group.filter((d) => d.id !== survivor?.id && !d.clientId);
+  const foldedIds = new Set(folded.map((d) => d.id));
+  const kept: Deal | undefined = survivor && {
+    ...survivor, leadId: primaryId,
+    value: Math.max(survivor.value, ...folded.map((d) => d.value)),
+    services: [...new Set([...survivor.services, ...folded.flatMap((d) => d.services)])],
+    notes: [survivor.notes, ...folded.filter((d) => d.notes.trim()).map((d) => `— Merged from ${d.title}:\n${d.notes}`)].filter(Boolean).join("\n\n"),
+    proposalId: survivor.proposalId ?? folded.find((d) => d.proposalId)?.proposalId,
+  };
+  if (kept) merged.status = kept.stage;
+  const toKept = <T extends { dealId?: string }>(x: T): T => (kept && x.dealId && foldedIds.has(x.dealId) ? { ...x, dealId: kept.id } : x);
   useCRM.setState((st) => ({
     leads: st.leads.filter((l) => !ids.has(l.id)).map((l) => (l.id === primaryId ? merged : l)),
     conversations: st.conversations.map(re),
-    meetings: st.meetings.map(re),
-    deals: st.deals.map(re),
+    meetings: st.meetings.map(re).map(toKept),
+    deals: st.deals.filter((d) => !foldedIds.has(d.id)).map((d) => (d.id === kept?.id ? kept : re(d))),
+    proposals: st.proposals.map(toKept),
     tasks: st.tasks.map((t) => (t.related?.type === "lead" && ids.has(t.related.id) ? { ...t, related: { type: "lead", id: primaryId } } : t)),
-    outreach: st.outreach.map((c) => ({ ...c, recipients: c.recipients.map((r) => (ids.has(r.leadId) ? { ...r, leadId: primaryId } : r)) })),
+    // One person must not receive the same campaign twice: keep the primary's place in each campaign.
+    outreach: st.outreach.map((c) => {
+      const seen = new Set(c.recipients.filter((r) => !ids.has(r.leadId)).map((r) => r.leadId));
+      return { ...c, recipients: c.recipients.flatMap((r) => { if (!ids.has(r.leadId)) return [r]; if (seen.has(primaryId)) return []; seen.add(primaryId); return [{ ...r, leadId: primaryId }]; }) };
+    }),
   }));
   s.log({ actor: "human", actorId: s.currentUserId, entity: "lead", entityId: primaryId, action: "Merged duplicate leads", detail: `${others.length} merged into ${primary.name} · ${primary.company}` });
 }

@@ -249,3 +249,7 @@ main .flex > .flex-1 {
   border-color: var(--accent);
   color: #fff;
 }
+
+/* Forms and drawers keep their Save/Cancel buttons bottom-right. While one is open,
+   confirmations move to the top-left so they never cover those buttons. */
+body:has([role="dialog"]) .toaster { bottom: auto; right: auto; top: 1rem; left: 1rem; }

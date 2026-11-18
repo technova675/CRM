@@ -98,10 +98,11 @@ async function firecrawlSearch(query:string,signal?:AbortSignal):Promise<string[
 }
 
 export async function collectPublicEvidence(lead:Pick<Lead,"company"|"website"|"linkedin"|"instagram">,signal?:AbortSignal,options:{searchProvider?:"auto"|"firecrawl"}={}){
-  const documents:PublicDocument[]=[];const limitations:string[]=[];
+  const documents:PublicDocument[]=[];const limitations:string[]=[];let siteRead=false;
   if(lead.website){
     const home=await readPage(lead.website,"site-1",signal,limitations);documents.push(home);
     if(home.status==="ok"){
+      siteRead=true;
       const origin=new URL(home.url).origin;
       const links=home.links.filter(link=>new URL(link).origin===origin&&/about|product|service|solution|pricing|blog|news|case-stud/i.test(new URL(link).pathname)).slice(0,3);
       documents.push(...await Promise.all(links.map((link,index)=>readPage(link,`site-${index+2}`,signal,limitations))));
@@ -110,7 +111,9 @@ export async function collectPublicEvidence(lead:Pick<Lead,"company"|"website"|"
   const social=[lead.linkedin,lead.instagram?(/^https?:\/\//i.test(lead.instagram)?lead.instagram:`https://www.instagram.com/${lead.instagram.replace(/^@/,"")}/`):undefined].filter((value):value is string=>!!value);
   documents.push(...await Promise.all(social.map((link,index)=>readPublicDocument(link,`social-${index+1}`,signal))));
   if(!social.length)limitations.push("No social profiles were supplied. Social presence and activity have not been verified.");
-  if(firecrawlKey()){
+  // A company name alone can match an unrelated business. Search wider only once the lead's own site confirms who it is.
+  if(!siteRead)limitations.push("Broader public search was skipped because the lead's own website could not be read. Results found by company name alone could describe a different business.");
+  else if(firecrawlKey()){
     const host=(()=>{try{return lead.website?new URL(publicResearchUrl(lead.website).href).hostname.replace(/^www\./,""):"";}catch{return "";}})();
     const queries=[`"${lead.company}" ${host} competitors alternatives`,`"${lead.company}" ${host} reviews news marketing`];
     const found=(await Promise.all(queries.map(async query=>{try{return await firecrawlSearch(query,signal);}catch(error){limitations.push(error instanceof Error?error.message:"Firecrawl search was unavailable.");return[];}}))).flat();

@@ -1,6 +1,6 @@
 "use client";
 
-import {useCRM} from "@/lib/store";
+import {STAGE_PROB,useCRM} from "@/lib/store";
 import {DEAL_STAGES,SERVICES,type DealStage,type Service} from "@/lib/types";
 import {SpreadsheetImportModal,type ImportColumn,type ImportRecord} from "@/components/imports/SpreadsheetImportModal";
 
@@ -34,7 +34,7 @@ export function DealImportModal({onClose}:{onClose:()=>void}){
  };
  const save=(row:ImportRecord)=>{
   useCRM.getState().addDeal({title:row.title.trim(),company:row.company.trim(),value:Number(row.value),stage:(row.stage||"New") as DealStage,
-   probability:row.probability?Number(row.probability):10,expectedClose:row.expectedClose||new Date(Date.now()+30*86400000).toISOString().slice(0,10),
+   probability:row.probability?Number(row.probability):STAGE_PROB[(row.stage||"New") as DealStage],expectedClose:row.expectedClose||new Date(Date.now()+30*86400000).toISOString().slice(0,10),
    services:(row.services??"").split(/[;,]/).map(service=>service.trim()).filter(Boolean) as Service[],notes:row.notes??"",ownerId,paymentStatus:"Pending"});
  };
  return <SpreadsheetImportModal title="deals" columns={columns} template={template} required={["title","company","value"]} validate={validate} uniqueBy={row=>`${row.company?.toLocaleLowerCase()}|${row.title?.toLocaleLowerCase()}`} save={save} onClose={onClose}/>;

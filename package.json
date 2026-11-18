@@ -19,6 +19,8 @@
     "test:research:integration": "node --env-file=.env.local scripts/research-integration.mjs",
     "test:crm": "node --test scripts/crm.test.mjs",
     "test:crm:integration": "node --env-file=.env.local scripts/crm-integration.mjs",
+    "test:usage": "node --test scripts/tenant-usage.test.mjs",
+    "test:devices:integration": "node --env-file=.env.local scripts/multi-device-integration.mjs",
     "test:reports": "node --test scripts/reports.test.mjs scripts/supabase-reports.test.mjs scripts/supabase-schema.test.mjs scripts/report-r2.test.mjs scripts/pdf-tables.test.mjs scripts/marketing-overview.test.mjs",
     "storage:check": "node --env-file=.env.local scripts/check-report-r2.mjs",
     "storage:cleanup": "node --env-file=.env.local scripts/cleanup-report-r2.mjs",

@@ -356,10 +356,10 @@ function PipelineInner() {
       )}
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Open pipeline" value={compactMoney(stats.openValue)} hint={`${stats.openCount} open deals`} icon={<KanbanSquare className="size-3.5" />} />
+        <Stat label="Open pipeline" value={compactMoney(stats.openValue)} hint={`${stats.openCount} open ${stats.openCount === 1 ? "deal" : "deals"}`} icon={<KanbanSquare className="size-3.5" />} />
         <Stat label="Weighted forecast" value={compactMoney(stats.weighted)} hint="value × probability" icon={<TrendingUp className="size-3.5" />} />
         <Stat label="Win rate" value={pct(stats.winRate, 0)} hint="won / closed" icon={<Trophy className="size-3.5" />} tone="success" />
-        <Stat label="Won value" value={compactMoney(stats.wonValue)} hint={`${stats.wonCount} deals`} icon={<Wallet className="size-3.5" />} tone="success" />
+        <Stat label="Won value" value={compactMoney(stats.wonValue)} hint={`${stats.wonCount} ${stats.wonCount === 1 ? "deal" : "deals"}`} icon={<Wallet className="size-3.5" />} tone="success" />
       </div>
 
       {view === "proposals" ? (

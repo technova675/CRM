@@ -286,7 +286,7 @@ const STAGE_TO_STATUS: Record<DealStage, LeadStatus> = {
   Won: "Won",
   Lost: "Lost",
 };
-const STAGE_PROB: Record<DealStage, number> = { "New": 10, Researching: 15, Replied: 35, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
+export const STAGE_PROB: Record<DealStage, number> = { "New": 10, Researching: 15, Replied: 35, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
 
 async function callResearchAPI(lead: Lead): Promise<NonNullable<Lead["research"]>> {
   await flushCRMChanges();
@@ -500,7 +500,11 @@ export const useCRM = create<CRMState>()(
         updateDeal: (id, patch) => {
           const deal=get().deals.find(d=>d.id===id);if(!deal)return;
           const {stage,...fields}=patch;
-          set(s=>({deals:s.deals.map(d=>d.id===id?{...d,...fields}:d)}));
+          // The lead profile shows the same value, owner and services as its opportunity; keep both sides
+          // in step. A lead with several opportunities has no single figure to mirror, so it is left alone.
+          const only=!!deal.leadId&&get().deals.filter(d=>d.leadId===deal.leadId).length===1;
+          const mirror={...(fields.value!==undefined?{dealValue:fields.value}:{}),...(fields.ownerId!==undefined?{ownerId:fields.ownerId}:{}),...(fields.services!==undefined?{services:fields.services}:{})};
+          set(s=>({deals:s.deals.map(d=>d.id===id?{...d,...fields}:d),leads:only&&Object.keys(mirror).length?s.leads.map(l=>l.id===deal.leadId?{...l,...mirror}:l):s.leads}));
           const changes=Object.keys(fields).filter(key=>JSON.stringify(deal[key as keyof Deal])!==JSON.stringify(fields[key as keyof typeof fields]));
           if(changes.length)log({actor:"human",actorId:me(),entity:"deal",entityId:id,action:"Updated deal details",detail:changes.join(", ")});
           if(stage)get().moveDeal(id,stage);

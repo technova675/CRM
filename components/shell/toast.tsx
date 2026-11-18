@@ -28,7 +28,7 @@ export function Toaster() {
   const items = useToasts((s) => s.items);
   const drop = useToasts((s) => s.drop);
   return (
-    <div className="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-sm pointer-events-none">
+    <div className="toaster fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-sm pointer-events-none">
       {items.map((t) => {
         const Icon = t.kind === "success" ? CheckCircle2 : t.kind === "warning" ? TriangleAlert : t.kind === "error" ? XCircle : t.kind === "ai" ? Sparkles : Info;
         return (
