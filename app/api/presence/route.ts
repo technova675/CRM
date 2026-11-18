@@ -12,8 +12,8 @@ export async function POST(req: Request) {
   try {
     const user = await sessionIdentity(req);
     const parsed = body.safeParse(await boundedJSON(req, 512).catch(() => ({})));
-    const owner = user.portalOwner ?? user.staffOwner ?? user.userId;
-    const kind = user.portalOwner ? "portal" : user.staffOwner ? "staff" : "agency";
+    const owner = user.staffOwner ?? user.userId;
+    const kind = user.staffOwner ? "staff" : "agency";
     await touchPresence(owner, user.userId, kind, parsed.success ? parsed.data.page ?? null : null);
     return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   } catch (error) {

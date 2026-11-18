@@ -290,7 +290,7 @@ const STAGE_PROB: Record<DealStage, number> = { "New": 10, Researching: 15, Repl
 
 async function callResearchAPI(lead: Lead): Promise<NonNullable<Lead["research"]>> {
   await flushCRMChanges();
-  const response = await fetch("/api/ai/research", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({leadId:lead.id}), signal:AbortSignal.timeout(110000) });
+  const response = await fetch("/api/ai/research", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({leadId:lead.id}), signal:AbortSignal.timeout(175000) });
   const data=await response.json();
   if(!response.ok||!data.research)throw new Error(data.error??"Public research could not complete. Please retry.");
   return data.research;

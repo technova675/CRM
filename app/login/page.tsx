@@ -29,7 +29,7 @@ export default function LoginPage() {
       const account=await refresh();
       notifyAuthChange();
       const requested = new URLSearchParams(window.location.search).get("next");
-      router.replace(account?.kind==="staff"?"/staff":account?.kind==="portal"?"/portal":safeReturnPath(requested)); router.refresh();
+      router.replace(account?.kind==="staff"?"/staff":safeReturnPath(requested)); router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not connect. Please retry."); }
     finally { setBusy(false); }
   }
@@ -61,7 +61,6 @@ export default function LoginPage() {
       </form>
       <p className="mt-6 text-center text-sm text-fg-2">{mode === "signin" ? "New here?" : "Already have an account?"} <button disabled={busy} className="min-h-11 font-medium text-accent-text hover:underline" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setNotice(""); }}>{mode === "signin" ? "Create an account" : "Sign in"}</button></p>
       {process.env.NEXT_PUBLIC_GOOGLE_OAUTH==="true"&&<Button className="mt-3 min-h-11 w-full" disabled={busy} onClick={()=>void google()}>Continue with Google</Button>}
-      <Button href="/portal/login" variant="ghost" className="mt-3 min-h-11 w-full">Client portal sign-in</Button>
     </div></section>
   </main>;
 }

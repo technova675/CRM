@@ -7,7 +7,7 @@ import { requestOrigin } from "@/lib/auth/origin";
 export async function GET(req: Request) {
   try {
     const user = await sessionIdentity(req);
-    return Response.json({ user: { id: user.userId, email: user.email, kind: user.portalOwner ? "portal" : user.staffOwner ? "staff" : "agency" } }, { headers: { "Cache-Control": "private, no-store" } });
+    return Response.json({ user: { id: user.userId, email: user.email, kind: user.staffOwner ? "staff" : "agency" } }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof AuthenticationRequiredError) return Response.json({ user: null }, { status: 401, headers: { "Cache-Control": "private, no-store" } });
     return dbError(error);

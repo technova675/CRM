@@ -25,7 +25,6 @@ export function createBackup(owner:string,workspace:string,data:CRMLibrary){
   delete snapshot.staffInvites;
   delete snapshot.workspaceApiKeys;
   delete snapshot.credentialVault;
-  delete snapshot.clientPortal;
   for(const member of snapshot.team)delete member.staffAuthId;
   for(const campaign of snapshot.outreach??[])for(const recipient of campaign.recipients)delete recipient.approvalToken;
   const payload:Backup={version:2,createdAt:new Date().toISOString(),workspace,data:snapshot};
@@ -72,33 +71,11 @@ export function prepareRestore(current:CRMLibrary,backup:CRMLibrary){
     return [{label:RESTORABLE[key],added,updated,removed}];
   });
 
-  // Restoring a historical contact or shareable record must never revive stale access.
-  const portal=next.clientPortal;
-  let unshared=0,disabledLogins=0,pausedWorkflows=0;
-  if(portal&&changed.size){
-    const previousClients=new Map(current.clients.map(client=>[client.id,client]));
-    const restoredClients=new Map(next.clients.map(client=>[client.id,client]));
-    for(const account of portal.accounts){
-      if(!account.active)continue;
-      const hasContact=(client:typeof current.clients[number]|undefined)=>client?.contacts.some(contact=>contact.email?.trim().toLowerCase()===account.email);
-      if(hasContact(previousClients.get(account.clientId))&&hasContact(restoredClients.get(account.clientId)))continue;
-      account.active=false;
-      disabledLogins++;
-    }
-    const shareCollections={campaign:"campaigns",invoice:"invoices",meeting:"meetings",task:"tasks"} as const;
-    const before=portal.shares.length;
-    portal.shares=portal.shares.filter(share=>{
-      if(changed.get("clients")?.has(share.clientId))return false;
-      if(share.kind==="task"&&(changed.has("projects")||changed.has("campaigns")))return false;
-      const collection=shareCollections[share.kind as keyof typeof shareCollections];
-      return !collection||!changed.get(collection)?.has(share.id);
-    });
-    unshared=before-portal.shares.length;
-  }
+  let pausedWorkflows=0;
   if(changed.size)for(const workflow of next.marketingAutomations??[]){
     if(!workflow.enabled)continue;
     workflow.enabled=false;
     pausedWorkflows++;
   }
-  return {next,preview:{counts,unshared,disabledLogins,pausedWorkflows}};
+  return {next,preview:{counts,pausedWorkflows}};
 }

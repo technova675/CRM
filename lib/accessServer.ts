@@ -1,9 +1,9 @@
 import { supabaseRequest, SupabaseDbError } from "./db";
 import { knowledgeAccess } from "./domain/clientKnowledge";
-import { PORTAL_PANELS, STAFF_PANELS, STAFF_PANEL_MODULE, type PanelOverrides, type PortalPanel, type StaffPanel } from "./domain/staffPanels";
+import { STAFF_PANELS, STAFF_PANEL_MODULE, type PanelOverrides, type StaffPanel } from "./domain/staffPanels";
 import type { CRMLibrary } from "./domain/crmLibrary";
 
-export type PresenceKind = "agency" | "staff" | "portal";
+export type PresenceKind = "agency" | "staff";
 export type PresenceRow = { user_id: string; kind: PresenceKind; current_page: string | null; last_seen_at: string };
 
 // The tables come from migration 202611010008. Until it is applied there is nothing to enforce or show.
@@ -14,9 +14,6 @@ const tolerateMissing = <T>(fallback: T) => (error: unknown): T => {
 };
 
 const isPanel = (value: string): value is StaffPanel => (STAFF_PANELS as readonly string[]).includes(value);
-const isPortalPanel = (value: string): value is PortalPanel => (PORTAL_PANELS as readonly string[]).includes(value);
-// Staff and portal users share the table; their panel names overlap, but each user_id is only ever one kind.
-export type AnyPanelOverrides = Partial<Record<StaffPanel | PortalPanel, boolean>>;
 
 function toOverrides(rows: { panel: string; allowed: boolean }[]): PanelOverrides {
   const result: PanelOverrides = {};
@@ -31,27 +28,20 @@ export async function panelOverridesFor(owner: string, userId: string): Promise<
   return toOverrides(rows);
 }
 
-export async function hiddenPortalPanels(owner: string, userId: string): Promise<Set<PortalPanel>> {
-  const rows = await supabaseRequest<{ panel: string; allowed: boolean }[]>("user_panel_access", {
-    query: { owner_id: `eq.${owner}`, user_id: `eq.${userId}`, allowed: "eq.false", select: "panel,allowed" },
-  }).catch(tolerateMissing([]));
-  return new Set(rows.map(row => row.panel).filter(isPortalPanel));
-}
-
-export async function allPanelOverrides(owner: string): Promise<Map<string, AnyPanelOverrides>> {
+export async function allPanelOverrides(owner: string): Promise<Map<string, PanelOverrides>> {
   const rows = await supabaseRequest<{ user_id: string; panel: string; allowed: boolean }[]>("user_panel_access", {
     query: { owner_id: `eq.${owner}`, select: "user_id,panel,allowed", limit: "5000" },
   }).catch(tolerateMissing([]));
-  const byUser = new Map<string, AnyPanelOverrides>();
+  const byUser = new Map<string, PanelOverrides>();
   for (const row of rows) {
-    if (!isPanel(row.panel) && !isPortalPanel(row.panel)) continue;
+    if (!isPanel(row.panel)) continue;
     byUser.set(row.user_id, { ...byUser.get(row.user_id), [row.panel]: row.allowed });
   }
   return byUser;
 }
 
 /** state: "default" removes the override so the role decides again. */
-export async function setPanelOverride(owner: string, userId: string, panel: StaffPanel | PortalPanel, state: "default" | "show" | "hide") {
+export async function setPanelOverride(owner: string, userId: string, panel: StaffPanel, state: "default" | "show" | "hide") {
   if (state === "default") {
     await supabaseRequest("user_panel_access", { method: "DELETE", query: { owner_id: `eq.${owner}`, user_id: `eq.${userId}`, panel: `eq.${panel}` } });
     return;

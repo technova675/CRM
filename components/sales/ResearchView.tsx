@@ -4,6 +4,7 @@ import { CheckCircle2, HelpCircle, Lightbulb, FileText, CircleAlert, ExternalLin
 import type { LeadResearch, ResearchFinding } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {Button} from "@/components/ui";
+import {researchCitation} from "@/lib/ai/researchCitation";
 
 export const KIND_META: Record<ResearchFinding["kind"], { label: string; icon: typeof CheckCircle2; cls: string; desc: string }> = {
   verified: { label: "Verified excerpt", icon: CheckCircle2, cls: "text-success bg-success-soft", desc: "Observed in a fetched public source. This verifies what was published, not the truth of every claim." },
@@ -36,6 +37,23 @@ export function ResearchLegend({ className }: { className?: string }) {
   );
 }
 
+function FindingContent({finding,research}:{finding:ResearchFinding;research:LeadResearch}){
+  const citation=researchCitation(research,finding);
+  const checked=citation&&Number.isFinite(Date.parse(citation.checkedAt))?new Date(citation.checkedAt).toLocaleString():undefined;
+  return <div className="min-w-0 space-y-1 text-[13px] leading-6">
+    {finding.kind!=="verified"||!citation?<p className="break-words text-fg">{finding.text}</p>:null}
+    {finding.evidenceQuote&&<blockquote className="border-l-2 border-border pl-3 text-fg-2">“{finding.evidenceQuote}”</blockquote>}
+    {finding.sourceId&&<p className="text-xs text-fg-2">Source ID: {finding.sourceId}</p>}
+    {finding.source&&(/^https?:\/\//i.test(finding.source)?<a href={finding.source} target="_blank" rel="noreferrer" className="flex min-h-11 items-center gap-1 break-all text-xs text-accent-text underline"><ExternalLink size={12} className="shrink-0" aria-hidden="true"/>{citation?.title??"View source"}</a>:<p className="text-xs text-fg-2">Source: {finding.source}</p>)}
+    {checked&&<p className="text-xs text-fg-2">Retrieved {checked}</p>}
+    {finding.kind==="verified"&&!citation&&<p className="text-xs text-warning">Complete citation missing. Re-run research to verify this finding.</p>}
+  </div>;
+}
+
+function displayedKind(research:LeadResearch,finding:ResearchFinding):ResearchFinding["kind"]{
+  return finding.kind==="verified"?(!research.mode?"record":researchCitation(research,finding)?"verified":"unavailable"):finding.kind;
+}
+
 export function ResearchSections({ research }: { research: LeadResearch }) {
   return (
     <div className="grid gap-3 md:grid-cols-2">
@@ -45,12 +63,8 @@ export function ResearchSections({ research }: { research: LeadResearch }) {
           <ul className="space-y-2">
             {s.findings.map((f, i) => (
               <li key={i} className="flex flex-col items-start gap-2 text-[13px] sm:flex-row">
-                <KindTag kind={!research.mode && f.kind==="verified" ? "record" : f.kind} />
-                <span className="min-w-0">
-                  <span className="text-fg">{f.text}</span>
-                  {f.evidenceQuote && f.kind!=="verified" && <blockquote className="mt-2 border-l-2 border-border pl-2 text-xs leading-6 text-fg-2">“{f.evidenceQuote}”</blockquote>}
-                  {f.source && (/^https?:\/\//i.test(f.source)?<a href={f.source} target="_blank" rel="noreferrer" className="mt-1 flex min-h-11 items-center gap-1 break-all text-xs text-accent-text underline">Source <ExternalLink size={12} aria-hidden="true"/>{f.source}</a>:<span className="mt-1 block text-xs text-fg-2">Source: {f.source}</span>)}
-                </span>
+                <KindTag kind={displayedKind(research,f)} />
+                <FindingContent finding={f} research={research}/>
               </li>
             ))}
           </ul>
@@ -61,12 +75,19 @@ export function ResearchSections({ research }: { research: LeadResearch }) {
 }
 
 export function ResearchEvidencePanel({research,onRerun}:{research:LeadResearch;onRerun?:()=>void}){
-  const missingTopicDetail=research.coverage?.some(item=>item.status!=="unavailable"&&!item.findings?.length);
+  const missingTopicDetail=research.coverage?.some(item=>item.status!=="unavailable"&&!item.findings?.length)||research.sections.some(section=>section.findings.some(finding=>finding.kind==="verified"&&!researchCitation(research,finding)));
   return <div className="space-y-4">
     <div className="rounded-xl border border-border bg-surface p-4"><p className="text-sm font-semibold">{research.mode==="public_ai"?"Public research + AI synthesis":research.mode==="public_evidence"?"Public evidence only":research.mode==="crm_only"?"CRM-only assessment":"Imported or older research · not independently verified"}</p>{research.model&&<p className="mt-1 text-xs text-fg-2">Model: {research.model}</p>}{research.identityAssessment&&<p className={research.identityAssessment.status==="not_verified"?"mt-2 text-xs font-medium text-warning":"mt-2 text-xs text-fg-2"}>{research.identityAssessment.status==="not_verified"?"Identity Not Verified":"AI source-identity check passed"}: {research.identityAssessment.reason}</p>}<p className="mt-2 text-xs leading-6 text-fg-2">Only matched public-source observations are labelled as evidence. Inferences and recommendations require review. A profile link, tracking tag or unreadable page does not prove activity or inactivity.</p></div>
-    {missingTopicDetail&&<div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/30 bg-warning-soft p-4"><p className="max-w-xl text-sm leading-6">This older research result did not save which source excerpt supports each topic. Re-run research to see the target audience and other findings with their sources.</p>{onRerun&&<Button className="min-h-11" onClick={onRerun}>Re-run research</Button>}</div>}
-    {research.coverage&&<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label="Research coverage">{research.coverage.map(item=><div key={item.topic} className="rounded-lg border border-border bg-surface p-3 text-xs"><div className="flex items-center justify-between gap-3"><span className="font-medium">{item.label}</span><span className={item.status==="evidence"&&item.findings?.length?"text-success":item.status==="inference"&&item.findings?.length?"text-warning":"text-fg-2"}>{item.status!=="unavailable"&&!item.findings?.length?"Detail unavailable":item.status==="evidence"?"Evidence found":item.status==="inference"?"Inference only":"Not verified"}</span></div>{item.findings?.length?<ul className="mt-2 space-y-2 border-t border-border pt-2">{item.findings.map((finding,index)=><li key={index} className="leading-5"><KindTag kind={finding.kind}/><p className="mt-1 break-words text-fg-2">{finding.text}</p>{finding.sourceId&&<p className="mt-1 text-fg-3">Source ID: {finding.sourceId}</p>}{finding.source&&(/^https?:\/\//i.test(finding.source)?<a href={finding.source} target="_blank" rel="noreferrer" className="mt-1 block break-all text-accent-text underline">View source</a>:<p className="mt-1 text-fg-3">Source: {finding.source}</p>)}</li>)}</ul>:item.status!=="unavailable"?<p className="mt-2 leading-5 text-fg-2">The topic-specific excerpt was not saved in this result.</p>:item.reason?<p className="mt-2 leading-5 text-fg-2">{item.reason}</p>:null}</div>)}</div>}
+    {missingTopicDetail&&<div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/30 bg-warning-soft p-4"><p className="max-w-xl text-sm leading-6">This research result is missing complete source details. Re-run research to refresh the findings and citations.</p>{onRerun&&<Button className="min-h-11" onClick={onRerun}>Re-run research</Button>}</div>}
+    {research.coverage&&<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label="Research coverage">{research.coverage.map(item=>{
+      const evidence=item.findings?.some(finding=>displayedKind(research,finding)==="verified");
+      const label=item.status!=="unavailable"&&!item.findings?.length?"Detail unavailable":item.status==="evidence"?(evidence?"Evidence found":"Citation incomplete"):item.status==="inference"?"Inference only":"Not verified";
+      return <div key={item.topic} className="rounded-lg border border-border bg-surface p-3 text-xs">
+        <div className="flex items-center justify-between gap-3"><span className="font-medium">{item.label}</span><span className={evidence?"text-success":item.status==="inference"?"text-warning":"text-fg-2"}>{label}</span></div>
+        {item.findings?.length?<ul className="mt-2 space-y-3 border-t border-border pt-3">{item.findings.map((finding,index)=><li key={index} className="space-y-2"><KindTag kind={displayedKind(research,finding)}/><FindingContent finding={finding} research={research}/></li>)}</ul>:item.status!=="unavailable"?<p className="mt-2 leading-5 text-fg-2">The topic-specific excerpt was not saved in this result.</p>:item.reason?<p className="mt-2 leading-5 text-fg-2">{item.reason}</p>:null}
+      </div>;
+    })}</div>}
     {!!research.limitations?.length&&<div className="rounded-xl border border-warning/30 bg-warning-soft p-4"><p className="text-sm font-semibold">Research limitations</p><ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-6">{research.limitations.map((limitation,index)=><li key={index}>{limitation}</li>)}</ul></div>}
-    {!!research.sources?.length&&<details className="rounded-xl border border-border bg-surface p-4"><summary className="min-h-11 cursor-pointer text-sm font-semibold">Sources checked · {research.sources.length}</summary><ul className="mt-3 space-y-3">{research.sources.map(source=><li key={source.id} className="rounded-lg border border-border p-3 text-xs"><a href={/^https?:\/\//i.test(source.url)?source.url:undefined} target="_blank" rel="noreferrer" className="break-all text-accent-text underline">{source.title} · {source.url}</a><p className="mt-1 text-fg-2">{source.status==="ok"?"Read successfully":"Unavailable"} · {new Date(source.checkedAt).toLocaleString()}</p>{source.reason&&<p className="mt-1 text-fg-2">{source.reason}</p>}</li>)}</ul></details>}
+    {!!research.sources?.length&&<details className="rounded-xl border border-border bg-surface p-4"><summary className="min-h-11 cursor-pointer text-sm font-semibold">Sources checked · {research.sources.length}</summary><ul className="mt-3 space-y-3">{research.sources.map(source=><li key={source.id} className="rounded-lg border border-border p-3 text-xs"><p className="mb-1 text-fg-2">Source ID: {source.id}</p><a href={/^https?:\/\//i.test(source.url)?source.url:undefined} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center break-all text-accent-text underline">{source.title} · {source.url}</a><p className="mt-1 text-fg-2">{source.status==="ok"?"Read successfully":"Unavailable"} · {new Date(source.checkedAt).toLocaleString()}</p>{source.reason&&<p className="mt-1 text-fg-2">{source.reason}</p>}</li>)}</ul></details>}
   </div>;
 }

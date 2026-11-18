@@ -4,18 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Circle } from "lucide-react";
 import { Avatar, Badge, Button, Card, CardHeader, Modal, Select, Table, Td, Th } from "@/components/ui";
 import { ROLE_LABEL } from "@/lib/permissions";
-import { ONLINE_WINDOW_MS, PORTAL_PANELS, PORTAL_PANEL_LABEL, STAFF_PANELS, STAFF_PANEL_LABEL, type PanelOverrides, type PortalPanel, type StaffPanel } from "@/lib/domain/staffPanels";
+import { ONLINE_WINDOW_MS, STAFF_PANELS, STAFF_PANEL_LABEL, type PanelOverrides, type StaffPanel } from "@/lib/domain/staffPanels";
 import { relTime } from "@/lib/utils";
 import type { Role } from "@/lib/types";
 
 type Presence = { lastSeenAt: string | null; currentPage: string | null };
 type StaffUser = Presence & { id: string; userId: string | null; name: string; email: string; role: Role; status: string; defaults: Record<StaffPanel, boolean>; overrides: PanelOverrides; effective: Record<StaffPanel, boolean> };
-type PortalUser = Presence & { userId: string; email: string; client: string; active: boolean; hidden: string[] };
-type Payload = { now: string; ready: boolean; owner: Presence; staff: StaffUser[]; portal: PortalUser[] };
+type Payload = { now: string; ready: boolean; owner: Presence; staff: StaffUser[] };
 type State = "default" | "show" | "hide";
-type Row =
-  | { kind: "staff"; key: string; name: string; email: string; detail: string; presence: Presence; badge?: { tone: "warning" | "danger"; label: string }; user: StaffUser; summary: string }
-  | { kind: "portal"; key: string; name: string; email: string; detail: string; presence: Presence; badge?: { tone: "warning" | "danger"; label: string }; user: PortalUser; summary: string };
+type Row = { kind: "staff"; key: string; name: string; email: string; detail: string; presence: Presence; badge?: { tone: "warning" | "danger"; label: string }; user: StaffUser; summary: string };
 
 const stateOf = (user: StaffUser, panel: StaffPanel): State => user.overrides[panel] === undefined ? "default" : user.overrides[panel] ? "show" : "hide";
 
@@ -85,12 +82,7 @@ export function UserAccess() {
         summary: user.userId ? `${visible} of ${STAFF_PANELS.length} sections` : "Waiting for invitation",
       };
     });
-    const portal: Row[] = data.portal.map(user => ({
-      kind: "portal", key: `p:${user.userId}`, name: user.client, email: user.email, detail: "Client", presence: user, user,
-      badge: user.active ? undefined : { tone: "danger", label: "Access revoked" },
-      summary: `${PORTAL_PANELS.length - user.hidden.length} of ${PORTAL_PANELS.length} sections`,
-    }));
-    return [...staff, ...portal];
+    return staff;
   }, [data]);
   const online = rows.filter(row => isOnline(row.presence, now)).length;
   const current = rows.find(row => row.key === editing);
@@ -101,14 +93,14 @@ export function UserAccess() {
       {data && !data.ready && (
         <Card className="border-warning p-4 text-sm">
           <p className="font-medium">One-time database setup needed</p>
-          <p className="mt-1 text-fg-2">Run <code>supabase/migrations/202611010008_user_access.sql</code> and then <code>202611010009_portal_panel_access.sql</code> in the Supabase SQL Editor. Until then, activity is not recorded and section settings cannot be saved.</p>
+          <p className="mt-1 text-fg-2">Run <code>supabase/migrations/202611010008_user_access.sql</code> in the Supabase SQL Editor. Until then, activity is not recorded and section settings cannot be saved.</p>
         </Card>
       )}
       {!data && !error && <p role="status" className="text-sm text-fg-2">Loading users…</p>}
       {data && (
         <Card>
-          <CardHeader title="Users & clients" subtitle={`${rows.length} login${rows.length === 1 ? "" : "s"} · ${online} online now. Open “Manage access” to choose which sections each person sees.`} />
-          {!rows.length ? <p className="px-4 pb-4 text-sm text-fg-3">No staff or client logins yet. Invite a teammate in Staff sign-in, or create a client login in Client portal access.</p> : (
+          <CardHeader title="Staff access" subtitle={`${rows.length} login${rows.length === 1 ? "" : "s"} · ${online} online now. Open “Manage access” to choose which sections each person sees.`} />
+          {!rows.length ? <p className="px-4 pb-4 text-sm text-fg-3">No staff logins yet. Invite a teammate in Staff sign-in.</p> : (
             <Table>
               <thead>
                 <tr><Th>User</Th><Th>Type</Th><Th>Activity</Th><Th>Access</Th><Th className="text-right">Manage</Th></tr>
@@ -127,7 +119,7 @@ export function UserAccess() {
                     </Td>
                     <Td>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge tone={row.kind === "portal" ? "info" : "accent"}>{row.detail}</Badge>
+                        <Badge tone="accent">{row.detail}</Badge>
                         {row.badge && <Badge tone={row.badge.tone}>{row.badge.label}</Badge>}
                       </div>
                     </Td>
@@ -163,28 +155,6 @@ export function UserAccess() {
                     </Select>
                   </label>
                 ))}
-              </div>
-            </div>
-          )}
-          {current.kind === "portal" && (
-            <div className="space-y-3">
-              <p className="text-xs text-fg-3">The client only ever sees records you have shared in Client portal access. Hiding a section here removes it from their sidebar and blocks its data.</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {PORTAL_PANELS.map((panel: PortalPanel) => {
-                  const hidden = current.user.hidden.includes(panel);
-                  return (
-                    <label key={panel} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-xs">
-                      <span className="min-w-0">
-                        <span className="block font-medium">{PORTAL_PANEL_LABEL[panel]}</span>
-                        <span className={hidden ? "text-fg-3" : "text-success"}>{hidden ? "Hidden" : "Visible"}</span>
-                      </span>
-                      <Select className="w-28" aria-label={`${PORTAL_PANEL_LABEL[panel]} for ${current.name}`} value={hidden ? "hide" : "default"} disabled={!!busy || !data?.ready} onChange={event => void change(current.user.userId, panel, event.target.value as State)}>
-                        <option value="default">Visible</option>
-                        <option value="hide">Hidden</option>
-                      </Select>
-                    </label>
-                  );
-                })}
               </div>
             </div>
           )}

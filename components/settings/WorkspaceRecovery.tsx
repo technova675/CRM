@@ -11,7 +11,7 @@ type Entry={slot:Slot;updatedAt:string};
 type Vault={configured:boolean;entries:Entry[]};
 type Preview={
   createdAt:string;counts:{label:string;added:number;updated:number;removed:number}[];
-  unshared:number;disabledLogins:number;pausedWorkflows:number;
+  pausedWorkflows:number;
   ticket:{revision:number;expiresAt:number;operation:string;mac:string};
 };
 
@@ -134,9 +134,7 @@ export function WorkspaceBackup(){
             <span className="font-medium">{row.label}</span><span className="tabular-nums">{row.added} added · {row.updated} updated · {row.removed} removed</span>
           </li>)}
         </ul>
-        {(preview.unshared>0||preview.disabledLogins>0||preview.pausedWorkflows>0)&&<ul className="list-disc space-y-1 pl-5">
-          {preview.unshared>0&&<li>{preview.unshared} client portal shares will be removed.</li>}
-          {preview.disabledLogins>0&&<li>{preview.disabledLogins} client portal logins will be disabled.</li>}
+        {preview.pausedWorkflows>0&&<ul className="list-disc space-y-1 pl-5">
           {preview.pausedWorkflows>0&&<li>{preview.pausedWorkflows} automations will be paused for review.</li>}
         </ul>}
         <form className="flex flex-wrap items-end gap-2" onSubmit={event=>{event.preventDefault();void run("restore");}}>

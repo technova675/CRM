@@ -16,7 +16,7 @@ try{
   const blocked=await run(a,"blocked-source");assert.equal(blocked.status,200);const blockedResult=(await blocked.json()).research;
   assert.equal(blockedResult.mode,"crm_only");assert.ok(blockedResult.sources.every(source=>source.status==="unavailable"));assert.ok(!blockedResult.sections.flatMap(section=>section.findings).some(finding=>finding.kind==="verified"));
   // The public-source/model request has a larger bounded duration than routine API calls.
-  const response=await fetch(a.base+"/api/ai/research",{method:"POST",headers:{"content-type":"application/json",origin:a.base,cookie:[...a.cookies].map(([key,value])=>`${key}=${value}`).join("; ")},body:JSON.stringify({leadId:lead.id}),signal:AbortSignal.timeout(115000)});
+  const response=await fetch(a.base+"/api/ai/research",{method:"POST",headers:{"content-type":"application/json",origin:a.base,cookie:[...a.cookies].map(([key,value])=>`${key}=${value}`).join("; ")},body:JSON.stringify({leadId:lead.id}),signal:AbortSignal.timeout(175000)});
   const body=await response.json();assert.equal(response.status,200,JSON.stringify(body));
   const research=body.research;assert.equal(research.sections.length,6);assert.equal(research.coverage.length,10);
   assert.ok(research.sources.some(source=>source.status==="ok"),"At least one public page must be read to validate the live path");

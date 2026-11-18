@@ -63,9 +63,15 @@ async function firecrawlPost<T>(path:string,body:unknown,signal?:AbortSignal):Pr
   const key=firecrawlKey();if(!key)return null;
   try{
     const response=await fetch(`${FIRECRAWL}${path}`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify(body),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(30000)]):AbortSignal.timeout(30000),cache:"no-store"});
-    if(!response.ok){console.error("[firecrawl]",path,response.status);return null;}
+    if(!response.ok){
+      if(response.status===402)throw new Error("Firecrawl credits are exhausted. No paid fallback or top-up was requested.");
+      if(response.status===429)throw new Error("Firecrawl request limit reached. Retry research later.");
+      if(response.status===401)throw new Error("Firecrawl authorization failed. Check the configured API key.");
+      if(response.status===403)throw new Error(`Firecrawl denied access to ${path==="/search"?"public search":"a requested public page"} (HTTP 403). Restricted sources remain unverified.`);
+      throw new Error(`Firecrawl source collection returned HTTP ${response.status}.`);
+    }
     return await response.json() as T;
-  }catch{return null;}
+  }catch(error){throw new Error(error instanceof Error&&error.message.startsWith("Firecrawl")?error.message:"Firecrawl could not be reached within the source collection time limit.");}
 }
 async function firecrawlScrape(value:string,id:string,signal?:AbortSignal):Promise<PublicDocument|null>{
   let url:URL;try{url=publicResearchUrl(value);}catch{return null;}
@@ -76,12 +82,14 @@ async function firecrawlScrape(value:string,id:string,signal?:AbortSignal):Promi
   return{id,url:url.href,title:normalizeEvidence(result.data?.metadata?.title??url.hostname),text,links:[...new Set(links)],status:"ok",checkedAt:new Date().toISOString()};
 }
 // Plain fetch first (free, unlimited); Firecrawl only when the page is empty, blocked or JS-rendered.
-async function readPage(value:string,id:string,signal?:AbortSignal):Promise<PublicDocument>{
+async function readPage(value:string,id:string,signal?:AbortSignal,limitations:string[]=[]):Promise<PublicDocument>{
   const plain=await readPublicDocument(value,id,signal);
   if(plain.status==="ok"&&plain.text.length>=1500)return plain;
   if(!firecrawlKey())return plain;
-  const rendered=await firecrawlScrape(value,id,signal);
-  return rendered&&rendered.text.length>(plain.status==="ok"?plain.text.length:0)?rendered:plain;
+  try{
+    const rendered=await firecrawlScrape(value,id,signal);
+    return rendered&&rendered.text.length>(plain.status==="ok"?plain.text.length:0)?rendered:plain;
+  }catch(error){limitations.push(error instanceof Error?error.message:"Firecrawl source collection was unavailable.");return plain;}
 }
 async function firecrawlSearch(query:string,signal?:AbortSignal):Promise<string[]>{
   const result=await firecrawlPost<{data?:{url?:string}[]|{web?:{url?:string}[]}}>("/search",{query,limit:3},signal);
@@ -89,14 +97,14 @@ async function firecrawlSearch(query:string,signal?:AbortSignal):Promise<string[
   return items.map(item=>item.url).filter((url):url is string=>typeof url==="string");
 }
 
-export async function collectPublicEvidence(lead:Pick<Lead,"company"|"website"|"linkedin"|"instagram">,signal?:AbortSignal){
+export async function collectPublicEvidence(lead:Pick<Lead,"company"|"website"|"linkedin"|"instagram">,signal?:AbortSignal,options:{searchProvider?:"auto"|"firecrawl"}={}){
   const documents:PublicDocument[]=[];const limitations:string[]=[];
   if(lead.website){
-    const home=await readPage(lead.website,"site-1",signal);documents.push(home);
+    const home=await readPage(lead.website,"site-1",signal,limitations);documents.push(home);
     if(home.status==="ok"){
       const origin=new URL(home.url).origin;
       const links=home.links.filter(link=>new URL(link).origin===origin&&/about|product|service|solution|pricing|blog|news|case-stud/i.test(new URL(link).pathname)).slice(0,3);
-      documents.push(...await Promise.all(links.map((link,index)=>readPage(link,`site-${index+2}`,signal))));
+      documents.push(...await Promise.all(links.map((link,index)=>readPage(link,`site-${index+2}`,signal,limitations))));
     }
   }else limitations.push("No website was supplied. This does not prove the company has no website.");
   const social=[lead.linkedin,lead.instagram?(/^https?:\/\//i.test(lead.instagram)?lead.instagram:`https://www.instagram.com/${lead.instagram.replace(/^@/,"")}/`):undefined].filter((value):value is string=>!!value);
@@ -105,11 +113,11 @@ export async function collectPublicEvidence(lead:Pick<Lead,"company"|"website"|"
   if(firecrawlKey()){
     const host=(()=>{try{return lead.website?new URL(publicResearchUrl(lead.website).href).hostname.replace(/^www\./,""):"";}catch{return "";}})();
     const queries=[`"${lead.company}" ${host} competitors alternatives`,`"${lead.company}" ${host} reviews news marketing`];
-    const found=(await Promise.all(queries.map(query=>firecrawlSearch(query,signal)))).flat();
+    const found=(await Promise.all(queries.map(async query=>{try{return await firecrawlSearch(query,signal);}catch(error){limitations.push(error instanceof Error?error.message:"Firecrawl search was unavailable.");return[];}}))).flat();
     const urls=[...new Set(found)].filter(url=>!documents.some(document=>document.url===url)).slice(0,4);
     if(!urls.length)limitations.push("Broader public search returned no new sources. Competitor and advertising checks may be incomplete.");
-    documents.push(...await Promise.all(urls.map((url,index)=>readPage(url,`search-${index+1}`,signal))));
-  }else if(process.env.TAVILY_API_KEY){
+    documents.push(...await Promise.all(urls.map((url,index)=>readPage(url,`search-${index+1}`,signal,limitations))));
+  }else if(options.searchProvider!=="firecrawl"&&process.env.TAVILY_API_KEY){
     try{
       const response=await fetch("https://api.tavily.com/search",{method:"POST",headers:{Authorization:`Bearer ${process.env.TAVILY_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({query:`"${lead.company}" competitors products marketing advertising`,search_depth:"basic",max_results:3,include_answer:false,include_raw_content:false}),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),cache:"no-store"});
       if(!response.ok)throw new Error();
@@ -117,6 +125,6 @@ export async function collectPublicEvidence(lead:Pick<Lead,"company"|"website"|"
       const urls=(result.results??[]).slice(0,3).filter(item=>typeof item.url==="string"&&!documents.some(document=>document.url===item.url));
       documents.push(...await Promise.all(urls.map((item,index)=>readPublicDocument(item.url,`search-${index+1}`,signal))));
     }catch{limitations.push("Broader public search was unavailable. Competitor and advertising checks may be incomplete.");}
-  }else limitations.push("Broader public search is not configured. Competitors and ad-library activity must remain unverified unless a fetched source explicitly documents them.");
-  return{documents,limitations};
+  }else limitations.push(options.searchProvider==="firecrawl"?"Firecrawl search is not configured. Add FIRECRAWL_API_KEY to collect broader public sources.":"Broader public search is not configured. Competitors and ad-library activity must remain unverified unless a fetched source explicitly documents them.");
+  return{documents,limitations:[...new Set(limitations)]};
 }

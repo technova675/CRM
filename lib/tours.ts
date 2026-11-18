@@ -49,7 +49,6 @@ export const PAGE_TOURS: Record<string, PageTour> = {
   meetings: { name: "Meetings", summary: "Schedule calls, capture notes and outcomes. Outcomes update the pipeline automatically." },
   clients: { name: "Clients", summary: "", steps: CLIENTS_STEPS },
   "clients/[id]": { name: "Client profile", summary: "Everything for one client: contacts, services, campaigns, invoices, onboarding and reports." },
-  "clients/portal-access": { name: "Client portal access", summary: "Create a separate client login and choose which records appear in that client's workspace." },
   onboarding: { name: "Client onboarding", summary: "Deal won → welcome → onboarding form → info, assets, access and tracking → workspace and team → strategy → campaign setup → launch." },
   strategy: { name: "Marketing Strategy", summary: "AI strategy workspace covering personas, funnel, channels, budget, testing and KPIs. Humans review and approve before execution." },
   documents: { name: "Documents & Assets", summary: "Central asset library per client: logos, guidelines, creatives, contracts and reports, with folders, tags and versions." },

@@ -21,7 +21,7 @@ export function staffMember(data:CRMLibrary,owner:string,actor:string){
 }
 export async function requireStaff(req:Request){
   const user=await sessionIdentity(req);
-  if(!user.staffOwner||user.portalOwner)throw new WorkspaceAccessError();
+  if(!user.staffOwner)throw new WorkspaceAccessError();
   const data=await ownedLibrary(user.staffOwner);
   const member=data&&staffMember(data,user.staffOwner,user.userId);
   if(!data||!member)throw new WorkspaceAccessError("Your staff access is inactive. Contact the workspace owner.");

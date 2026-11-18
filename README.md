@@ -148,7 +148,7 @@ Run `npm run test:research` for public-fetch and evidence-grounding checks. `npm
 | Area | Route | Highlights |
 |---|---|---|
 | AI Command Center | `/command` | ChatGPT-style threads, auto-routing to 12 specialised agents, visible "what I did" steps, recommendations → tasks, deep links into modules, agent directory, AI activity, "four questions" home |
-| Dashboard | `/dashboard` | Sales · Clients · Marketing · Operations · Finance sections (role-filtered) + client-portal dashboard |
+| Dashboard | `/dashboard` | Sales · Clients · Marketing · Operations · Finance sections (role-filtered) |
 | Leads & CRM | `/leads`, `/leads/[id]` | Custom fields, deal value, duplicate detection & merge, bulk tagging, segments, saved views, CSV/Excel import |
 | AI Lead Research & scoring | `/research` | Verified vs inferred findings, explainable score + next action, manual override |
 | Outreach | `/outreach` | Research → personalise → review → approve → send → follow-up; A/B variants, templates, sequences, suppression/opt-out |
@@ -158,7 +158,7 @@ Run `npm run test:research` for public-fetch and evidence-grounding checks. `npm
 | Clients (360°) | `/clients`, `/clients/[id]` | One-screen overview, health score, upsell/churn insights, Creative/Social/SEO/Influencer/Strategy tabs, **Knowledge (AI memory)** |
 | Onboarding | `/onboarding` | Deal Won → welcome email → form → assets → access → tracking → workspace → project → tasks → team → strategy → setup → launch |
 | Strategy | `/strategy` | AI strategy, personas, funnel, channel & budget allocation, pillars, testing roadmap, KPI framework; edit, approve, create campaigns |
-| Documents & Assets | `/documents` | Per-client libraries, folders, tags, search, versions, client-portal visibility |
+| Documents & Assets | `/documents` | Per-client libraries, folders, tags, search, versions |
 | Campaigns | `/campaigns` | All channels incl. LinkedIn, retail media, quick commerce; objective, audience, landing page, tracking, KPIs |
 | Performance Marketing | `/performance` | Media agent: winners, losers, fatigue, rising CPA, scaling, budget pacing → **recommendation → approval → execution** |
 | Creative Studio | `/creative` | Concepts/hooks/scripts/storyboards from the knowledge base, creative intelligence, approval board with versions & comments, client approvals |

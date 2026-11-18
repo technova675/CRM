@@ -2,7 +2,6 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { accountWorkspace, AuthenticationRequiredError, AuthenticationUnavailableError, WorkspaceAccessError } from "./identity";
 import { staffOwner } from "./staffIdentity";
-import { portalOwner } from "./portalIdentity";
 import { requestOrigin } from "./origin";
 import { resilientFetch } from "./resilientFetch";
 
@@ -28,12 +27,12 @@ export async function sessionIdentity(req: Request) {
   }
   const claims = data?.claims;
   if (!claims?.sub || claims.role !== "authenticated") throw new AuthenticationRequiredError();
-  return { userId: claims.sub, email: typeof claims.email === "string" ? claims.email : "", workspace: accountWorkspace(claims.sub), portalOwner: portalOwner(claims.app_metadata), staffOwner: staffOwner(claims.app_metadata) };
+  return { userId: claims.sub, email: typeof claims.email === "string" ? claims.email : "", workspace: accountWorkspace(claims.sub), staffOwner: staffOwner(claims.app_metadata) };
 }
 
 export async function reportIdentity(req: Request) {
   const identity = await sessionIdentity(req);
-  if (identity.portalOwner || identity.staffOwner) throw new WorkspaceAccessError();
+  if (identity.staffOwner) throw new WorkspaceAccessError();
   return identity;
 }
 

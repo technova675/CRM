@@ -4,12 +4,11 @@ import { boundedJSON, ownedLibrary } from "@/lib/outreachServer";
 import { ensureTenant } from "@/lib/tenantServer";
 import { dbError } from "@/lib/db";
 import { isStaffRole } from "@/lib/domain/staffRoles";
-import { portalState } from "@/lib/domain/clientPortal";
-import { PORTAL_PANELS, STAFF_PANELS } from "@/lib/domain/staffPanels";
+import { STAFF_PANELS } from "@/lib/domain/staffPanels";
 import { accessTablesReady, allPanelOverrides, effectivePanels, listPresence, roleDefaultPanels, setPanelOverride } from "@/lib/accessServer";
 
 const reply = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "private, no-store" } });
-const input = z.object({ userId: z.string().uuid(), panel: z.enum([...STAFF_PANELS, ...PORTAL_PANELS]), state: z.enum(["default", "show", "hide"]) });
+const input = z.object({ userId: z.string().uuid(), panel: z.enum(STAFF_PANELS), state: z.enum(["default", "show", "hide"]) });
 
 async function requireOwner(req: Request) {
   const user = await reportIdentity(req);
@@ -38,12 +37,7 @@ export async function GET(req: Request) {
         defaults, overrides: own, effective: effectivePanels(defaults, own),
       };
     });
-    const clientName = new Map(data.clients.map(client => [client.id, client.company]));
-    const portal = portalState(data).accounts.map(account => ({
-      userId: account.userId, email: account.email, client: clientName.get(account.clientId) ?? "Client", active: account.active, ...seen(account.userId),
-      hidden: Object.entries(overrides.get(account.userId) ?? {}).filter(([, allowed]) => allowed === false).map(([panel]) => panel),
-    }));
-    return reply({ now: new Date().toISOString(), ready, owner: seen(owner), staff, portal });
+    return reply({ now: new Date().toISOString(), ready, owner: seen(owner), staff });
   } catch (error) { return dbError(error); }
 }
 
@@ -56,13 +50,9 @@ export async function POST(req: Request) {
     if (!parsed.success) return reply({ error: "Choose a valid user, section and setting." }, 400);
     // Read the saved library so an override can only target this workspace's linked staff logins.
     const data = (await ownedLibrary(ctx.owner)) ?? ctx.data;
-    const { userId, panel } = parsed.data;
+    const { userId } = parsed.data;
     const isStaff = data.team.some(member => member.staffAuthId === userId && isStaffRole(member.role));
-    const isPortal = portalState(data).accounts.some(account => account.userId === userId);
-    // Each login kind may only be given the sections that exist for it.
-    const valid = isStaff ? (STAFF_PANELS as readonly string[]).includes(panel) : isPortal && (PORTAL_PANELS as readonly string[]).includes(panel);
-    if (!isStaff && !isPortal) return reply({ error: "User not found." }, 404);
-    if (!valid) return reply({ error: "That section does not apply to this user." }, 400);
+    if (!isStaff) return reply({ error: "User not found." }, 404);
     await setPanelOverride(ctx.owner, parsed.data.userId, parsed.data.panel, parsed.data.state);
     return reply({ ok: true });
   } catch (error) { return dbError(error); }

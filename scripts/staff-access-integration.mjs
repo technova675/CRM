@@ -51,7 +51,6 @@ try{
   assert.doesNotMatch(JSON.stringify(view),/Synthetic B lead|Synthetic private lead note/);
   assert.equal((await staff.request(crm)).status,403);
   assert.equal((await staff.request(manage)).status,403);
-  assert.equal((await staff.request("/api/portal")).status,403);
   assert.equal((await staff.request("/api/workspace/backup")).status,403);
   assert.equal((await send(staff,workspace,{action:"leadStatus",id:"org-b-lead",previous:"New",status:"Qualified"})).status,404);
   await ok(await send(staff,workspace,{action:"leadStatus",id:"org-a-lead",previous:"New",status:"Qualified"}));

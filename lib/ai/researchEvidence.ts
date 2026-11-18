@@ -8,21 +8,6 @@ export type EvidenceDocument={id:string;url:string;title:string;text:string;stat
 export type ProposedFinding={text:string;kind:"verified"|"assumption"|"recommendation";sourceId:string|null;quote:string|null};
 export type ProposedResearch={identity?:{status:"verified"|"not_verified";reason:string;conflicts:string[]};analysis:{topic:string;findings:ProposedFinding[]}[];problems:ProposedFinding[];opportunities:ProposedFinding[];recommendedServices:{service:Service;reason:string;sourceId:string|null;quote:string|null}[];outreachAngle:string};
 const normalize=(value:string)=>value.replace(/\s+/g," ").trim();
-function sameWebsite(a:string,b:string){try{return new URL(a).hostname.replace(/^www\./i,"").toLowerCase()===new URL(b).hostname.replace(/^www\./i,"").toLowerCase();}catch{return false;}}
-function officialSiteFinding(source:EvidenceDocument,quote:string):ResearchFinding|null{
-  const exact=normalize(quote);
-  return exact.length>=12&&exact.length<=280&&normalize(source.text).includes(exact)?{kind:"verified",text:`The source states: “${exact}”`,source:source.url,sourceId:source.id,evidenceQuote:exact}:null;
-}
-function explicitOfficialFacts(lead:Pick<Lead,"company"|"website">,documents:EvidenceDocument[]){
-  const home=documents.find(document=>document.id==="site-1"&&document.status==="ok"&&lead.website&&sameWebsite(document.url,lead.website));
-  if(!home)return{};
-  const text=normalize(home.text),escaped=lead.company.trim().replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-  const businessQuote=escaped?text.slice(0,800).match(new RegExp(`\\b${escaped}\\b\\s*(?:(?:is|are)\\s+|[|:–—-]\\s*)[^.!?]{0,120}\\b(?:agency|consultancy|consulting firm|platform|marketplace|manufacturer|retailer|software company|SaaS company)\\b[^.!?]{0,40}`,"i"))?.[0]:undefined;
-  const websiteQuote=escaped?text.match(new RegExp(`[^.!?]{0,60}\\b${escaped}\\b[^.!?]{0,160}\\b(?:website|site|agency|platform|services)\\b[^.!?]{0,40}`,"i"))?.[0]:undefined;
-  const website=websiteQuote?officialSiteFinding(home,websiteQuote):null;
-  const business_model=businessQuote?officialSiteFinding(home,businessQuote):null;
-  return{website,business_model};
-}
 function adTransparencySource(value:string){
   try{const url=new URL(value),host=url.hostname.replace(/^www\./,"");return host==="adstransparency.google.com"||(host==="facebook.com"&&/^\/ads\/library(?:\/|$)/.test(url.pathname))||(host==="linkedin.com"&&/^\/ad-library(?:\/|$)/.test(url.pathname));}catch{return false;}
 }
@@ -35,7 +20,7 @@ export function groundFinding(finding:ProposedFinding,documents:EvidenceDocument
   const grounded=!!source&&quote.length>=12&&quote.length<=280&&normalize(source.text).includes(quote);
   if(finding.kind==="verified")return grounded?{kind:"verified",text:`The source states: “${quote}”`,source:source!.url,sourceId:source!.id,evidenceQuote:quote}:null;
   if(!finding.text.trim()||finding.text.length>1500||/guaranteed?\b|\d+(?:\.\d+)?\s*%/i.test(finding.text))return null;
-  if(finding.kind==="assumption"&&!grounded)return null;
+  if(!grounded)return null;
   if(finding.kind==="assumption"&&!/\b(may|might|could|if|possible|suggests|potential)\b/i.test(finding.text))return null;
   return{kind:finding.kind,text:finding.kind==="assumption"?`AI inference — confirm before use: ${finding.text}`:finding.text,...(grounded?{source:source!.url,sourceId:source!.id,evidenceQuote:quote}:{source:"General recommendation; not an observed company problem"})};
 }
@@ -43,7 +28,7 @@ export function groundFinding(finding:ProposedFinding,documents:EvidenceDocument
 const unavailable=(text:string):ResearchFinding=>({kind:"unavailable",text});
 export function evidenceResearch(lead:Pick<Lead,"company"|"industry"|"location"|"companySize"|"website"|"linkedin"|"instagram"|"services">,documents:EvidenceDocument[],proposal:ProposedResearch|null,limitations:string[]=[],model?:string):LeadResearch{
   let rejected=0;
-  const identityUnverified=proposal?.identity?.status==="not_verified";
+  const identityUnverified=!!proposal&&proposal.identity?.status!=="verified";
   const clean=(findings:ProposedFinding[]=[])=>findings.flatMap(finding=>{const result=groundFinding(finding,documents);if(!result)rejected++;return result?[result]:[];});
   const analysis=new Map<string,ResearchFinding[]>();
   const topicReasons=new Map<string,string>();
@@ -59,19 +44,13 @@ export function evidenceResearch(lead:Pick<Lead,"company"|"industry"|"location"|
     if(!findings.length&&proposed.length)topicReasons.set(topic,"An AI finding was omitted because its quote, source or topic did not pass verification.");
   }
   const read=documents.filter(document=>document.status==="ok");
-  if(proposal?.identity?.status==="verified"){
-    const official=explicitOfficialFacts(lead,documents);
-    for(const [topic,finding]of Object.entries(official))if(finding&&!analysis.get(topic)?.length){analysis.set(topic,[finding]);topicReasons.delete(topic);}
-  }
-  if(!proposal&&read.length){analysis.set("website",read.filter(document=>document.id.startsWith("site")).slice(0,2).map(document=>({kind:"verified",text:`Readable public page: ${document.title}`,source:document.url,evidenceQuote:document.text.slice(0,220)})));}
   const record:ResearchFinding[]=[{kind:"record",text:`Company supplied in CRM: ${lead.company}.`,source:"CRM record — not independently verified"},
     ...[["Industry",lead.industry],["Location",lead.location],["Company size",lead.companySize]].filter(([,value])=>value&&value!=="Unknown").map(([label,value])=>({kind:"record" as const,text:`${label} supplied in CRM: ${value}.`,source:"CRM record — not independently verified"}))];
   const get=(...topics:string[])=>topics.flatMap(topic=>analysis.get(topic)??[]);
   const marketing=get("website","social","marketing","ads","content","competitors");
-  if(!identityUnverified)for(const document of read)for(const tag of document.tracking??[])marketing.push({kind:"verified",text:`${tag} was observed in this page's HTML. A tracking reference does not establish active advertising or campaign performance.`,source:document.url});
   if(!get("ads").length)marketing.push(unavailable("Active ads, budgets, targeting and performance have not been verified. Tracking tags and a missing ad-library result are not proof of advertising activity or inactivity."));
   if(!get("competitors").length)marketing.push(unavailable("No competitor names have been established by the checked sources. No competitor list has been invented."));
-  const services=identityUnverified?[]:proposal?.recommendedServices.flatMap(item=>{const finding=groundFinding({text:item.reason,kind:"recommendation",sourceId:item.sourceId,quote:item.quote},documents);return finding?[{service:item.service,finding}]:[];})??lead.services.map(service=>({service,finding:{kind:"recommendation" as const,text:`Discuss whether ${service} matches the company's priorities. This service is listed in CRM, not established as a business need.`,source:"CRM record"}}));
+  const services=identityUnverified?[]:proposal?.recommendedServices.flatMap(item=>{const finding=groundFinding({text:item.reason,kind:"recommendation",sourceId:item.sourceId,quote:item.quote},documents);return finding?[{service:item.service,finding}]:[];})??[];
   const companyEvidence=get("business_model","products","audience","website").filter(finding=>finding.kind==="verified"&&finding.evidenceQuote);
   const context=companyEvidence[0];
   const angle=context?`Reference this public-source excerpt: “${context.evidenceQuote}”. Ask ${lead.company} whether a short conversation about ${services[0]?.service??"its growth priorities"} would be useful. Treat any suggested opportunity as a discovery question, not an established problem.`:`Ask ${lead.company} which growth priorities matter most, then offer a short discovery conversation. Do not claim to have identified problems or results that the sources do not establish.`;

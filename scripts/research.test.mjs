@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {isPublicAddress,publicResearchUrl,readablePublicPage,readPublicDocument} from "../lib/ai/publicResearch.ts";
+import {isPublicAddress,publicResearchUrl,readablePublicPage,readPublicDocument,collectPublicEvidence} from "../lib/ai/publicResearch.ts";
 import {groundFinding,evidenceResearch} from "../lib/ai/researchEvidence.ts";
+import {applyResearchReview,researchCandidates,researchSourcePacket,researchReviewSchemaFor} from "../lib/ai/researchReview.ts";
+import {researchModelConfig,researchOpenRouterSettings} from "../lib/ai/researchConfig.ts";
+import {researchCitation} from "../lib/ai/researchCitation.ts";
+import {researchFindingSchemaFor} from "../lib/ai/researchSchema.ts";
 const lead={company:"Example",industry:"SaaS",location:"Mumbai",companySize:"Unknown",website:"https://example.com",services:[]};
 const source={id:"site-1",url:"https://example.com",title:"Example",text:"We make scheduling software for independent retailers. Our alternative to Example Competitor supports appointments.",status:"ok",checkedAt:new Date().toISOString()};
-const proposal={analysis:[],problems:[],opportunities:[],recommendedServices:[],outreachAngle:"We guarantee 300% revenue growth"};
+const proposal={identity:{status:"verified",reason:"The official site matches the company.",conflicts:[]},analysis:[],problems:[],opportunities:[],recommendedServices:[],outreachAngle:"We guarantee 300% revenue growth"};
 
 test("public research blocks private, loopback, reserved, mapped and NAT64 internal addresses",()=>{
   for(const address of ["127.0.0.1","10.0.0.1","169.254.169.254","192.168.1.1","100.64.0.1","192.0.2.1","::1","::ffff:127.0.0.1","64:ff9b::a00:1","2001:db8::1"])assert.equal(isPublicAddress(address),false,address);
@@ -56,28 +60,24 @@ test("target audience coverage includes the actual sourced finding",()=>{
   assert.equal(audience.findings[0].source,source.url);
 });
 
-test("confirmed official-site statements fill only matching research topics",()=>{
+test("official-site descriptions cannot bypass the findings verification process",()=>{
   const official={...source,text:"Example is a performance marketing agency for independent retailers. Our services include paid acquisition and CRO."};
   const result=evidenceResearch(lead,[official],{...proposal,identity:{status:"verified",reason:"The official site identifies Example as the agency.",conflicts:[]}});
-  assert.equal(result.coverage.find(item=>item.topic==="business_model").status,"evidence");
-  assert.equal(result.coverage.find(item=>item.topic==="website").status,"evidence");
+  assert.equal(result.coverage.find(item=>item.topic==="business_model").status,"unavailable");
+  assert.equal(result.coverage.find(item=>item.topic==="website").status,"unavailable");
   assert.equal(result.coverage.find(item=>item.topic==="ads").status,"unavailable");
   assert.equal(result.coverage.find(item=>item.topic==="competitors").status,"unavailable");
 });
 
-test("an official-site brand heading can establish the stated business model",()=>{
-  const official={...source,text:"Example | Founder-led performance marketing agency in Mumbai. We help independent retailers grow."};
-  const result=evidenceResearch(lead,[official],{...proposal,identity:{status:"verified",reason:"The official site identifies Example.",conflicts:[]}});
-  assert.equal(result.coverage.find(item=>item.topic==="business_model").status,"evidence");
-  assert.equal(result.coverage.find(item=>item.topic==="business_model").findings[0].sourceId,"site-1");
+test("readable pages alone cannot establish verified findings when AI verification fails",()=>{
+  const result=evidenceResearch(lead,[{...source,tracking:["Meta tracking reference"]}],null);
+  assert.ok(result.coverage.every(item=>item.status==="unavailable"));
+  assert.ok(!result.sections.flatMap(section=>section.findings).some(finding=>finding.kind==="verified"));
 });
 
-test("official-site fallback requires a matching host and verified identity",()=>{
-  const official={...source,text:"Example is a performance marketing agency for independent retailers."};
-  for(const [document,identity] of [[{...official,url:"https://unrelated.example"},"verified"],[official,"not_verified"]]){
-    const result=evidenceResearch(lead,[document],{...proposal,identity:{status:identity,reason:"Identity check",conflicts:[]}});
-    assert.equal(result.coverage.find(item=>item.topic==="business_model").status,"unavailable");
-  }
+test("a proposal without an explicit identity decision cannot produce verified findings",()=>{
+  const result=evidenceResearch(lead,[source],{...proposal,identity:undefined,analysis:[{topic:"products",findings:[{text:"Software",kind:"verified",sourceId:source.id,quote:source.text}]}]});
+  assert.equal(result.coverage.find(item=>item.topic==="products").status,"unavailable");
 });
 
 test("rejected category findings explain why they were omitted",()=>{
@@ -98,11 +98,122 @@ test("unverified company identity suppresses company-specific findings and expla
 test("tracking references do not establish active ads, and inferred competitors are rejected",()=>{
   const result=evidenceResearch(lead,[{...source,tracking:["Meta tracking reference"]}],{...proposal,analysis:[{topic:"competitors",findings:[{text:"Google competes with this business",kind:"assumption",sourceId:source.id,quote:source.text}]},{topic:"ads",findings:[{text:"Active ads",kind:"verified",sourceId:source.id,quote:"We make scheduling software for independent retailers."}]}]});
   assert.equal(result.coverage.find(item=>item.topic==="ads").status,"unavailable");assert.equal(result.coverage.find(item=>item.topic==="competitors").status,"unavailable");
-  assert.ok(result.sections.flatMap(section=>section.findings).some(finding=>finding.text.includes("does not establish active advertising")));
+  assert.ok(result.sections.flatMap(section=>section.findings).some(finding=>finding.text.includes("not proof of advertising")));
+  assert.ok(!result.sections.flatMap(section=>section.findings).some(finding=>finding.kind==="verified"&&finding.text.includes("tracking")));
   assert.ok(!result.sections.flatMap(section=>section.findings).some(finding=>finding.text.includes("Google competes")));
 });
 test("lookalike transparency hosts cannot establish advertising evidence",()=>{
   const fake={...source,url:"https://adstransparency.google.com.evil.example/",text:"This ad is active and was first shown on a public record."};
   const result=evidenceResearch(lead,[fake],{...proposal,analysis:[{topic:"ads",findings:[{text:"Active ads",kind:"verified",sourceId:fake.id,quote:fake.text}]}]});
   assert.equal(result.coverage.find(item=>item.topic==="ads").status,"unavailable");
+});
+
+const audienceProposal={...proposal,analysis:[{topic:"audience",findings:[{text:"Independent retailers",kind:"verified",sourceId:source.id,quote:"We make scheduling software for independent retailers."}]}]};
+const acceptedReview={identity:proposal.identity,sources:[{sourceId:source.id,relevance:"matched",reason:"The official website describes the intended company."}],findings:[{id:"analysis-0-0",accept:true,reason:"The quote explicitly names the customers and supports the audience topic."}]};
+
+test("separate review keeps correctly grounded findings and preserves source provenance",()=>{
+  const reviewed=applyResearchReview(audienceProposal,[source],acceptedReview);
+  assert.equal(reviewed.accepted,1);
+  const result=evidenceResearch(lead,reviewed.documents,reviewed.proposal);
+  const finding=result.coverage.find(item=>item.topic==="audience").findings[0];
+  assert.equal(finding.sourceId,source.id);assert.equal(finding.source,source.url);
+  assert.match(result.sources[0].reason,/Source relevance: matched/);
+});
+
+test("matching quotes on unrelated company pages are rejected even if the reviewer accepts the claim",()=>{
+  for(const relevance of ["mismatched","uncertain"]){
+    const reviewed=applyResearchReview(audienceProposal,[source],{...acceptedReview,sources:[{sourceId:source.id,relevance,reason:"This source cannot be linked confidently to this company."}]});
+    assert.equal(reviewed.accepted,0);assert.equal(reviewed.proposal.analysis[0].findings.length,0);
+  }
+});
+
+test("a reviewer rejection of the category cannot be bypassed by an exact quote",()=>{
+  const reviewed=applyResearchReview(audienceProposal,[source],{...acceptedReview,findings:[{id:"analysis-0-0",accept:false,reason:"The quote does not support the assigned category."}]});
+  assert.equal(reviewed.accepted,0);assert.equal(reviewed.rejected,1);
+});
+
+test("review response schema requires decisions for every supplied source and candidate",()=>{
+  const schema=researchReviewSchemaFor([source],audienceProposal);
+  assert.equal(schema.safeParse(acceptedReview).success,true);
+  assert.equal(schema.safeParse({...acceptedReview,sources:[],findings:[]}).success,false);
+  assert.equal(schema.safeParse({...acceptedReview,findings:[{id:"made-up-id",accept:true,reason:"Unsupported"}]}).success,false);
+});
+
+test("research output schema only accepts source IDs that were actually retrieved",()=>{
+  const schema=researchFindingSchemaFor([source]);
+  assert.equal(schema.safeParse(audienceProposal.analysis[0].findings[0]).success,true);
+  assert.equal(schema.safeParse({...audienceProposal.analysis[0].findings[0],sourceId:"synhetics-1"}).success,false);
+});
+
+test("review omissions, duplicate decisions, fabricated quotes and missing citations fail closed",()=>{
+  for(const review of [
+    {...acceptedReview,findings:[]},
+    {...acceptedReview,findings:[...acceptedReview.findings,...acceptedReview.findings]},
+    {...acceptedReview,sources:[]},
+    {...acceptedReview,sources:[...acceptedReview.sources,...acceptedReview.sources]},
+  ])assert.equal(applyResearchReview(audienceProposal,[source],review).accepted,0);
+  const invented={...audienceProposal,analysis:[{topic:"audience",findings:[{text:"Invented audience",kind:"verified",sourceId:source.id,quote:"A manufactured exact quote about unrelated customers."}]}]};
+  assert.equal(applyResearchReview(invented,[source],acceptedReview).accepted,0);
+  assert.equal(groundFinding({text:"Could automation help?",kind:"recommendation",sourceId:null,quote:null},[source]),null);
+});
+
+test("identity disagreement removes all company claims and recommendations",()=>{
+  const withService={...audienceProposal,recommendedServices:[{service:"SEO",reason:"Could retailer-specific content be worth testing?",sourceId:source.id,quote:source.text}]};
+  const reviewed=applyResearchReview(withService,[source],{...acceptedReview,identity:{status:"not_verified",reason:"Conflicting company identity",conflicts:["Different company"]}});
+  assert.equal(reviewed.accepted,0);
+  const result=evidenceResearch(lead,reviewed.documents,reviewed.proposal);
+  assert.ok(result.coverage.every(item=>item.status==="unavailable"));assert.equal(result.recommendedServices.length,0);
+});
+
+test("source packet includes later search sources with exact separate excerpts within budget",()=>{
+  const documents=Array.from({length:10},(_,i)=>({...source,id:`source-${i}`,text:`START-${i} `+"x".repeat(14000)+` END-${i}`}));
+  const packet=researchSourcePacket(documents,24000);
+  assert.equal(packet.length,10);assert.equal(packet[9].id,"source-9");
+  assert.ok(packet.flatMap(item=>item.excerpts).reduce((sum,text)=>sum+text.length,0)<=24000);
+  for(const item of packet){assert.ok(item.excerpts.every(excerpt=>documents.find(document=>document.id===item.id).text.includes(excerpt)));assert.ok(item.excerpts[1].includes("END-"));}
+});
+
+test("research model selection is isolated and a missing selected-provider key stays unconfigured",()=>{
+  const inherited={provider:"groq",model:"openai/gpt-oss-120b"};
+  const env={AI_RESEARCH_PROVIDER:"openrouter",AI_RESEARCH_MODEL:"openai/gpt-6.1-sol",GROQ_API_KEY:"synthetic-only"};
+  assert.deepEqual(researchModelConfig(env,inherited),{provider:"openrouter",model:"openai/gpt-6.1-sol",configured:false,freeOnly:false});
+  assert.deepEqual(researchModelConfig({...env,OPENROUTER_API_KEY:"synthetic-only"},inherited),{provider:"openrouter",model:"openai/gpt-6.1-sol",configured:true,freeOnly:false});
+  assert.equal(researchModelConfig({GROQ_API_KEY:"synthetic-only"},inherited).model,inherited.model);
+  assert.equal(env.GROQ_API_KEY,"synthetic-only");
+  assert.throws(()=>researchModelConfig({AI_RESEARCH_PROVIDER:"invalid"},inherited));
+  assert.equal(researchCandidates(audienceProposal)[0].id,"analysis-0-0");
+});
+
+test("free research accepts the existing key alias and rejects paid model configuration",()=>{
+  const inherited={provider:"groq",model:"openai/gpt-oss-120b"};
+  const env={AI_RESEARCH_PROVIDER:"openrouter",AI_RESEARCH_MODEL:"nvidia/nemotron-3.5-super-vl:free",AI_RESEARCH_FREE_ONLY:"true",OPENROUTER_API_KEY1:"synthetic-only"};
+  assert.deepEqual(researchModelConfig(env,inherited),{provider:"openrouter",model:env.AI_RESEARCH_MODEL,configured:true,freeOnly:true});
+  assert.throws(()=>researchModelConfig({...env,AI_RESEARCH_MODEL:"openai/gpt-6.1-sol"},inherited),/Free-only/);
+  assert.deepEqual(researchOpenRouterSettings(true).provider.max_price,{prompt:0,completion:0,request:0});
+});
+
+test("verified citations must reference a successfully retrieved source with the same ID and URL",()=>{
+  const result=evidenceResearch(lead,[source],audienceProposal);
+  const finding=result.coverage.find(item=>item.topic==="audience").findings[0];
+  assert.equal(researchCitation(result,finding).id,source.id);
+  for(const incomplete of [{...finding,sourceId:undefined},{...finding,evidenceQuote:undefined},{...finding,source:"https://unrelated.example"}])assert.equal(researchCitation(result,incomplete),undefined);
+  assert.equal(researchCitation({...result,sources:[{...result.sources[0],status:"unavailable"}]},finding),undefined);
+});
+
+test("Firecrawl-only collection never falls back to Tavily or Apify",async(t)=>{
+  const oldFirecrawl=process.env.FIRECRAWL_API_KEY,oldTavily=process.env.TAVILY_API_KEY;
+  delete process.env.FIRECRAWL_API_KEY;process.env.TAVILY_API_KEY="synthetic-only";
+  t.after(()=>{if(oldFirecrawl===undefined)delete process.env.FIRECRAWL_API_KEY;else process.env.FIRECRAWL_API_KEY=oldFirecrawl;if(oldTavily===undefined)delete process.env.TAVILY_API_KEY;else process.env.TAVILY_API_KEY=oldTavily;});
+  t.mock.method(globalThis,"fetch",async()=>{throw new Error("No external provider may be called");});
+  const result=await collectPublicEvidence({company:"Synthetic",website:"",linkedin:"",instagram:""},undefined,{searchProvider:"firecrawl"});
+  assert.equal(result.documents.length,0);assert.ok(result.limitations.some(item=>item.includes("Firecrawl search is not configured")));
+});
+
+test("Firecrawl credit exhaustion appears as a limitation without using another service",async(t)=>{
+  const previous=process.env.FIRECRAWL_API_KEY;process.env.FIRECRAWL_API_KEY="synthetic-only";
+  t.after(()=>{if(previous===undefined)delete process.env.FIRECRAWL_API_KEY;else process.env.FIRECRAWL_API_KEY=previous;});
+  const calls=[];t.mock.method(globalThis,"fetch",async(url)=>{calls.push(String(url));return Response.json({error:"No credits"},{status:402});});
+  const result=await collectPublicEvidence({company:"Synthetic",website:"",linkedin:"",instagram:""},undefined,{searchProvider:"firecrawl"});
+  assert.equal(calls.length,2);assert.ok(calls.every(url=>url.startsWith("https://api.firecrawl.dev/")));
+  assert.ok(result.limitations.some(item=>item.includes("credits are exhausted")));
 });

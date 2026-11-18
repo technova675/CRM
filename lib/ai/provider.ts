@@ -3,6 +3,7 @@ import {reserveTenantUsage} from "../tenantServer";
 import type { LanguageModel } from "ai";
 import { createGroq } from "@ai-sdk/groq";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { researchModelConfig, researchOpenRouterSettings } from "./researchConfig";
 
 // Central place to configure the model. AI_PROVIDER picks the backend; when unset, the first
 // provider with a key wins (Groq → OpenRouter → Vercel AI Gateway). Each provider has its own
@@ -12,7 +13,7 @@ type Provider = (typeof PROVIDERS)[number];
 
 const hasKey: Record<Provider, boolean> = {
   groq: Boolean(process.env.GROQ_API_KEY),
-  openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+  openrouter: Boolean(process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY1),
   gateway: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
 };
 
@@ -28,7 +29,8 @@ export const AI_PROVIDER: Provider = requested && PROVIDERS.includes(requested) 
 export const AI_MODEL_ID = MODEL_IDS[AI_PROVIDER];
 
 // Gateway takes a plain "provider/model" string; Groq and OpenRouter need a provider instance.
-const modelFor = (p: Provider): LanguageModel => (p === "groq" ? createGroq()(MODEL_IDS.groq) : p === "openrouter" ? createOpenRouter()(MODEL_IDS.openrouter) : MODEL_IDS.gateway);
+const openRouter = () => createOpenRouter({apiKey: process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY1});
+const modelFor = (p: Provider): LanguageModel => (p === "groq" ? createGroq()(MODEL_IDS.groq) : p === "openrouter" ? openRouter()(MODEL_IDS.openrouter) : MODEL_IDS.gateway);
 export const AI_MODEL: LanguageModel = modelFor(AI_PROVIDER);
 
 // Free tiers hit rate limits often: when the primary provider fails, retry once on the next
@@ -45,6 +47,18 @@ export async function withModelFallback<T>(owner:string,run: (model: LanguageMod
 }
 
 export const aiConfigured = () => hasKey[AI_PROVIDER];
+
+const researchConfig = () => researchModelConfig(process.env, {provider: AI_PROVIDER, model: AI_MODEL_ID});
+export const researchAIConfigured = () => researchConfig().configured;
+export async function withResearchModel<T>(owner: string, run: (model: LanguageModel, label: string) => Promise<T>, credits: 1 | 2 = 1): Promise<T> {
+  const config = researchConfig();
+  if (!config.configured) throw new Error("The configured research provider has no API key.");
+  await reserveTenantUsage(owner, "aiCredits", credits);
+  const model: LanguageModel = config.provider === "groq" ? createGroq()(config.model)
+    : config.provider === "openrouter" ? openRouter()(config.model, researchOpenRouterSettings(config.freeOnly))
+    : config.model;
+  return run(model, `${config.provider} · ${config.model}`);
+}
 
 export const SAFETY_RULES = `You are an assistant inside Adbibe's CRM (an AI-powered digital marketing agency).
 Rules:

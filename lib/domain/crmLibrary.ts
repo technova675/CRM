@@ -20,7 +20,6 @@ export interface CRMLibrary extends OnboardingLibrary {
   expenses: import("../types").Expense[];
   timeEntries: import("./teamTime").TimeEntry[];
   creativeReviews?: import("./creativeReviews").CreativeReview[];
-  clientPortal?: import("./clientPortal").ClientPortalState;
   clientReporting?: import("./clientReporting").ClientReporting;
   analyticsFeeds:import("./analyticsEngine").AnalyticsFeed[];
   marketingAutomations:import("./marketingAutomation").MarketingWorkflow[];
