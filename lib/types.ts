@@ -1016,6 +1016,7 @@ export interface SocialPost {
   brief?: string;
   strategyId?: ID;
   contentPlan?: string;
+  campaign?: string;
   generationSource?: string;
   updatedAt?: string;
   review?: { digest: string; at: string; source: string; score: number; notes: string[] };

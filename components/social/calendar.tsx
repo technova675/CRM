@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SocialPost } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button, Card } from "@/components/ui";
-import { PlatformChip, STAGE_TONE, reschedule } from "./shared";
+import { PlatformChip, STAGE_TONE } from "./shared";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const key = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -35,11 +35,17 @@ function PostChip({ p, writable, onOpen, clientName }: { p: SocialPost; writable
   );
 }
 
-export function SocialCalendar({ posts, month, onMonth, onOpen, writable, clientName }: { posts: SocialPost[]; month: Date; onMonth: (d: Date) => void; onOpen: (p: SocialPost) => void; writable: boolean; clientName: (id: string) => string }) {
+/** Month or week calendar. Dropping a post on a day calls onMove; the caller applies the approval and scheduling rules. */
+export function SocialCalendar({ posts, month, onMonth, onOpen, writable, clientName, mode = "month", onMode, onMove }: { posts: SocialPost[]; month: Date; onMonth: (d: Date) => void; onOpen: (p: SocialPost) => void; writable: boolean; clientName: (id: string) => string; mode?: "month" | "week"; onMode?: (m: "month" | "week") => void; onMove?: (p: SocialPost, day: Date) => void }) {
   const [over, setOver] = useState<string | null>(null);
   const [today] = useState(() => key(new Date()));
 
   const days = useMemo(() => {
+    if (mode === "week") {
+      const start = new Date(month.getFullYear(), month.getMonth(), month.getDate());
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+      return Array.from({ length: 7 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
+    }
     const first = new Date(month.getFullYear(), month.getMonth(), 1);
     const lead = (first.getDay() + 6) % 7; // Monday-first
     const start = new Date(first);
@@ -50,7 +56,7 @@ export function SocialCalendar({ posts, month, onMonth, onOpen, writable, client
       d.setDate(start.getDate() + i);
       return d;
     });
-  }, [month]);
+  }, [month, mode]);
 
   const byDay = useMemo(() => {
     const m = new Map<string, SocialPost[]>();
@@ -71,26 +77,27 @@ export function SocialCalendar({ posts, month, onMonth, onOpen, writable, client
     setOver(null);
     const id = e.dataTransfer.getData("text/post");
     const p = posts.find((x) => x.id === id);
-    if (p && p.stage !== "Published") reschedule(p, d);
+    if (p && p.stage !== "Published") onMove?.(p, d);
   };
 
   return (
     <Card>
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border">
         <div className="flex items-center gap-1">
-          <Button className="min-h-11 min-w-11" variant="ghost" size="xs" aria-label="Previous month" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} icon={<ChevronLeft className="size-3.5" />} />
-          <Button className="min-h-11 min-w-11" variant="ghost" size="xs" aria-label="Next month" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} icon={<ChevronRight className="size-3.5" />} />
-          <span className="text-[13px] font-semibold ml-1">{month.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</span>
+          <Button className="min-h-11 min-w-11" variant="ghost" size="xs" aria-label="Previous month" onClick={() => onMonth(mode === "week" ? new Date(month.getFullYear(), month.getMonth(), month.getDate() - 7) : new Date(month.getFullYear(), month.getMonth() - 1, 1))} icon={<ChevronLeft className="size-3.5" />} />
+          <Button className="min-h-11 min-w-11" variant="ghost" size="xs" aria-label="Next month" onClick={() => onMonth(mode === "week" ? new Date(month.getFullYear(), month.getMonth(), month.getDate() + 7) : new Date(month.getFullYear(), month.getMonth() + 1, 1))} icon={<ChevronRight className="size-3.5" />} />
+          <span className="text-[13px] font-semibold ml-1">{mode === "week" ? `${days[0].toLocaleDateString("en-IN", { day: "numeric", month: "short" })} – ${days[6].toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : month.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</span>
         </div>
         <div className="flex items-center gap-2">
-          {writable && <span className="hidden sm:inline text-[11px] text-fg-3">Drag a post to another day to reschedule</span>}
-          <Button className="min-h-11" size="xs" onClick={() => onMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>Today</Button>
+          {writable && <span className="hidden sm:inline text-[11px] text-fg-3">Drag an approved post onto a day to plan it</span>}
+          {onMode && <div className="flex gap-1" role="group" aria-label="Calendar view">{(["month", "week"] as const).map((m) => <Button key={m} className="min-h-11" size="xs" variant={mode === m ? "primary" : "secondary"} aria-pressed={mode === m} onClick={() => onMode(m)}>{m === "month" ? "Month" : "Week"}</Button>)}</div>}
+          <Button className="min-h-11" size="xs" onClick={() => onMonth(mode === "week" ? new Date() : new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>Today</Button>
         </div>
       </div>
       <div className="space-y-4 p-3 md:hidden" aria-label="Monthly content agenda">
         <p className="text-sm font-semibold">Content agenda</p>
-        {days.filter(d=>d.getMonth()===month.getMonth()&&byDay.has(key(d))).map(d=><section key={key(d)}><h3 className="mb-2 text-xs font-medium text-fg-2">{d.toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"short"})}</h3><div className="space-y-2">{byDay.get(key(d))!.map(p=><PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName}/>)}</div></section>)}
-        {!days.some(d=>d.getMonth()===month.getMonth()&&byDay.has(key(d)))&&<p className="text-sm text-fg-2">No dated content this month. Open an unscheduled idea below to plan a post.</p>}
+        {days.filter(d=>(mode==="week"||d.getMonth()===month.getMonth())&&byDay.has(key(d))).map(d=><section key={key(d)}><h3 className="mb-2 text-xs font-medium text-fg-2">{d.toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"short"})}</h3><div className="space-y-2">{byDay.get(key(d))!.map(p=><PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName}/>)}</div></section>)}
+        {!days.some(d=>(mode==="week"||d.getMonth()===month.getMonth())&&byDay.has(key(d)))&&<p className="text-sm text-fg-2">No dated content this month. Open an unscheduled idea below to plan a post.</p>}
       </div>
       <div className="hidden overflow-x-auto md:block">
         <div className="min-w-[720px]">
@@ -101,18 +108,18 @@ export function SocialCalendar({ posts, month, onMonth, onOpen, writable, client
             {days.map((d) => {
               const k = key(d);
               const list = byDay.get(k) ?? [];
-              const inMonth = d.getMonth() === month.getMonth();
+              const inMonth = mode === "week" || d.getMonth() === month.getMonth();
               return (
                 <div
                   key={k}
                   onDragOver={(e) => { if (writable) { e.preventDefault(); setOver(k); } }}
                   onDragLeave={() => setOver((o) => (o === k ? null : o))}
                   onDrop={(e) => onDrop(e, d)}
-                  className={cn("min-h-24 border-b border-r border-border p-1 space-y-0.5", !inMonth && "bg-surface-2/40", over === k && "bg-accent-soft")}
+                  className={cn(mode === "week" ? "min-h-72 border-b border-r border-border p-1 space-y-1" : "min-h-24 border-b border-r border-border p-1 space-y-0.5", !inMonth && "bg-surface-2/40", over === k && "bg-accent-soft")}
                 >
                   <div className={cn("text-[11px] tabular-nums px-0.5", inMonth ? "text-fg-2" : "text-fg-3", today === k && "font-semibold text-accent-text")}>{d.getDate()}</div>
-                  {list.slice(0, 4).map((p) => <PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName} />)}
-                  {list.length > 4 && <details><summary className="min-h-11 cursor-pointer px-1 text-xs text-fg-2">+{list.length - 4} more</summary>{list.slice(4).map(p=><PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName}/>)}</details>}
+                  {(mode === "week" ? list : list.slice(0, 4)).map((p) => <PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName} />)}
+                  {mode === "month" && list.length > 4 && <details><summary className="min-h-11 cursor-pointer px-1 text-xs text-fg-2">+{list.length - 4} more</summary>{list.slice(4).map(p=><PostChip key={p.id} p={p} writable={writable} onOpen={onOpen} clientName={clientName}/>)}</details>}
                 </div>
               );
             })}

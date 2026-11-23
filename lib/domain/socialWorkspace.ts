@@ -7,7 +7,7 @@ export const socialDraftSchema=z.object({
   clientId:z.string().min(1).max(150),platform:z.enum(socialPlatforms),format:z.enum(socialFormats),
   title:z.string().trim().min(1).max(300),pillar:z.string().trim().min(1).max(200),
   hook:z.string().max(2000),caption:z.string().max(15000),hashtags:z.array(z.string().max(100)).max(40),
-  brief:z.string().max(12000).default(""),strategyId:z.string().max(150).optional(),contentPlan:z.string().max(12000).default(""),
+  brief:z.string().max(12000).default(""),strategyId:z.string().max(150).optional(),contentPlan:z.string().max(12000).default(""),campaign:z.string().trim().max(120).optional(),
   mediaUrls:z.array(z.string().url().max(2000).refine(s=>s.startsWith("https://"))).max(10).default([]),
 });
 export const socialGenerationSchema=z.object({clientId:z.string().min(1).max(150),platform:z.enum(socialPlatforms),format:z.enum(socialFormats),brief:z.string().trim().min(10).max(12000),strategyId:z.string().max(150).optional(),count:z.number().int().min(1).max(8)});
