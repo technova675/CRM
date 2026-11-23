@@ -153,7 +153,7 @@ function InboxInner() {
           </div>}
         </div>
         <div className="flex-1 overflow-y-auto">
-          {list.length === 0 && <EmptyState icon={<Inbox className="size-5" />} title="No conversations" />}
+          {list.length === 0 && <EmptyState icon={<Inbox className="size-5" />} title="No conversations yet" description={isClient ? undefined : "Replies arrive here once an email channel is connected for Outreach (Outreach → Channel connections). Until then, log calls and emails on each lead's page."} />}
           {list.map((c) => {
             const m = lastMsg.get(c.id);
             return (

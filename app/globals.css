@@ -2,6 +2,32 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Tailwind v4 gives buttons the arrow cursor. Show the hand on everything clickable,
+   in the base layer so a cursor-* utility on an element still wins. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"],
+  [role="tab"],
+  [role="option"],
+  [role="switch"],
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="file"]:not(:disabled),
+  input[type="color"]:not(:disabled),
+  input[type="range"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+}
+
 :root {
   --bg: #f7f7f8;
   --surface: #ffffff;

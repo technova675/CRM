@@ -30,7 +30,7 @@ export default function StaffJoin(){
   }
   return <main className="grid min-h-dvh place-items-center p-4">
     <Card className="w-full max-w-lg">
-      <CardHeader title="Join your Adbibe workspace" subtitle="Set a password for your individual staff sign-in." action={<ShieldCheck className="size-5 text-accent-text"/>}/>
+      <CardHeader title="Join your agency workspace" subtitle="Set a password for your individual staff sign-in." action={<ShieldCheck className="size-5 text-accent-text"/>}/>
       <div className="space-y-4 px-4 pb-4">
         {error&&<p role="alert" className="text-sm text-danger">{error}</p>}
         {invite&&<form className="space-y-4" onSubmit={event=>{event.preventDefault();void accept();}}>

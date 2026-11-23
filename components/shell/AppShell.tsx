@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Bell, ChevronDown, CircleHelp, LogOut, Lock, Menu, Moon, Search, Sparkles, Sun, X } from "lucide-react";
+import { Bell, ChevronDown, CircleHelp, LogOut, Lock, Menu, Moon, Search, Settings, Sparkles, Sun, X } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can, moduleFromPath, MODULE_LABEL, ROLE_LABEL, setPermissionOverrides } from "@/lib/permissions";
 import { cn, relTime } from "@/lib/utils";
@@ -103,18 +103,46 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </section>;
         })}
       </div>
-      <div className="mt-auto">
-        <AccountMenu />
-      </div>
     </nav>
   );
 }
 
 function AccountMenu() {
   const { user, signOut } = useAuth();
+  const me = useMe();
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  return <div className="rounded-xl border border-border bg-surface p-3 shadow-card"><div className="flex min-w-0 items-center gap-2"><Avatar name={user?.email ?? "Account"} size={28} /><div className="min-w-0"><p className="truncate text-xs font-medium" title={user?.email}>{user?.email}</p><p className="mt-1 text-[11px] text-fg-2">Signed-in account</p></div></div><Button className="mt-3 w-full" icon={<LogOut size={14} aria-hidden="true" />} loading={busy} onClick={async () => { setBusy(true); setError(""); try { await signOut(); } catch { setError("Could not sign out. Please retry."); } finally { setBusy(false); } }}>Sign out</Button>{error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}</div>;
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [open]);
+  const email = user?.email ?? "Account";
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)} className="grid size-8 cursor-pointer place-items-center rounded-full hover:ring-2 hover:ring-border-strong" aria-label="Account menu" aria-haspopup="menu" aria-expanded={open} title={email}>
+        <Avatar name={email} size={28} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div role="menu" className="animate-in absolute right-0 top-10 z-40 w-64 rounded-xl border border-border bg-surface p-1 shadow-pop">
+            <div className="flex min-w-0 items-center gap-2 border-b border-border px-2 pb-2.5 pt-1.5">
+              <Avatar name={email} size={32} />
+              <div className="min-w-0"><p className="truncate text-[13px] font-medium" title={email}>{email}</p><p className="text-[11px] text-fg-3">{ROLE_LABEL[me.role] ?? "Signed in"}</p></div>
+            </div>
+            {can(me.role, "settings") && <Link role="menuitem" href="/settings" onClick={() => setOpen(false)} className="mt-1 flex min-h-9 items-center gap-2 rounded-lg px-2 text-[13px] hover:bg-surface-2"><Settings className="size-4 text-fg-2" aria-hidden="true" />Settings</Link>}
+            <button role="menuitem" disabled={busy} onClick={async () => { setBusy(true); setError(""); try { await signOut(); } catch { setError("Could not sign out. Please retry."); setBusy(false); } }} className="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[13px] text-danger hover:bg-surface-2 disabled:cursor-wait disabled:opacity-60">
+              <LogOut className="size-4" aria-hidden="true" />{busy ? "Signing out…" : "Sign out"}
+            </button>
+            {error && <p role="alert" className="px-2 pb-1.5 text-xs text-danger">{error}</p>}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function Notifications() {
@@ -210,6 +238,7 @@ function Topbar({ hasTour, onTour }: { hasTour: boolean; onTour: () => void }) {
         <button onClick={toggle} className="grid size-8 place-items-center rounded-lg text-fg-2 hover:bg-surface-2" aria-label="Toggle theme">
           {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </button>
+        <AccountMenu />
       </div>
     </header>
   );

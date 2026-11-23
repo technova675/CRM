@@ -43,6 +43,7 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
   const [attachName, setAttachName] = useState("");
   const [attachUrl, setAttachUrl] = useState("");
   const [depPick, setDepPick] = useState("");
+  const [titleError, setTitleError] = useState(false);
 
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
   const deps = f.dependsOn.map((id) => byId.get(id)).filter((t): t is Task => !!t);
@@ -59,10 +60,12 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
   const dependents = task ? tasks.filter((t) => (t.dependsOn ?? []).includes(task.id)) : [];
 
   const save = () => {
-    if (!f.title.trim()) return toast("Title is required", undefined, "warning");
+    if (!f.title.trim()) { setTitleError(true); document.getElementById("task-title")?.focus(); return; }
+    // A dependency chosen in the picker counts even if Add was not pressed.
+    const dependsOn = depPick && !f.dependsOn.includes(depPick) ? [...f.dependsOn, depPick] : f.dependsOn;
     if (!f.dueDate || !Number.isFinite(Date.parse(f.dueDate))) return toast("Choose a valid deadline", undefined, "warning");
     if (!team.some(m=>m.id===f.assigneeId&&m.role!=="client"&&m.status==="active")) return toast("Choose an active team member",undefined,"warning");
-    const issue=taskDependencyIssue({id:task?.id??"",dependsOn:f.dependsOn,status:f.status},byId);
+    const issue=taskDependencyIssue({id:task?.id??"",dependsOn,status:f.status},byId);
     if(issue)return toast(issue,undefined,"warning");
     const payload = {
       title: f.title,
@@ -74,7 +77,7 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
       related: f.relType && f.relId ? { type: f.relType, id: f.relId } : undefined,
       recurring: f.recurring,
       projectId: f.projectId || undefined,
-      dependsOn: f.dependsOn,
+      dependsOn,
       attachments: f.attachments,
     };
     if (task) updateTask(task.id, payload);
@@ -110,7 +113,7 @@ export function TaskDrawer({ task, onClose, writable, clientView, defaults }: { 
     >
       <div className="space-y-5">
         <fieldset disabled={!writable} className="grid grid-cols-2 gap-3">
-          <Field label="Title" className="col-span-2"><Input autoFocus={!task} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
+          <Field label="Title" className="col-span-2" hint={titleError ? "Enter a title for this task." : undefined}><Input id="task-title" autoFocus={!task} aria-invalid={titleError} className={titleError ? "border-danger" : undefined} value={f.title} onChange={(e) => { setF({ ...f, title: e.target.value }); if (e.target.value.trim()) setTitleError(false); }} /></Field>
           <Field label="Description" className="col-span-2"><Textarea value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
           <Field label="Assignee"><Select value={f.assigneeId} onChange={(e) => setF({ ...f, assigneeId: e.target.value })}>{team.filter((t) => t.role !== "client").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></Field>
           <Field label="Priority"><Select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value as Priority })}>{PRIORITIES.map((p) => <option key={p}>{p}</option>)}</Select></Field>

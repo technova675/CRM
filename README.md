@@ -253,6 +253,15 @@ Follow-ups are **prepared for review when requested**, respecting sequence day o
 
 Validation: `npm run test:outreach` covers suppression normalization, content-bound approvals, due offsets/windows, opt-out text, ledger idempotency, daily caps, event deduplication, RLS and browser-role denial. `npm run test:outreach:integration` uses disposable Supabase accounts to verify cross-laptop sync, isolation, approval, AI/fallback drafts and blocked sending without a configured adapter. It does not send messages.
 
+## Email (Brevo)
+
+Two kinds of email are sent, both from the verified Brevo sender (for example `hello@adbibe.com`):
+
+- **Account emails** (sign-up confirmation, password reset) are sent by Supabase Auth. Supabase's built-in mailer allows only a few emails per hour, so set Brevo as custom SMTP in Supabase → Authentication → Emails → SMTP Settings: host `smtp-relay.brevo.com`, port `587`, username = the SMTP login shown in Brevo → SMTP & API → SMTP (not the sender address), password = a Brevo **SMTP key** (not the API key), sender email = the verified sender. Then raise the email rate limit in Supabase → Authentication → Rate Limits.
+- **Client onboarding welcome emails** are sent through the Brevo API with `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` and `BREVO_REPLY_TO`, and only after the welcome message is approved.
+
+In Supabase → Authentication → URL Configuration, set the Site URL to the live domain and add `https://<live-domain>/auth/callback` to Redirect URLs; otherwise email links point at localhost. Brevo's terms do not allow cold email, so outreach delivery needs a separate provider.
+
 ## What's required to take this to production
 
 Other modules still use demo data. To run the complete platform for real teams and external customers you need:

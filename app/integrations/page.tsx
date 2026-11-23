@@ -106,7 +106,7 @@ function IntegrationsInner() {
       {error&&<p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
       {tab==="connectors"&&<div className="space-y-4">
         {statusError&&<p role="alert" className="text-sm text-danger">{statusError}</p>}
-        {status&&!status.configured&&<Card className="p-4 text-sm text-fg-2">Set <code>MEDIA_CONNECTOR_URL</code> and <code>MEDIA_CONNECTOR_TOKEN</code> on the CRM server to enable live platform authorization. You can import metrics from CSV in Performance Marketing.</Card>}
+        {status&&!status.configured&&<Card className="p-4 text-sm text-fg-2">Live connections to ad platforms are not switched on for this workspace yet. Until then, export reports from Meta, Google or LinkedIn and import the CSV as it is in <a className="text-accent-text underline" href="/analytics?tab=sources">Analytics → Data sources</a> or <a className="text-accent-text underline" href="/performance">Performance</a>.</Card>}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {MEDIA_PLATFORMS.map(name=>{
             const connections = status?.connections.filter(item=>item.platform===name) ?? [];
@@ -133,9 +133,9 @@ function IntegrationsInner() {
           </form>
         </Card>}
         <Card>
-          <CardHeader title="Other integrations" subtitle="The catalog lists platforms that are managed elsewhere or still require an adapter."/>
+          <CardHeader title="Planned integrations" subtitle="Not available yet. Listed so you know what is on the roadmap; none of these connect today."/>
           <ul className="grid gap-2 px-4 pb-4 sm:grid-cols-2 lg:grid-cols-3">
-            {catalog.filter(item=>!MEDIA_PLATFORMS.some(name=>name===item.name)&&item.key!=="dv360").map(item=><li key={item.key} className="rounded-lg border border-border p-2 text-sm">{item.name}{item.key==="gsc"&&<Button size="sm" href="/seo" className="ml-2">Open SEO</Button>}</li>)}
+            {catalog.filter(item=>!MEDIA_PLATFORMS.some(name=>name===item.name)&&item.key!=="dv360").map(item=><li key={item.key} className="flex items-center justify-between gap-2 rounded-lg border border-border p-2 text-sm"><span>{item.name}</span>{item.key==="gsc"?<Button size="sm" href="/seo">Open SEO</Button>:<span className="text-[11px] text-fg-3">Coming later</span>}</li>)}
           </ul>
         </Card>
       </div>}

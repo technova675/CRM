@@ -141,16 +141,18 @@ export function ScorePill({ score, overridden }: { score: number; overridden?: b
 }
 
 // ---------- Form controls ----------
-const field = "w-full rounded-lg border border-border bg-surface px-2.5 text-[13px] text-fg placeholder:text-fg-3 outline-none transition focus:border-accent focus:ring-3 focus:ring-[var(--ring)]";
+// Full width unless the caller sets its own base width (clsx does not drop the conflicting class, so "w-full w-36" stayed full width).
+const width = (className?: string) => /(^|\s)w-/.test(className ?? "") ? "" : "w-full";
+const field = "rounded-lg border border-border bg-surface px-2.5 text-[13px] text-fg placeholder:text-fg-3 outline-none transition focus:border-accent focus:ring-3 focus:ring-[var(--ring)]";
 export function Input({ className, ...p }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...p} className={cn(field, "h-8", className)} />;
+  return <input {...p} className={cn(field, width(className), "h-8", className)} />;
 }
 export function Textarea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...p} className={cn(field, "py-2 min-h-20 leading-relaxed", className)} />;
+  return <textarea {...p} className={cn(field, width(className), "py-2 min-h-20 leading-relaxed", className)} />;
 }
 export function Select({ className, children, ...p }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select {...p} className={cn(field, "h-8 pr-7 appearance-none bg-[length:12px] bg-[right_8px_center] bg-no-repeat cursor-pointer", className)} style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b8b96' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")` }}>
+    <select {...p} className={cn(field, width(className), "h-8 pr-7 appearance-none bg-[length:12px] bg-[right_8px_center] bg-no-repeat cursor-pointer", className)} style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b8b96' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")` }}>
       {children}
     </select>
   );

@@ -111,11 +111,13 @@ function CampaignsInner() {
             </Select>
           )}
           <Select aria-label="Filter by campaign type" value={type} onChange={e=>setType(e.target.value)} className="w-full sm:w-44"><option value="All">All campaign types</option>{CAMPAIGN_TYPES.map(t=><option key={t}>{t}</option>)}</Select>
-          <span className="ml-auto self-center text-xs text-fg-3">{visible.length} campaigns</span>
+          <span className="ml-auto self-center text-xs text-fg-3">{visible.length} {visible.length===1?"campaign":"campaigns"}</span>
         </div>
 
         {visible.length === 0 ? (
-          <EmptyState icon={<Megaphone className="size-5" />} title="No campaigns match these filters" />
+          (campaigns.length===0
+            ? <EmptyState icon={<Megaphone className="size-5" />} title="No campaigns yet" description={clients.length?"Plan your first campaign: goals, audience, channels, budget and KPIs in one brief.":"Campaigns belong to clients. Add your first client, then plan a campaign for them."} action={writable?(clients.length?<Button variant="primary" icon={<Plus className="size-3.5" />} onClick={()=>setCreating(true)}>Create your first campaign</Button>:<Button variant="primary" href="/clients?new=1">Add your first client</Button>):undefined} />
+            : <EmptyState icon={<Megaphone className="size-5" />} title="No campaigns match these filters" action={<Button onClick={()=>{setService("All");setStatus("All");setClientId("All");setType("All");setQ("");}}>Clear filters</Button>} />)
         ) : view === "table" ? (
           <Table>
             <thead>
@@ -149,8 +151,8 @@ function CampaignsInner() {
                   <Td><StatusBadge status={c.status} /></Td>
                   <Td>
                     <div className="space-y-1 min-w-32">
-                      {c.kpis.slice(0, 2).map((k) => (
-                        <div key={k.label} className="flex items-center gap-2 text-[11px]">
+                      {c.kpis.slice(0, 2).map((k, i) => (
+                        <div key={i} className="flex items-center gap-2 text-[11px]">
                           <span className="w-9 text-fg-3">{k.label}</span>
                           <Progress value={kpiRatio(k)} tone={kpiRatio(k) >= 100 ? "success" : kpiRatio(k) >= 75 ? "accent" : "warning"} className="w-16" />
                           <span className="tabular-nums text-fg-2">{k.measurementRecorded===false?"Not measured":`${k.actual}${k.unit??""}`}</span>
