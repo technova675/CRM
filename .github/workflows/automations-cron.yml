@@ -1,0 +1,35 @@
+# Runs scheduled marketing automations every 5 minutes on the free Vercel plan, which allows only one Vercel Cron run a day.
+# Set up once in GitHub → Settings → Secrets and variables → Actions:
+#   Secret   CRON_SECRET  the same value as CRON_SECRET in the Vercel project
+#   Variable APP_URL      the live site, for example https://crm.example.com (no trailing slash)
+# GitHub may delay scheduled runs by a few minutes at busy times.
+name: Automations schedule
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: automations-cron
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Advance due automation runs
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ] || [ -z "$APP_URL" ]; then
+            echo "::notice::Set the CRON_SECRET secret and APP_URL variable to enable scheduled automations."
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/automations/cron"
