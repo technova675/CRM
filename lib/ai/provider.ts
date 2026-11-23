@@ -60,7 +60,7 @@ export async function withResearchModel<T>(owner: string, run: (model: LanguageM
   return run(model, `${config.provider} · ${config.model}`);
 }
 
-export const SAFETY_RULES = `You are an assistant inside Adbibe's CRM (an AI-powered digital marketing agency).
+export const SAFETY_RULES = `You are an assistant inside a digital marketing agency's CRM. Never name the agency or a sender unless the input supplies them, and never write placeholders such as [Your Name].
 Rules:
 - Never invent facts about people or companies. Only state as "verified" what appears in the provided data or fetched page content.
 - Clearly separate verified facts, assumptions, and recommendations.

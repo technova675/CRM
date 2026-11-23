@@ -15,7 +15,7 @@ import { cn, fmtDate, pct, relTime, uid } from "@/lib/utils";
 import { AIBadge, Badge, Button, Card, CardHeader, Checkbox, EmptyState, Field, Input, InsightList, Modal, Progress, ScorePill, Segmented, Select, StatusBadge, Textarea, Toggle } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import { INDUSTRIES } from "./LeadForms";
-import { withOptOut, suppressed } from "@/lib/domain/outreach";
+import { withOptOut, suppressed, destination } from "@/lib/domain/outreach";
 import { DeliveryTracking, useDeliveryStatus } from "./OutreachDelivery";
 
 export function funnel(c: OutreachCampaign) {
@@ -232,6 +232,8 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
   }, [leads, usePreset, presetIds, statuses, industry, minScore,suppressions,tag,companySize]);
   const n = usePreset ? eligible.length : PRESETS.find((p) => p.value === preset)!.n;
   const selected = eligible.slice(0, n);
+  // Leads with no address for this channel are stopped at drafting; say so before the campaign starts.
+  const reachable = selected.filter((l) => destination(l, channel));
   const avg = selected.length ? Math.round(selected.reduce((a, l) => a + effectiveScore(l), 0) / selected.length) : 0;
 
   const start = async () => {
@@ -287,7 +289,7 @@ export function NewCampaignModal({ open, onClose, presetIds }: { open: boolean; 
         )}
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-lg bg-surface-2 p-3"><p className="text-[11px] text-fg-3">Eligible</p><p className="text-lg font-semibold tabular-nums">{eligible.length}</p></div>
-          <div className="rounded-lg bg-surface-2 p-3"><p className="text-[11px] text-fg-3">Will be contacted</p><p className="text-lg font-semibold tabular-nums">{selected.length}</p></div>
+          <div className="rounded-lg bg-surface-2 p-3"><p className="text-[11px] text-fg-3">Will be contacted</p><p className="text-lg font-semibold tabular-nums">{reachable.length}</p>{selected.length > reachable.length && <p className="text-[11px] text-warning">{selected.length - reachable.length} without {channel === "Email" ? "an email address" : `a ${channel} contact`}</p>}</div>
           <div className="rounded-lg bg-surface-2 p-3"><p className="text-[11px] text-fg-3">Avg. score</p><p className="text-lg font-semibold tabular-nums">{avg}</p></div>
         </div>
         {!usePreset && n !== Infinity && eligible.length < n && <p className="text-xs text-warning">Only {eligible.length} leads match — widen filters or import more leads to reach {n}.{eligible.length===0&&leads.length>0&&" Unresearched leads have a score of 0, so lower the minimum AI score, or include more statuses."}</p>}

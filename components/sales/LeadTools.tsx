@@ -126,12 +126,14 @@ export function findDuplicateGroups(leads: Lead[]): DupGroup[] {
     const seen = new Map<string, string>();
     return { seen, reason, key };
   };
-  const buckets = [index("email", "Same email"), index("domco", "Same email domain + company"), index("phone", "Same phone")];
+  const buckets = [index("email", "Same email"), index("domco", "Same email domain + company"), index("phone", "Same phone"), index("person", "Same name + company")];
   for (const l of leads) {
     parent.set(l.id, l.id);
     const email = l.email.trim().toLowerCase();
     const dom = domainOf(email);
-    const keys = [email || "", dom && !FREE_MAIL.has(dom) && normCompany(l.company) ? `${dom}|${normCompany(l.company)}` : "", normPhone(l.phone)];
+    // The same person at the same company is a duplicate even when one copy has no email or phone yet.
+    const person = l.name.trim().toLowerCase().replace(/\s+/g, " ");
+    const keys = [email || "", dom && !FREE_MAIL.has(dom) && normCompany(l.company) ? `${dom}|${normCompany(l.company)}` : "", normPhone(l.phone), person && normCompany(l.company) ? `${person}|${normCompany(l.company)}` : ""];
     keys.forEach((k, i) => {
       if (!k) return;
       const b = buckets[i]!;
@@ -189,6 +191,10 @@ export function mergeLeads(primaryId: string, otherIds: string[]) {
     merged.website ||= o.website;
     merged.linkedin ||= o.linkedin;
     merged.instagram ||= o.instagram;
+    // Fill placeholders from the copy that knows more, so merging never loses a city, industry or size.
+    merged.location ||= o.location;
+    if ((!merged.industry || merged.industry === "Other") && o.industry && o.industry !== "Other") merged.industry = o.industry;
+    if ((!merged.companySize || merged.companySize === "Unknown") && o.companySize && o.companySize !== "Unknown") merged.companySize = o.companySize;
     merged.dealValue = Math.max(merged.dealValue ?? 0, o.dealValue ?? 0) || undefined;
     merged.customFields = { ...(o.customFields ?? {}), ...(merged.customFields ?? {}) };
     if (!merged.research && o.research) merged.research = o.research;

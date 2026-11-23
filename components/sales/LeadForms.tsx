@@ -6,14 +6,14 @@ import Papa from "papaparse";
 import { readSheet } from "read-excel-file/browser";
 import { FileSpreadsheet, Upload } from "lucide-react";
 import { useCRM } from "@/lib/store";
-import { LEAD_SOURCES, LEAD_STATUSES, SERVICES, type CompanySize, type LeadStatus, type LeadSource, type Service } from "@/lib/types";
+import { LEAD_SOURCES, LEAD_STATUSES, SERVICES, type CompanySize, type LeadStatus, type LeadSource, type Service, LEAD_INDUSTRIES } from "@/lib/types";
 import { Badge, Button, Field, Input, Modal, Select, Table, Td, Textarea, Th } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import { cn, downloadFile, toCSV } from "@/lib/utils";
 import { importedLead, LEAD_IMPORT_FIELDS, normalizeHeader } from "@/lib/domain/leadImport";
 import { CustomFieldInput, findDuplicatesFor } from "./LeadTools";
 
-export const INDUSTRIES = ["D2C / E-commerce", "Real Estate", "Education", "Healthcare", "Hospitality", "Fashion", "Beauty", "SaaS", "Fintech", "Automotive", "Food & Beverage", "Fitness", "Consulting", "Other"];
+export const INDUSTRIES: string[] = [...LEAD_INDUSTRIES];
 export const SIZES: CompanySize[] = ["Unknown","1-10", "11-50", "51-200", "201-1000", "1000+"];
 
 type Draft = {
@@ -61,7 +61,7 @@ export function AddLeadModal({ open, onClose }: { open: boolean; onClose: () => 
     if (initialScore !== undefined && (!Number.isInteger(initialScore) || initialScore < 0 || initialScore > 100)) return toast("Lead score must be 0–100", undefined, "warning");
     if (dealValue && (!Number.isFinite(Number(dealValue)) || Number(dealValue) < 0)) return toast("Deal value must be non-negative",undefined,"warning");
     const cf = Object.fromEntries(Object.entries(customFields).filter(([, v]) => v !== ""));
-    const lead = addLead({ ...rest, name: d.name.trim(), company: d.company.trim(), email: d.email.trim(), initialScore, tags: tags.split(/[;,]/).map(tag => tag.trim().replace(/^#/, "")).filter(Boolean), linkedin: d.linkedin || undefined, instagram: d.instagram || undefined, website: d.website || undefined, dealValue: dealValue.trim() === "" ? undefined : Number(dealValue), customFields: Object.keys(cf).length ? cf : undefined });
+    const lead = addLead({ ...rest, name: d.name.trim(), company: d.company.trim(), email: d.email.trim(), initialScore, tags: tags.split(/[;,]/).map(tag => tag.trim().replace(/^#/, "")).filter(Boolean), linkedin: d.linkedin || undefined, instagram: d.instagram || undefined, website: d.website.trim() ? (/^https?:\/\//i.test(d.website.trim()) ? d.website.trim() : `https://${d.website.trim()}`) : undefined, dealValue: dealValue.trim() === "" ? undefined : Number(dealValue), customFields: Object.keys(cf).length ? cf : undefined });
     toast("Lead added", `${lead.company} · ${lead.status}`);
     setD(empty(me));
     onClose();
@@ -194,12 +194,13 @@ export function ImportModal({ open, onClose }: { open: boolean; onClose: () => v
     toast("Import complete", `${r.added} added · ${r.skipped} skipped`);
   };
 
-  const hasName = Object.values(map).includes("name") && Object.values(map).includes("company");
+  const targets = Object.values(map);
+  const hasName = (targets.includes("name") || targets.includes("firstName")) && targets.includes("company");
   const mappedFields = Object.values(map).filter(value => value !== "skip");
   const duplicateMapping = new Set(mappedFields).size !== mappedFields.length;
 
   return (
-    <Modal open={open} onClose={close} size="xl" title="Import leads" subtitle="Import CSV or Excel (.xlsx), or paste a CSV list. Map every lead field; duplicate email addresses and phone numbers are skipped."
+    <Modal open={open} onClose={close} size="xl" title="Import leads" subtitle="Import CSV or Excel (.xlsx), or paste a CSV list. Map every lead field; leads matching an existing email, phone number, or name and company are skipped."
       footer={result ? <Button variant="primary" onClick={close}>Done</Button> : <><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" disabled={!rows.length || !hasName || duplicateMapping || rows.length > 10000} onClick={run}>Import {rows.length.toLocaleString()} leads</Button></>}>
       {result ? (
         <div className="py-8 text-center">
@@ -250,7 +251,7 @@ export function ImportModal({ open, onClose }: { open: boolean; onClose: () => v
             </div>
             {duplicateMapping && <p role="alert" className="mt-2 text-xs text-danger">Map each destination field only once to prevent overwriting values.</p>}
             {rows.length > 10000 && <p role="alert" className="mt-2 text-xs text-danger">Split this list into batches of no more than 10,000 leads.</p>}
-            {!hasName && <p className="mt-2 text-xs text-danger">Map one column to “Name” and one to “Company”.</p>}
+            {!hasName && <p className="mt-2 text-xs text-danger">Map a column to “Name” (or “First name”) and one to “Company”.</p>}
           </div>
           <div>
             <p className="mb-2 text-xs font-medium text-fg-2">Preview (first 5 rows)</p>

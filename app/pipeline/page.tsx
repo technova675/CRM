@@ -281,6 +281,10 @@ function PipelineInner() {
   const [importOpen,setImportOpen]=useState(false);
   const [dragOver, setDragOver] = useState<DealStage | null>(null);
   const [won, setWon] = useState<{ company: string; clientId?: string } | null>(null);
+  // A deal marked Won with no value would create a ₹0 client and distort win value, forecasts and finance.
+  const [closing, setClosing] = useState<Deal | null>(null);
+  const [closeValue, setCloseValue] = useState("");
+  const [closeRetainer, setCloseRetainer] = useState("");
 
   const setOpen = (id: string | null) => router.replace(id ? `/pipeline?deal=${id}` : "/pipeline", { scroll: false });
 
@@ -309,8 +313,9 @@ function PipelineInner() {
     };
   }, [filtered]);
 
-  const handleMove = (deal: Deal, stage: DealStage) => {
+  const handleMove = (deal: Deal, stage: DealStage, confirmed = false) => {
     if (deal.stage === stage) return;
+    if (stage === "Won" && !deal.value && !confirmed) { setCloseValue(""); setCloseRetainer(""); setClosing(deal); return; }
     moveDeal(deal.id, stage);
     if (stage === "Won") {
       const clientId = useCRM.getState().deals.find((d) => d.id === deal.id)?.clientId;
@@ -319,8 +324,25 @@ function PipelineInner() {
     } else toast(`Moved to ${stage}`, deal.company, "info");
   };
 
+  const confirmWon = (skip = false) => {
+    if (!closing) return;
+    const value = skip ? 0 : Number(closeValue), retainer = skip ? 0 : Number(closeRetainer);
+    if (Number.isFinite(value) && value > 0) useCRM.getState().updateDeal(closing.id, { value });
+    handleMove({ ...closing, value: Number.isFinite(value) ? value : 0 }, "Won", true);
+    const clientId = useCRM.getState().deals.find((d) => d.id === closing.id)?.clientId;
+    if (clientId && Number.isFinite(retainer) && retainer > 0) useCRM.getState().updateClient(clientId, { retainer });
+    setClosing(null);
+  };
+
   return (
     <div className={styles.page}>
+      {closing && <Modal open onClose={() => setClosing(null)} size="sm" title={`Mark ${closing.company} as won`} subtitle="This deal has no value yet. Add it so win value, forecasts and the new client's billing are right."
+        footer={<><Button variant="ghost" onClick={() => setClosing(null)}>Cancel</Button><Button onClick={() => confirmWon(true)}>Skip, value not known</Button><Button variant="primary" disabled={!(Number(closeValue) > 0) && !(Number(closeRetainer) > 0)} onClick={() => confirmWon()}>Mark as won</Button></>}>
+        <div className="space-y-3">
+          <Field label="Deal value (₹)" hint="Total value of the contract."><Input type="number" min={0} autoFocus value={closeValue} onChange={(e) => setCloseValue(e.target.value)} /></Field>
+          <Field label="Monthly retainer (₹, optional)" hint="Saved on the new client for invoices and MRR."><Input type="number" min={0} value={closeRetainer} onChange={(e) => setCloseRetainer(e.target.value)} /></Field>
+        </div>
+      </Modal>}
       <PageHeader
         title="Pipeline"
         description="Lead → Qualified → Meeting → Proposal → Negotiation → Won / Lost. Drag a card or use its move menu; Won starts client onboarding."

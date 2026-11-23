@@ -96,7 +96,7 @@ export function clientHealth(client: Client, data: HealthData, now = Date.now())
 
   // 3. Billing (15)
   const billPts = overdueInv.length ? Math.max(0, 5 - (overdueInv.length - 1) * 5) : outstanding > 0 ? 12 : 15;
-  factors.push({ key: "billing", label: "Invoices", points: billPts, max: 15, reason: overdueInv.length ? `${overdueInv.length} overdue invoice${overdueInv.length > 1 ? "s" : ""} · ₹${outstanding.toLocaleString("en-IN")} outstanding` : outstanding > 0 ? `₹${outstanding.toLocaleString("en-IN")} pending, nothing overdue` : "All invoices paid" });
+  factors.push({ key: "billing", label: "Invoices", points: billPts, max: 15, reason: overdueInv.length ? `${overdueInv.length} overdue invoice${overdueInv.length > 1 ? "s" : ""} · ₹${outstanding.toLocaleString("en-IN")} outstanding` : outstanding > 0 ? `₹${outstanding.toLocaleString("en-IN")} pending, nothing overdue` : invoices.length ? "All invoices paid" : "No invoices yet — neutral score" });
   if (overdueInv.length) churn.push(`${overdueInv.length} overdue invoice${overdueInv.length > 1 ? "s" : ""}`);
 
   // 4. Delivery — overdue tasks (10)

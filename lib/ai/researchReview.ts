@@ -53,6 +53,8 @@ export function applyResearchReview(proposal: ProposedResearch, documents: Evide
     opportunities: proposal.opportunities.filter((_, i) => approved.has(`opportunity-${i}`)),
     recommendedServices: proposal.recommendedServices.filter((_, i) => approved.has(`service-${i}`)),
     outreachAngle: "", // The display layer builds this from the accepted company evidence.
+    // Labelled hypotheses survive only for a verified company, so nothing is pitched to a look-alike business.
+    insights: identityVerified ? proposal.insights ?? null : null,
   };
   const auditedDocuments = documents.map(document => {
     if (document.status !== "ok") return document;

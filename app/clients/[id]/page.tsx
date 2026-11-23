@@ -1,4 +1,6 @@
 "use client";
+import { clientHealth } from "@/lib/ai/client-success";
+import { useHealthData } from "@/components/clients/useClientHealth";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -539,6 +541,7 @@ export default function ClientProfilePage({ params, searchParams }: { params: Pr
   const [tab, setTab] = useState<Tab>(use(searchParams).tab === "knowledge" ? "knowledge" : "overview");
   const isClient = me.role === "client";
   const internal = !isClient && can(me.role, "clients", "write");
+  const healthData = useHealthData();
 
 
   if (!client || (isClient && me.clientId !== id))
@@ -552,6 +555,7 @@ export default function ClientProfilePage({ params, searchParams }: { params: Pr
     );
 
   const done = client.onboarding.filter((o) => o.done).length;
+  const headerHealth = clientHealth(client, healthData);
   const staffCan = (m: Parameters<typeof can>[1]) => !isClient && can(me.role, m);
   const tabs: { value: Tab; label: string }[] = [
     { value: "overview", label: "360° overview" },
@@ -586,7 +590,7 @@ export default function ClientProfilePage({ params, searchParams }: { params: Pr
         description={`${client.industry||"Industry not recorded"} · ${client.location||"Location not recorded"} · client since ${fmtShort(client.createdAt)}`}
         actions={
           <>
-            {!isClient && <StatusBadge status={client.health} />}
+            {!isClient && <StatusBadge status={headerHealth.band} />}
             <MemberAvatar id={client.accountManagerId} showName />
           </>
         }

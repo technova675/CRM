@@ -35,7 +35,7 @@ export async function proposalPDF(proposal:Proposal,agency="Adbibe"){
  paragraph(`Proposed ${proposal.durationMonths??12}-month value: INR ${proposalValue(proposal).toLocaleString("en-IN")}`,12,bold);
  heading("Deliverables");for(const item of proposal.deliverables??[])paragraph(`• ${item}`);
  heading("Proposed timeline");for(const row of proposal.timeline??[]){ensure(55);paragraph(`${row.phase} · ${row.weeks}`,11,bold);paragraph(row.detail);}
- heading("Commercial terms");for(const term of proposal.terms?.length?proposal.terms:["Commercial terms, taxes, payment schedule and exclusions must be confirmed before acceptance."])paragraph(`• ${term}`);
+ heading("Commercial terms");for(const term of proposal.terms?.length?proposal.terms:["All fees are exclusive of GST, charged at 18% on each invoice.","Media spend is paid directly by the client to the ad platforms and is not included in these fees.","Payment schedule and exclusions to be confirmed before acceptance."])paragraph(`• ${term}`);
  paragraph("Scope and dates are proposed and depend on agreed access, approvals and delivery requirements. This document does not constitute an electronic signature.",9);
  const pages=document.getPages();pages.forEach((p,i)=>{p.drawLine({start:{x:margin,y:42},end:{x:width-margin,y:42},color:rgb(.83,.83,.88),thickness:.5});p.drawText(`${agency} · ${i+1} / ${pages.length}`,{x:margin,y:27,size:8,font:regular,color:rgb(.4,.42,.48)});});
  document.setTitle(proposal.title);document.setAuthor(agency);return document.save();

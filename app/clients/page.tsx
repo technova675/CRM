@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Building2, FileBarChart, LayoutGrid, List, Megaphone, Plus, TrendingUp, Upload, Wallet } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
@@ -87,6 +87,10 @@ function Renewal({ days, date }: { days: number; date: string }) {
 }
 
 export default function ClientsPage() {
+  return <Suspense><ClientsInner /></Suspense>;
+}
+
+function ClientsInner() {
   const clients = useCRM((s) => s.clients);
   const campaigns = useCRM((s) => s.campaigns);
   const invoices = useCRM((s) => s.invoices);
@@ -97,7 +101,9 @@ export default function ClientsPage() {
   const [health, setHealth] = useState("all");
   const [service, setService] = useState<Service | "all">("all");
   const [view, setView] = useState<"grid" | "list">("grid");
-  const [adding,setAdding]=useState(false);
+  const params = useSearchParams();
+  // Other pages link here with ?new=1 to open the Add client form directly.
+  const [adding,setAdding]=useState(()=>params.get("new")==="1");
   const [importing,setImporting]=useState(false);
 
   useEffect(() => {
@@ -107,7 +113,7 @@ export default function ClientsPage() {
   const rows = useMemo<Row[]>(
     () =>
       clients
-        .filter((c) => (health === "all" || c.health === health) && (service === "all" || c.services.includes(service)) && `${c.company} ${c.industry} ${c.location}`.toLowerCase().includes(q.toLowerCase()))
+        .filter((c) => (service === "all" || c.services.includes(service)) && `${c.company} ${c.industry} ${c.location}`.toLowerCase().includes(q.toLowerCase()))
         .map((c) => {
           const inv = invoices.filter((i) => i.clientId === c.id && i.status !== "Paid");
           return {
@@ -119,7 +125,9 @@ export default function ClientsPage() {
             health: clientHealth(c, healthData),
             renewalDays: daysBetween(c.contractEnd),
           };
-        }),
+        })
+        // Health shown and filtered is the computed score, not the "Healthy" every client is created with.
+        .filter((row) => health === "all" || row.health.band === health),
     [clients, campaigns, invoices, q, health, service, healthData],
   );
 
@@ -127,11 +135,11 @@ export default function ClientsPage() {
     () => ({
       mrr: sum(clients.map((c) => c.retainer)),
       onboarding: clients.filter((c) => c.onboarding.some((o) => !o.done)).length,
-      atRisk: clients.filter((c) => c.health !== "Healthy").length,
+      atRisk: clients.filter((c) => clientHealth(c, healthData).band !== "Healthy").length,
       adSpend: sum(clients.map((c) => c.monthlyAdSpend ?? 0)),
       outstanding: sum(invoices.filter((i) => i.status !== "Paid").map((i) => i.amount - i.paid)),
     }),
-    [clients, invoices],
+    [clients, invoices, healthData],
   );
 
   if (me.role === "client") return null;
@@ -177,7 +185,7 @@ export default function ClientsPage() {
 
       {rows.length === 0 ? (
         <Card>
-          <EmptyState icon={<Building2 className="size-5" />} title="No clients match" description={clients.length?"Try clearing your filters.":"Add a client here or move a sales deal to Won."} action={!clients.length&&can(me.role,"clients","write")?<Button onClick={()=>setAdding(true)}>Add client</Button>:undefined}/>
+          <EmptyState icon={<Building2 className="size-5" />} title={clients.length?"No clients match":"No clients yet"} description={clients.length?"Try clearing your filters.":"Add a client here or move a sales deal to Won."} action={!clients.length&&can(me.role,"clients","write")?<Button onClick={()=>setAdding(true)}>Add client</Button>:undefined}/>
         </Card>
       ) : view === "grid" ? (
         <div data-tour="clients-list" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -193,7 +201,7 @@ export default function ClientsPage() {
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    <StatusBadge status={c.health} />
+                    <StatusBadge status={h.band} />
                     <HealthScore h={h} />
                   </div>
                 </div>
@@ -270,7 +278,7 @@ export default function ClientsPage() {
                     <p className="text-xs text-fg-3">{c.industry}</p>
                   </Td>
                   <Td>
-                    <StatusBadge status={c.health} />
+                    <StatusBadge status={h.band} />
                   </Td>
                   <Td>
                     <HealthScore h={h} />

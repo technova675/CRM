@@ -10,15 +10,17 @@ const HOOKS: Record<Service, string> = {
   "AI Automation": "a review of repetitive sales and marketing work", "Video Production": "a video-content and audience discussion", "Brand Strategy": "a positioning and customer-message discussion", Consulting: "a short discovery conversation",
 };
 
-export function personalizeFirstMessage(lead: Lead, channel: Channel, service?: Service): { body: string; angle: string; service: Service } {
+/** signature: the sender and agency lines; without one the message ends with a neutral sign-off and the sender's own mail signature. */
+export function personalizeFirstMessage(lead: Lead, channel: Channel, service?: Service, signature?: string): { body: string; angle: string; service: Service } {
   const services=lead.research?.recommendedServices?.length?lead.research.recommendedServices:recommendServices(lead);
   const svc=service??services[0]??"Consulting";
   const angle=lead.research?.outreachAngle??outreachAngle(lead,services);
   const fact=lead.research?.mode?lead.research.sections.flatMap(section=>section.findings).find(finding=>finding.kind==="verified"&&finding.evidenceQuote&&/^https?:\/\//i.test(finding.source??"")):undefined;
-  const context=fact?`A public source includes “${fact.evidenceQuote}” (${fact.source}). `:"";
-  const question=`Would ${HOOKS[svc]} be useful for ${lead.company}'s current priorities?`;
+  const quote=fact?.evidenceQuote&&fact.evidenceQuote.length>140?`${fact.evidenceQuote.slice(0,fact.evidenceQuote.lastIndexOf(" ",130))}…`:fact?.evidenceQuote;
+  const context=fact?`I noticed this on your website: “${quote}” `:"";
+  const question=`Would ${HOOKS[svc]} be useful for ${lead.company}${/s$/i.test(lead.company)?"'":"'s"} current priorities?`;
   const body=[`Hi ${firstName(lead.name)},`,`${context}${question}`,"If this is relevant, I'd be glad to compare notes and understand your goals before suggesting any work."];
-  if(channel==="Email")body.push("Best,\nTeam Adbibe\n\nReply stop and we will not follow up.");
+  if(channel==="Email")body.push(`Best regards${signature?`,\n${signature}`:","}\n\nReply stop and we will not follow up.`);
   return {body:body.join(channel==="Email"?"\n\n":" "),angle,service:svc};
 }
 

@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {SERVICES} from "../types.ts";
+import {LEAD_INDUSTRIES,SERVICES} from "../types.ts";
 import type {EvidenceDocument} from "./researchEvidence.ts";
 
 export function researchFindingSchemaFor(documents:EvidenceDocument[]){
@@ -19,5 +19,15 @@ export function researchSchemaFor(documents:EvidenceDocument[]){
     problems:z.array(finding).max(4),opportunities:z.array(finding).max(4),
     recommendedServices:z.array(z.object({service:z.enum(SERVICES),reason:z.string().max(1000),sourceId:finding.shape.sourceId,quote:finding.shape.quote})).max(4),
     outreachAngle:z.string().max(1500),
+    // Sales hypotheses, separate from quoted findings: no quote required, always shown labelled as inference.
+    insights:z.object({
+      industry:z.enum(LEAD_INDUSTRIES).describe("Closest industry from the list."),
+      whatTheyDo:z.string().max(300).describe("One plain sentence: what the company sells and to whom."),
+      likelyGaps:z.array(z.string().max(300)).max(3).describe("Marketing gaps that are likely for this kind of business, worded with may/likely."),
+      opportunities:z.array(z.string().max(300)).max(3).describe("Concrete marketing opportunities or experiments."),
+      serviceFit:z.array(z.object({service:z.enum(SERVICES),why:z.string().max(300)})).max(3),
+      outreachAngle:z.string().max(600).describe("A specific, non-generic opening line a salesperson could send."),
+      questions:z.array(z.string().max(200)).max(3).describe("Discovery questions for the first call."),
+    }).describe("Always fill this. It is shown labelled as AI inference and discarded by the application if identity is not verified."),
   });
 }

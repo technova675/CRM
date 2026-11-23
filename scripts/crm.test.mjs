@@ -23,6 +23,14 @@ test("duplicate detection normalizes emails and phone punctuation without mergin
   assert.equal(duplicateLead({email:"",phone:"+19876543210"},records),false);
   assert.equal(duplicateLead({email:"",phone:""},records),false);
 });
+test("imports split first and last names and matches local Indian phone formats",()=>{
+  const lead=importedLead({firstName:" Priya ",lastName:"Nair",company:"Glowleaf"},"owner",[]);
+  assert.equal(lead.name,"Priya Nair");
+  assert.equal(importedLead({lastName:"Nair",company:"Glowleaf"},"owner",[]).name,"Nair");
+  assert.throws(()=>importedLead({company:"Glowleaf"},"owner",[]),/Name and company/);
+  const records=[{email:"",phone:"+91 98450 67890"}];
+  for(const phone of ["098450 67890","9845067890","0091 98450 67890"])assert.equal(duplicateLead({email:"",phone},records),true,phone);
+});
 const conflictMigration=await readFile(new URL("../supabase/migrations/202611010006_crm_conflict_result.sql",import.meta.url),"utf8");
 const pg=new PGlite();const migration=await readFile(new URL("../supabase/migrations/202611010005_crm_library.sql",import.meta.url),"utf8");
 before(async()=>{await pg.exec("create role anon;create role authenticated;create role service_role bypassrls;grant usage on schema public to service_role;create schema auth;create table auth.users(id uuid primary key);");await pg.exec(migration);await pg.exec(conflictMigration);});

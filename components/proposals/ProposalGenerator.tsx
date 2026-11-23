@@ -65,6 +65,8 @@ export function ProposalGenerator({ open, onClose, dealId: initialDeal, leadId: 
   const [updateValue, setUpdateValue] = useState(true);
   const inputKey=JSON.stringify({target,notes,services,strategy:strategy?.summary,strategyNotes,deliverableRequirements,timelineRequirements,priceBook,durationMonths});
   const stale=!!draft&&draftKey!==inputKey;
+  // Say why saving is blocked; the confirmation checkbox sits below the fold and a silent disabled button looks broken.
+  const saveBlocker=!draft?"":stale?"Inputs changed since this draft. Generate again before saving.":!draft.title.trim()?"Add a proposal title.":!draft.lines.length?"Add at least one investment line.":draft.lines.some(l=>!l.description.trim()||!Number.isFinite(l.price)||l.price<0)?"Every line needs a description and a price of zero or more.":!expires?"Choose a valid-until date.":!pricingChecked?"Tick “I have checked the pricing, scope and timeline” below to save.":"";
 
   const setPrice = (s: Service, patch: Partial<PriceBookEntry>) => {
     const next = priceBook.map((p) => (p.service === s ? { ...p, ...patch } : p));
@@ -126,7 +128,7 @@ export function ProposalGenerator({ open, onClose, dealId: initialDeal, leadId: 
 
   return (
     <Modal open={open} onClose={onClose} size="xl" title={<span className="flex items-center gap-2">AI proposal generator <AIBadge>Sales agent</AIBadge></span>} subtitle="Built from the client record, discovery notes, selected services, strategy and your price book."
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button>{draft && <Button variant="primary" disabled={stale||!pricingChecked||!draft.title.trim()||!expires||!draft.lines.length||draft.lines.some(l=>!l.description.trim()||!Number.isFinite(l.price)||l.price<0)} onClick={save}>Save draft proposal</Button>}</>}>
+      footer={<>{draft && saveBlocker && <span className="mr-auto text-xs text-warning" role="status">{saveBlocker}</span>}<Button variant="ghost" onClick={onClose}>Cancel</Button>{draft && <Button variant="primary" disabled={stale||!pricingChecked||!draft.title.trim()||!expires||!draft.lines.length||draft.lines.some(l=>!l.description.trim()||!Number.isFinite(l.price)||l.price<0)} onClick={save}>Save draft proposal</Button>}</>}>
       <div className={`grid gap-5 lg:grid-cols-2 ${styles.generator}`}>
         {/* Inputs */}
         <div className="space-y-3">

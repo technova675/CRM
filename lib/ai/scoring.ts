@@ -14,7 +14,7 @@ export const DEFAULT_CRITERIA: ScoringCriterion[] = [
   { key: "website", label: "Website quality", weight: 10, enabled: true },
   { key: "social", label: "Social presence", weight: 10, enabled: true },
   { key: "budget", label: "Budget signals", weight: 10, enabled: true },
-  { key: "fit", label: "Fit with Adbibe services", weight: 10, enabled: true },
+  { key: "fit", label: "Fit with your services", weight: 10, enabled: true },
 ];
 
 type Eval = (lead: Lead) => { ratio: number; reason: string };
@@ -26,7 +26,7 @@ const evaluators: Record<string, Eval> = {
       : { ratio: 0.4, reason: `Contact title "${l.jobTitle}" may not own budget` },
   industry: (l) =>
     HIGH_FIT_INDUSTRIES.includes(l.industry)
-      ? { ratio: 1, reason: `${l.industry} is a core Adbibe vertical` }
+      ? { ratio: 1, reason: `${l.industry} is a core vertical for your services` }
       : MID_FIT_INDUSTRIES.includes(l.industry)
         ? { ratio: 0.6, reason: `${l.industry} is a secondary vertical` }
         : { ratio: 0.3, reason: `${l.industry || "Unknown industry"} is outside focus verticals` },
@@ -51,9 +51,10 @@ const evaluators: Record<string, Eval> = {
       : { ratio: 0.5, reason: "Ad dependency for this industry is moderate (assumption)" },
   website: (l) =>
     l.website
-      ? l.website.startsWith("https")
-        ? { ratio: 0.8, reason: "Has a secure website on record (not yet audited)" }
-        : { ratio: 0.5, reason: "Website on record is not HTTPS" }
+      // A bare domain ("brand.com") says nothing about HTTPS; only an explicit http:// link is insecure.
+      ? !/^http:\/\//i.test(l.website)
+        ? { ratio: 0.8, reason: "Website on record (not yet audited)" }
+        : { ratio: 0.5, reason: "Website on record uses http, not https" }
       : { ratio: 0.1, reason: "No website on record" },
   social: (l) =>
     l.instagram && l.linkedin
@@ -64,12 +65,14 @@ const evaluators: Record<string, Eval> = {
   budget: (l) => {
     const big = ["51-200", "201-1000", "1000+"].includes(l.companySize);
     const senior = SENIOR_TITLES.test(l.jobTitle);
-    const ratio = (big ? 0.6 : 0.2) + (senior ? 0.4 : 0);
-    return { ratio, reason: `${big ? "Company size" : "Small size"}${senior ? " + senior contact" : ""} suggest ${ratio > 0.7 ? "healthy" : "limited"} budget` };
+    const unknown = !l.companySize || l.companySize === "Unknown";
+    const ratio = (big ? 0.6 : unknown ? 0.3 : 0.2) + (senior ? 0.4 : 0);
+    const basis = unknown ? "Company size unknown" : big ? "Company size" : "Small company size";
+    return { ratio, reason: `${basis}${senior ? " + senior contact" : ""}: ${unknown && !senior ? "budget not known yet" : `${ratio > 0.7 ? "healthy" : "limited"} budget likely`}` };
   },
   fit: (l) =>
     l.services.length >= 2
-      ? { ratio: 1, reason: `Needs ${l.services.length} Adbibe services (${l.services.slice(0, 3).join(", ")})` }
+      ? { ratio: 1, reason: `Needs ${l.services.length} of your services (${l.services.slice(0, 3).join(", ")})` }
       : l.services.length === 1
         ? { ratio: 0.7, reason: `Needs ${l.services[0]}` }
         : { ratio: 0.3, reason: "No services identified yet" },

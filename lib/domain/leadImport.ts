@@ -2,6 +2,9 @@ import { LEAD_SOURCES, LEAD_STATUSES, SERVICES, type CompanySize, type Lead } fr
 
 export const LEAD_IMPORT_FIELDS = [
   {key:"name",label:"Name",aliases:["name","full name","contact name","lead name"]},
+  // CRM and prospecting exports usually split the name; the two parts are joined into the lead's name.
+  {key:"firstName",label:"First name",aliases:["first name","firstname","given name","fname"]},
+  {key:"lastName",label:"Last name",aliases:["last name","lastname","surname","family name","lname"]},
   {key:"company",label:"Company",aliases:["company","company name","brand","organization","organisation","business"]},
   {key:"website",label:"Website",aliases:["website","company website","url","domain"]},
   {key:"email",label:"Email",aliases:["email","email address","e mail"]},
@@ -25,7 +28,16 @@ export const LEAD_IMPORT_FIELDS = [
 ] as const;
 export const normalizeHeader=(value:string)=>value.trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
 export const emailKey=(value:string)=>value.trim().toLowerCase();
-export const phoneKey=(value:string)=>{const digits=value.replace(/\D/g,"");return digits.length>=8?digits:"";};
+/**
+ * Comparable phone number. Local Indian forms (98450 12345, 098450 12345) become +91 so they match the international
+ * form, while numbers with another country code (+1 98765 43210) stay distinct.
+ */
+export const phoneKey=(value:string)=>{
+  let digits=value.replace(/\D/g,"").replace(/^00/,"");
+  if(digits.length===11&&digits.startsWith("0"))digits=digits.slice(1);
+  if(digits.length===10)digits="91"+digits;
+  return digits.length>=8?digits:"";
+};
 
 export function importCompanySize(value:string):CompanySize{
   const sizes:CompanySize[]=["Unknown","1-10","11-50","51-200","201-1000","1000+"];
@@ -40,7 +52,8 @@ export function importedLead(row:Record<string,string>,ownerId:string,team:{id:s
   if(!status)throw new Error(`Unknown status: ${row.status}`);
   const source=LEAD_SOURCES.find(source=>source.toLowerCase()===(row.source||"Cold List").trim().toLowerCase());
   if(!source)throw new Error(`Unknown lead source: ${row.source}`);
-  if(!row.name?.trim()||!row.company?.trim())throw new Error("Name and company are required");
+  const name=row.name?.trim()||[row.firstName,row.lastName].map(part=>part?.trim()).filter(Boolean).join(" ");
+  if(!name||!row.company?.trim())throw new Error("Name and company are required");
   const services=(row.services||"").split(/[;,|]/).map(value=>value.trim()).filter(Boolean).map(value=>{
     const service=SERVICES.find(service=>service.toLowerCase()===value.toLowerCase());if(!service)throw new Error(`Unknown service: ${value}`);return service;
   });
@@ -51,7 +64,7 @@ export function importedLead(row:Record<string,string>,ownerId:string,team:{id:s
   const fields=Object.fromEntries(Object.entries(row).filter(([key])=>key.startsWith("custom:")).map(([key,value])=>[key.slice(7),value]));
   const email=row.email?.trim()||"";if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error("Invalid email address");
   const website=row.website?.trim();if(website&&!/^https?:\/\//i.test(website)&&/^[a-z][a-z\d+.-]*:/i.test(website))throw new Error("Website must use http or https");
-  return {name:row.name.trim(),company:row.company.trim(),jobTitle:row.jobTitle||"",email,phone:row.phone||"",website:website?(/^https?:\/\//i.test(website)?website:`https://${website}`):undefined,
+  return {name,company:row.company.trim(),jobTitle:row.jobTitle||"",email,phone:row.phone||"",website:website?(/^https?:\/\//i.test(website)?website:`https://${website}`):undefined,
     linkedin:row.linkedin||undefined,instagram:row.instagram||undefined,industry:row.industry||"Other",location:row.location||"",companySize:importCompanySize(row.companySize||""),source,services:[...new Set(services)],ownerId:assigned,status,
     tags:[...new Set(["imported",...(row.tags||"").split(/[;,|]/).map(value=>value.trim().replace(/^#/,"")).filter(Boolean)])],notes:row.notes||"",communicationHistory:row.communicationHistory||undefined,
     initialScore:score,dealValue:number(row.dealValue,"Deal value"),customFields:fields,
