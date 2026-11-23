@@ -15,7 +15,7 @@ export function researchModelConfig(env: Record<string, string | undefined>, inh
   const provider = requested as ResearchProvider || inherited.provider;
   const defaults: Record<ResearchProvider, string> = {
     groq: env.GROQ_MODEL || "openai/gpt-oss-120b",
-    openrouter: env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free",
+    openrouter: env.OPENROUTER_MODEL || "nvidia/nemotron-3.5-super-vl:free",
     gateway: env.AI_MODEL || "anthropic/claude-sonnet-5",
   };
   const configured: Record<ResearchProvider, boolean> = {

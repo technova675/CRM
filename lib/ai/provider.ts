@@ -19,7 +19,7 @@ const hasKey: Record<Provider, boolean> = {
 
 const MODEL_IDS: Record<Provider, string> = {
   groq: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-  openrouter: process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free",
+  openrouter: process.env.OPENROUTER_MODEL || "nvidia/nemotron-3.5-super-vl:free",
   gateway: process.env.AI_MODEL || "anthropic/claude-sonnet-5",
 };
 
@@ -41,6 +41,8 @@ export async function withModelFallback<T>(owner:string,run: (model: LanguageMod
   try {
     return await run(AI_MODEL, `${AI_PROVIDER} · ${AI_MODEL_ID}`);
   } catch (e) {
+    // The reason the main model failed (often a free-tier rate limit) would otherwise be hidden by the fallback's own result.
+    console.error("[ai] primary model failed:", e instanceof Error ? e.message.slice(0, 300) : e);
     if (!FALLBACK) throw e;
     return run(modelFor(FALLBACK), `${FALLBACK} · ${MODEL_IDS[FALLBACK]}`);
   }
