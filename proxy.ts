@@ -6,7 +6,7 @@ import { resilientFetch } from "@/lib/auth/resilientFetch";
 
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
-  if (path === "/staff/join" || path === "/api/staff/join" || path === "/api/workspace/summary" || path === "/login" || path.startsWith("/auth/") || path === "/api/auth" || path === "/api/outreach/webhook") return NextResponse.next();
+  if (path === "/staff/join" || path === "/api/staff/join" || path === "/api/workspace/summary" || path === "/login" || path.startsWith("/auth/") || path === "/api/auth" || path === "/api/outreach/webhook" || path === "/api/automations/tick" || path === "/api/automations/cron") return NextResponse.next();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return new NextResponse("Supabase authentication is not configured.", { status: 503 });
@@ -37,7 +37,9 @@ export async function proxy(req: NextRequest) {
     const staff=staffOwner(data.claims.app_metadata);
     const staffPage=path==="/staff";
     const staffApi=path==="/api/staff/workspace";
-    if(staff&&!staffPage&&!staffApi || !staff&&(staffPage||staffApi)){
+    // Every signed-in session sends a presence heartbeat; staff are blocked from it otherwise and always show as offline.
+    const shared=path==="/api/presence";
+    if(!shared&&(staff&&!staffPage&&!staffApi || !staff&&(staffPage||staffApi))){
       const denied=path.startsWith("/api/")?NextResponse.json({error:"This session cannot access that workspace."},{status:403}):
         NextResponse.redirect(new URL(staff?"/staff":"/dashboard",requestOrigin(req)));
       response.cookies.getAll().forEach(cookie=>denied.cookies.set(cookie));

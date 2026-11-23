@@ -54,13 +54,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await flushCRMChanges();
     const response = await fetch("/api/auth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "signout" }) });
     if (!response.ok) throw new Error("Could not sign out. Please retry.");
+    // Changes were saved to the account above, so the browser copies are no longer needed.
+    // Removing them keeps the next person on a shared computer from reading this workspace.
+    try { for (const key of Object.keys(localStorage)) if (key.startsWith("adbibe-") && user && key.endsWith(":" + user.id)) localStorage.removeItem(key); } catch { /* Storage can be blocked. */ }
     setUser(null);
     notifyAuthChange();
-    router.replace("/login");
-    router.refresh();
-  }, [router]);
+    // A full page load discards every in-memory store, so the next account starts clean.
+    window.location.replace("/login");
+  }, [user]);
   return <AuthContext.Provider value={{ user, refresh, signOut }}>
     {user && <Heartbeat path={path} />}
-    {joinPage || path === "/login" ? children : error ? <div className="grid min-h-dvh place-items-center p-6"><div className="max-w-md space-y-4 rounded-2xl border border-border bg-surface p-8"><p role="alert">{error}</p><button className="rounded-lg bg-fg px-4 py-2 text-bg" onClick={() => window.location.reload()}>Retry connection</button></div></div> : loading || !user ? <div role="status" className="grid min-h-dvh place-items-center text-sm text-fg-2"><div className="flex items-center gap-2.5"><Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />Verifying your account…</div></div> : user.kind === "staff" ? (staffPage?children:null) : <CRMCloudProvider key={user.id} account={user}><AppShell>{children}</AppShell></CRMCloudProvider>}
+    {joinPage || path === "/login" || path === "/reset-password" ? children : error ? <div className="grid min-h-dvh place-items-center p-6"><div className="max-w-md space-y-4 rounded-2xl border border-border bg-surface p-8"><p role="alert">{error}</p><button className="rounded-lg bg-fg px-4 py-2 text-bg" onClick={() => window.location.reload()}>Retry connection</button></div></div> : loading || !user ? <div role="status" className="grid min-h-dvh place-items-center text-sm text-fg-2"><div className="flex items-center gap-2.5"><Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />Verifying your account…</div></div> : user.kind === "staff" ? (staffPage?children:null) : <CRMCloudProvider key={user.id} account={user}><AppShell>{children}</AppShell></CRMCloudProvider>}
   </AuthContext.Provider>;
 }

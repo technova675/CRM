@@ -18,6 +18,8 @@ const input = z.discriminatedUnion("action", [
   z.object({ action: z.literal("signin"), email: z.string().email().max(254), password: z.string().min(1).max(128) }),
   z.object({ action: z.literal("signup"), email: z.string().email().max(254), password: z.string().min(8).max(128) }),
   z.object({ action: z.literal("signout") }),
+  z.object({ action: z.literal("reset"), email: z.string().email().max(254) }),
+  z.object({ action: z.literal("update-password"), password: z.string().min(8).max(128) }),
   z.object({action:z.literal("google"),next:z.string().max(1024).optional()}),
 ]);
 
@@ -38,9 +40,29 @@ export async function POST(req: Request) {
     }
     text += decoder.decode();
     const parsed = input.safeParse(JSON.parse(text));
-    if (!parsed.success) return Response.json({ error: "Enter a valid email and a password of 8–128 characters." }, { status: 400 });
+    if (!parsed.success) {
+      const action = (JSON.parse(text) as { action?: unknown })?.action;
+      const message = action === "signin" ? "Enter your email address and password." : action === "reset" ? "Enter a valid email address." : "Enter a valid email and a password of 8–128 characters.";
+      return Response.json({ error: message }, { status: 400 });
+    }
     const client = await authClient(req);
     const data = parsed.data;
+    if (data.action === "reset") {
+      const redirectTo = new URL("/auth/callback", req.headers.get("origin") || requestOrigin(req));
+      redirectTo.searchParams.set("next", "/reset-password");
+      const { error } = await client.auth.resetPasswordForEmail(data.email, { redirectTo: redirectTo.href });
+      if (error?.status === 429 || error?.code === "over_email_send_rate_limit") return Response.json({ error: "Too many reset emails were requested. Wait a few minutes and try again." }, { status: 429 });
+      if (error && (error.name === "AuthRetryableFetchError" || (error.status ?? 0) >= 500)) return Response.json({ error: "Could not send the reset email right now. Please try again in a moment." }, { status: 503 });
+      // Same answer whether or not the email has an account, so the form cannot be used to discover customers.
+      return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    }
+    if (data.action === "update-password") {
+      const { data: claims } = await client.auth.getClaims();
+      if (!claims?.claims?.sub) return Response.json({ error: "Your reset link has expired. Request a new one from the sign-in page." }, { status: 401 });
+      const { error } = await client.auth.updateUser({ password: data.password });
+      if (error) return Response.json({ error: error.code === "same_password" ? "Choose a password different from your current one." : error.code === "weak_password" ? "That password is too weak. Use a longer one with letters and numbers." : "Could not update the password. Request a new reset link and try again." }, { status: 400 });
+      return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (data.action === "signout") {
       const { error } = await client.auth.signOut({ scope: "local" });
       if (error) return Response.json({ error: "Could not sign out. Please retry." }, { status: 503 });
@@ -67,7 +89,11 @@ export async function POST(req: Request) {
     }
     const origin = req.headers.get("origin") || requestOrigin(req);
     const { data: result, error } = await client.auth.signUp({ email: data.email, password: data.password, options: { emailRedirectTo: `${origin}/auth/callback` } });
-    if (error) return Response.json({ error: error.code === "email_address_not_authorized" ? "Supabase email delivery is restricted for this address. Configure custom SMTP in your Supabase project, then try again." : error.code === "over_email_send_rate_limit" ? "Email delivery is temporarily rate limited. Wait before trying again." : "Could not create the account. Check the password requirements and Supabase email delivery settings." }, { status: error.status === 429 ? 429 : 400 });
+    if (error) {
+      // Provider details go to the server log for the operator, never to the person signing up.
+      if (error.code === "email_address_not_authorized") console.error("Sign-up email blocked: configure custom SMTP in Supabase Auth settings.");
+      return Response.json({ error: error.code === "over_email_send_rate_limit" || error.status === 429 ? "Too many sign-up attempts right now. Wait a few minutes and try again." : error.code === "weak_password" ? "That password is too weak. Use at least 8 characters with letters and numbers." : error.code === "email_address_not_authorized" ? "We couldn't send a confirmation email to this address right now. Please try again later or contact support." : "Could not create the account. Please try again." }, { status: error.status === 429 ? 429 : 400 });
+    }
     return Response.json({ ok: true, confirmationRequired: !result.session }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof SyntaxError) return Response.json({ error: "Invalid request" }, { status: 400 });

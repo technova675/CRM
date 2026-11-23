@@ -15,7 +15,7 @@ export const compactMoney = (n: number) => {
   if (a >= 1e12) return `₹${trim(n / 1e12, 2)}L Cr`;
   if (a >= 1e7) return `₹${trim(n / 1e7, a >= 1e9 ? 0 : 1)}Cr`;
   if (a >= 1e5) return `₹${trim(n / 1e5, 1)}L`;
-  if (a >= 1e3) return `₹${trim(n / 1e3, 0)}K`;
+  if (a >= 1e3) return `₹${trim(n / 1e3, a < 1e4 ? 2 : 1)}K`; // ₹42.5K, not a rounded-up ₹43K
   return `₹${Math.round(n)}`;
 };
 export const compact = (n: number) =>
@@ -67,7 +67,9 @@ export const initials = (name: string) =>
     .map((p) => p[0]!.toUpperCase())
     .join("");
 
-export const firstName = (name: string) => name.split(/\s+/)[0] ?? name;
+// A "name" that is really a role ("Marketing Head", "Founder") or blank gets a neutral greeting instead of "Hi Marketing".
+const ROLE_WORDS = /\b(head|manager|team|founder|owner|director|marketing|sales|admin|info|contact|hr|ceo|cmo|cto)\b/i;
+export const firstName = (name: string) => { const trimmed = name.trim(); if (!trimmed || ROLE_WORDS.test(trimmed)) return "there"; return trimmed.split(/\s+/)[0] ?? trimmed; };
 
 export const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 

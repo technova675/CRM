@@ -23,7 +23,7 @@ async function request(init?:RequestInit){
   const response=await fetch("/api/crm/library",{cache:"no-store",...init,signal:AbortSignal.timeout(30000)});
   const data=await response.json();
   if(!response.ok)throw Object.assign(new Error([data.error??"Could not sync CRM",...(data.issues??[])].join(" · ")),{status:response.status});
-  return data as {revision:number;data:CRMLibrary;notificationFeed?:import("@/lib/types").Notification[]};
+  return data as {revision:number;data:CRMLibrary;notificationFeed?:import("@/lib/types").Notification[];agencyName?:string};
 }
 
 export function CRMCloudProvider({account,children}:{account:{id:string;email:string};children:ReactNode}){
@@ -95,10 +95,14 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
         }catch{/* Private browsing can block persistence. */}
         useCRM.persist.setOptions({name:localKey});
         await useCRM.persist.rehydrate();
+        // Without a local copy for this account, memory may still hold another account's data: drop it.
+        if(useCRM.getState().currentUserId!==account.id)useCRM.setState(useCRM.getInitialState(),true);
+        // Back up only data this browser saved for this same account.
+        if(useCRM.getState().currentUserId===account.id){
         try {
           const saved=useCRM.getState();
           const key="adbibe-expense-backup-v1:"+account.id;
-          if(saved.currentUserId===account.id&&saved.expenses.length&&!localStorage.getItem(key))
+          if(saved.expenses.length&&!localStorage.getItem(key))
             localStorage.setItem(key,JSON.stringify(saved.expenses));
         } catch {}
         try{if(!localStorage.getItem("adbibe-creative-browser-backup-v1:"+account.id))localStorage.setItem("adbibe-creative-browser-backup-v1:"+account.id,JSON.stringify({concepts:useCRM.getState().concepts,creatives:useCRM.getState().creatives}));}catch{}
@@ -107,9 +111,10 @@ export function CRMCloudProvider({account,children}:{account:{id:string;email:st
         try{if(!localStorage.getItem("adbibe-pipeline-onboarding-browser-backup-v1:"+account.id))localStorage.setItem("adbibe-pipeline-onboarding-browser-backup-v1:"+account.id,JSON.stringify(snapshot(useCRM.getState())));}catch{}
         // Preserve pre-cloud browser data for recovery; never silently attach it to an account.
         try{if(!localStorage.getItem("adbibe-crm-browser-backup-v1:"+account.id))localStorage.setItem("adbibe-crm-browser-backup-v1:"+account.id,JSON.stringify(snapshot(useCRM.getState())));}catch{}
+        }
         const result=await request();if(!live)return;
         runtime.current={revision:result.revision,json:JSON.stringify(result.data),applying:false,dirty:false,conflict:false};
-        apply(result.data,result.notificationFeed);runtime.current.json=JSON.stringify(snapshot(useCRM.getState()));setReady(true);setError("");setDirty(false);setConflict(false);
+        apply(result.data,result.notificationFeed);if(result.agencyName)useCRM.setState(state=>({settings:{...state.settings,agencyName:result.agencyName!}}));runtime.current.json=JSON.stringify(snapshot(useCRM.getState()));setReady(true);setError("");setDirty(false);setConflict(false);
         unsubscribe=useCRM.subscribe((state,previous)=>{
           const rt=runtime.current;if(!rt||rt.applying)return;
           if(keys.every(key=>state[key]===previous[key])&&settingsKeys.every(key=>state.settings[key]===previous.settings[key])&&state.settings.leadCustomFields===previous.settings.leadCustomFields)return;

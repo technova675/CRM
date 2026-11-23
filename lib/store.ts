@@ -184,7 +184,7 @@ export interface CRMState extends SeedData {
 
   // Payments
   addInvoice: (i: Omit<Invoice, "id" | "number" | "paid" | "status" | "remindersSent">) => void;
-  recordPayment: (id: string, amount: number, receivedOn?:string, reference?:string) => boolean;
+  recordPayment: (id: string, amount: number, receivedOn?:string, reference?:string, tds?:number) => boolean;
   refreshOverdue: () => void;
 
   // Influencers
@@ -367,17 +367,20 @@ export const useCRM = create<CRMState>()(
         importLeads: (rows) => {
           const existing = new Set(get().leads.map((l) => emailKey(l.email)).filter(Boolean));
           const phones = new Set(get().leads.map((l) => phoneKey(l.phone)).filter(Boolean));
+          // The same person at the same company is a duplicate even when the saved copy has no email or phone.
+          const person = (l: { name: string; company: string }) => `${l.name.trim().toLowerCase().replace(/\s+/g, " ")}|${l.company.trim().toLowerCase().replace(/\s+/g, " ")}`;
+          const people = new Set(get().leads.map(person));
           const criteria = get().settings.scoringCriteria;
           const fresh: Lead[] = [];
           let skipped = 0;
           for (const r of rows) {
             const key = emailKey(r.email || "");
             const phone = phoneKey(r.phone || "");
-            if (!r.name.trim() || !r.company.trim() || (key && existing.has(key)) || (phone && phones.has(phone))) {
+            if (!r.name.trim() || !r.company.trim() || (key && existing.has(key)) || (phone && phones.has(phone)) || people.has(person(r))) {
               skipped++;
               continue;
             }
-            if (key) existing.add(key); if (phone) phones.add(phone);
+            if (key) existing.add(key); if (phone) phones.add(phone); people.add(person(r));
             const { initialScore, ...fields } = r;
             const lead: Lead = { tags: ["imported"], notes: "", services: [], ...fields, id: uid("l"), createdAt: now(), status: r.status ?? "New" };
             lead.score = scoreLead(lead, criteria);
@@ -451,6 +454,8 @@ export const useCRM = create<CRMState>()(
             leads: s.leads.map((l) => {
               if (l.id !== id) return l;
               const next = { ...l, research };
+              // Fill a placeholder industry from research so scoring and suggestions use the real category; a chosen industry is kept.
+              if (research.industry && (!l.industry || l.industry === "Other")) next.industry = research.industry;
               next.score = scoreLead(next, criteria);
               const qualified = (next.score.override ?? next.score.value) >= get().settings.qualifyThreshold;
               if ((l.status === "New" || l.status === "Researching") && research.mode === "public_ai") next.status = qualified ? "Qualified" : "Researching";
@@ -690,18 +695,19 @@ export const useCRM = create<CRMState>()(
           set((s) => ({ invoices: [{ ...i, id: uid("inv"), number: `ADB-${n}`, paid: 0, status: "Pending", remindersSent: 0 }, ...s.invoices] }));
           log({ actor: "human", actorId: me(), entity: "invoice", action: "Created invoice", detail: `ADB-${n}` });
         },
-        recordPayment: (id, amount, receivedOn=deadlineDay(Date.now()), reference) => {
+        recordPayment: (id, amount, receivedOn=deadlineDay(Date.now()), reference, tds=0) => {
           const invoice=get().invoices.find(item=>item.id===id);
           const today=deadlineDay(Date.now());
-          amount=rupeeAmount(amount);
-          if(!invoice||!Number.isFinite(amount)||amount<=0||amount>balance(invoice)||deadlineDay(receivedOn)!==receivedOn||
+          amount=rupeeAmount(amount);tds=rupeeAmount(tds);
+          // Cash received plus tax deducted at source together settle the invoice.
+          if(!invoice||!Number.isFinite(amount)||!Number.isFinite(tds)||amount<0||tds<0||amount+tds<=0||rupeeAmount(amount+tds)>balance(invoice)||deadlineDay(receivedOn)!==receivedOn||
              receivedOn<deadlineDay(invoice.issuedAt)||receivedOn>today)return false;
-          const payment={id:crypto.randomUUID(),amount,receivedOn,reference:reference?.trim()||undefined};
-          const next={...invoice,paid:rupeeAmount(invoice.paid+amount),payments:[...(invoice.payments??[]),payment]};
+          const payment={id:crypto.randomUUID(),amount,receivedOn,reference:reference?.trim()||undefined,...(tds?{tds}:{})};
+          const next={...invoice,paid:rupeeAmount(invoice.paid+amount+tds),payments:[...(invoice.payments??[]),payment]};
           next.status=billingStatus(next,today);
           if(next.status==="Paid") next.paidAt=next.payments.reduce((latest,item)=>item.receivedOn>latest?item.receivedOn:latest,deadlineDay(invoice.paidAt??""));
           set(state=>({invoices:state.invoices.map(item=>item.id===id?next:item)}));
-          log({actor:"human",actorId:me(),entity:"invoice",entityId:id,action:"Recorded payment",detail:"₹"+amount.toLocaleString("en-IN")});
+          log({actor:"human",actorId:me(),entity:"invoice",entityId:id,action:"Recorded payment",detail:"₹"+amount.toLocaleString("en-IN")+(tds?` + TDS ₹${tds.toLocaleString("en-IN")}`:"")});
           return true;
         },
         refreshOverdue: () =>
@@ -1151,7 +1157,12 @@ export const useCRM = create<CRMState>()(
     },
     {
       name: "adbibe-os-v3",
-      storage: createJSONStorage(() => localStorage),
+      // The browser copy is only a cache of the cloud library: a full quota must never block the CRM.
+      storage: createJSONStorage(() => ({
+        getItem: (k) => localStorage.getItem(k),
+        removeItem: (k) => localStorage.removeItem(k),
+        setItem: (k, v) => { try { localStorage.setItem(k, v); } catch (error) { if (!(error instanceof DOMException && error.name === "QuotaExceededError")) throw error; } },
+      })),
       skipHydration: true,
       partialize: (s) => {
         // Functions are not serializable; persist data only.

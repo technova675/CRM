@@ -100,8 +100,12 @@ export interface ResearchFinding {
   evidenceQuote?: string;
 }
 
+export const LEAD_INDUSTRIES = ["D2C / E-commerce", "Real Estate", "Education", "Healthcare", "Hospitality", "Fashion", "Beauty", "SaaS", "Fintech", "Automotive", "Food & Beverage", "Fitness", "Consulting", "Other"] as const;
+
 export interface LeadResearch {
   status: "idle" | "running" | "done" | "failed";
+  /** Industry the research assigned from the app's list (an inference); applied to the lead when it was "Other". */
+  industry?: string;
   generatedAt?: string;
   summary?: string;
   sections: {
@@ -290,6 +294,10 @@ export interface ClientContact {
 }
 
 export interface Client {
+  /** Billing details printed on tax invoices. */
+  gstin?: string;
+  billingAddress?: string;
+  billingState?: string;
   socialProfiles?: { platform: string; handle: string }[];
   creativeIntelligence?: CreativeIntelligenceReport[];
   id: ID;
@@ -454,7 +462,8 @@ export interface Project {
   createdAt: string;
 }
 
-export interface InvoicePayment { id: ID; amount: number; receivedOn: string; reference?: string }
+/** amount is cash received; tds is income tax the client deducted at source, which also settles the invoice. */
+export interface InvoicePayment { id: ID; amount: number; receivedOn: string; reference?: string; tds?: number }
 
 export interface Invoice {
   payments?: InvoicePayment[];
@@ -471,6 +480,10 @@ export interface Invoice {
   status: PaymentStatus;
   remindersSent: number;
   description: string;
+  /** GST invoices: amount is the total payable (taxable + GST); revenue is the taxable value. Older invoices have no tax fields. */
+  taxable?: number;
+  gstRate?: number;
+  sac?: string;
 }
 
 export interface Influencer {
