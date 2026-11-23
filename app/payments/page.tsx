@@ -50,7 +50,7 @@ function FinanceInner() {
   return (
     <div>
       <PageHeader
-        title="Finance & Billing"
+        title="Finance"
         description="Revenue, invoices, expenses, profitability and cash-flow forecast."
         actions={
           canWrite && (

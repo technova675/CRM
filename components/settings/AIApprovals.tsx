@@ -22,7 +22,7 @@ const INFO: Record<AIActionKind, string> = {
   "Payment reminders": "Invoice reminders from the Finance Agent",
   "Creative generation": "Ad creatives, copy and concepts",
   "Social publishing": "Publishing posts to client social accounts",
-  "Video exports": "Final video exports from the AI Video Editor",
+  "Video exports": "Final video exports from AI Video",
   "Strategy documents": "Marketing strategies and plans",
   Proposals: "Sales proposals sent to prospects",
   "Task creation": "Routine internal tasks created for the team",

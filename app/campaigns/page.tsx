@@ -65,12 +65,12 @@ function CampaignsInner() {
     return m;
   }, [campaigns, me]);
 
-  if(!can(me.role,"campaigns","read"))return <Readonly>You do not have access to Campaign Management.</Readonly>;
+  if(!can(me.role,"campaigns","read"))return <Readonly>You do not have access to Campaigns.</Readonly>;
 
   return (
     <div>
       <PageHeader
-        title="Campaign Management"
+        title="Campaigns"
         description="Plan campaign goals, channels, budget, assets, team and measurement."
         actions={
           <>

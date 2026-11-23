@@ -43,7 +43,7 @@ function CreativeInner() {
     return { internal: n("Internal Review"), client: n("Client Review"), changes: n("Changes Requested"), live: n("Live") };
   }, [visible]);
 
-  if (!readable) return <EmptyState icon={<Palette className="size-5" />} title="No access" description="Creative Studio is available to the creative and account teams." />;
+  if (!readable) return <EmptyState icon={<Palette className="size-5" />} title="No access" description="Creative is available to the creative and account teams." />;
 
   if (isClient) {
     return (
@@ -58,12 +58,12 @@ function CreativeInner() {
   return (
     <div>
       <PageHeader
-        title="Creative Studio"
+        title="Creative"
         actions={<Button href="/creative/reviews" className="min-h-11">Creative review queue</Button>}
         icon={<Palette className="size-5 text-fg-3" />}
         description="Creative approvals, AI concepts and creative intelligence — Draft → Internal Review → Client Review → Approved → Live."
       />
-      {!writable && <Readonly>You have read-only access to Creative Studio.</Readonly>}
+      {!writable && <Readonly>You have read-only access to Creative.</Readonly>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         {[["Internal review", stats.internal], ["Awaiting client", stats.client], ["Changes requested", stats.changes], ["Live", stats.live]].map(([l, v]) => (

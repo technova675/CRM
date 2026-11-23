@@ -69,7 +69,7 @@ function Palette() {
     NAV.filter((n) => ok(n.module) && (!t || n.label.toLowerCase().includes(t))).slice(0, t ? 4 : 30).forEach((n) => out.push({ id: n.href, label: n.label, group: "Go to", run: go(n.href) }));
 
     if (!t) {
-      if (ok("command")) out.push({ id: "cc", label: "Open AI Command Center", group: "Actions", run: go("/command") });
+      if (ok("command")) out.push({ id: "cc", label: "Open Command Center", group: "Actions", run: go("/command") });
       if (can(me.role, "leads", "write")) out.push({ id: "new-lead", label: "Add a new lead", group: "Actions", run: go("/leads?new=1") });
       if (can(me.role, "leads", "write")) out.push({ id: "import", label: "Import leads from CSV / Excel", group: "Actions", run: go("/leads?import=1") });
       if (can(me.role, "outreach", "write")) out.push({ id: "outreach", label: "Start an outreach campaign", group: "Actions", run: go("/outreach?new=1") });

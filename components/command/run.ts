@@ -59,7 +59,7 @@ function persistRecommendations(recs: Recommendation[]): string[] {
 export async function runCommand(q: string, opts: CommandOpts = {}): Promise<CmdMessage> {
   const me = currentMe();
   if (!can(me.role, "command")) {
-    return { role: "assistant", content: "The AI Command Center isn't available for your role.", at: now(), mode: "denied", steps: ["Checked your permissions"] };
+    return { role: "assistant", content: "The Command Center isn't available for your role.", at: now(), mode: "denied", steps: ["Checked your permissions"] };
   }
   const s = useCRM.getState();
   const local = answerCommand(q, s, me, opts);
@@ -107,7 +107,7 @@ export function createTaskFromTodo(todo: CommandTodo, agent?: AgentId): "Manual"
   const lead = todo.leadId ? s.leads.find((l) => l.id === todo.leadId) : undefined;
   const related = todo.campaignId ? { type: "campaign" as const, id: todo.campaignId } : todo.leadId ? { type: "lead" as const, id: todo.leadId } : todo.clientId ? { type: "client" as const, id: todo.clientId } : undefined;
   const base = {
-    description: `Created from the AI Command Center${agent ? ` (${agent} agent)` : ""}.\n\n${todo.text}`,
+    description: `Created from the Command Center${agent ? ` (${agent} agent)` : ""}.\n\n${todo.text}`,
     assigneeId: lead?.ownerId ?? client?.accountManagerId ?? me.id,
     priority: todo.priority ?? "Medium",
     dueDate: new Date(Date.now() + 2 * DAY).toISOString(),
@@ -116,7 +116,7 @@ export function createTaskFromTodo(todo: CommandTodo, agent?: AgentId): "Manual"
   if (mode === "Approval Required") {
     s.addTask({ ...base, title: `[Awaiting approval] ${todo.text}`, status: "Blocked", createdBy: "ai" });
     const task = useCRM.getState().tasks[0]!;
-    s.requestApproval({ kind: "Task creation", title: `Create task: ${todo.text}`, detail: "Suggested by the AI Command Center. Approving moves the task to Todo.", ref: { type: "task", id: task.id }, agent, apply: { collection: "tasks", id: task.id, patch: { status: "Todo", title: todo.text } } });
+    s.requestApproval({ kind: "Task creation", title: `Create task: ${todo.text}`, detail: "Suggested by the Command Center. Approving moves the task to Todo.", ref: { type: "task", id: task.id }, agent, apply: { collection: "tasks", id: task.id, patch: { status: "Todo", title: todo.text } } });
     return mode;
   }
   s.addTask({ ...base, title: todo.text, status: "Todo", createdBy: mode === "Automatic" ? "ai" : "human" });

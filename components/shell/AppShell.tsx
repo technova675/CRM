@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Bell, ChevronDown, CircleHelp, LogOut, Lock, Menu, Moon, Search, Settings, Sparkles, Sun, X } from "lucide-react";
+import { Bell, CircleHelp, LogOut, Lock, Menu, Moon, Search, Settings, Sparkles, Sun, X } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can, moduleFromPath, MODULE_LABEL, ROLE_LABEL, setPermissionOverrides } from "@/lib/permissions";
 import { cn, relTime } from "@/lib/utils";
@@ -88,18 +88,10 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           const items=NAV.filter(item=>item.group===group&&can(me.role,item.module)&&
             (item.href!=="/knowledge"||(!isClient&&can(me.role,"clients"))));
           if(!items.length)return null;
-          const main=isClient?items:items.filter(item=>!item.secondary);
-          const secondary=isClient?[]:items.filter(item=>item.secondary);
-          const show=secondary.some(item=>activePath(item.href));
+          // Every section is listed in full; nothing is tucked behind "More tools".
           return <section key={group} aria-label={group}>
             {!isClient&&<h2 className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-fg-3">{group}</h2>}
-            {!!main.length&&<ul className="space-y-0.5">{main.map(renderItem)}</ul>}
-            {!!secondary.length&&<details key={group+":"+show} open={show||undefined} className="group/tools">
-              <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-xs text-fg-3 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent max-lg:min-h-11">
-                <ChevronDown className="size-3 -rotate-90 group-open/tools:rotate-0"/> More {group==="CRM & sales"?"sales":group.toLowerCase()} tools
-              </summary>
-              <ul className="ml-2 space-y-0.5 border-l border-border pl-1">{secondary.map(renderItem)}</ul>
-            </details>}
+            <ul className="space-y-0.5">{items.map(renderItem)}</ul>
           </section>;
         })}
       </div>

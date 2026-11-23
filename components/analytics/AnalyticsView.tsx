@@ -41,7 +41,7 @@ export function AnalyticsView() {
     <div className="space-y-4">
       <PageHeader
         icon={<LineChart className="size-5 text-accent-text" />}
-        title="Analytics Engine"
+        title="Analytics"
         description="Explore measured marketing data by client, channel, campaign and the dimensions each source reports."
         actions={
           !isClient && (

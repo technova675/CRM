@@ -121,7 +121,7 @@ function TasksInner() {
   return (
     <div>
       <PageHeader
-        title={clientView ? "Tasks" : "Tasks & projects"}
+        title="Tasks"
         description={clientView ? "Work the agency is doing on your account." : "Tasks for clients, campaigns, creatives, SEO, influencer projects and deals — with dependencies, recurring tasks, projects and team workload."}
         actions={
           <>

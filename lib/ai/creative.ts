@@ -337,6 +337,6 @@ export function refreshBrief(f: FatiguedAd, k?: ClientKnowledge) {
     "Change: new opening 3 seconds, new first frame / thumbnail, fresh creator or setting; 2–3 variations.",
     k?.toneWords?.length ? `Tone: ${k.toneWords.join(", ")}.` : "",
     k?.rejectedConcepts?.length ? `Avoid: ${k.rejectedConcepts.join("; ")}.` : "",
-    "Deliver: 9:16 + 1:1 cuts, captions burned in. Upload to Creative Studio for internal review.",
+    "Deliver: 9:16 + 1:1 cuts, captions burned in. Upload to Creative for internal review.",
   ].filter(Boolean).join("\n");
 }

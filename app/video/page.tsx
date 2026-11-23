@@ -49,7 +49,7 @@ export default function VideoProjectsPage() {
     <div>
       <PageHeader
         icon={<Clapperboard className="size-5 text-accent-text" />}
-        title="AI Video Editor"
+        title="AI Video"
         description="Upload raw footage, scripts and reel plans — the Video Agent builds an editable timeline, you review, it revises."
         actions={
           <>

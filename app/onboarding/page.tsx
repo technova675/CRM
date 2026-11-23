@@ -101,7 +101,7 @@ function OnboardingInner() {
   return (
     <div>
       <PageHeader
-        title="Client onboarding"
+        title="Onboarding"
         description="Deal won → welcome → onboarding form → info, assets, access & tracking → workspace, project & team → strategy → campaign setup → launch."
         actions={
           <>

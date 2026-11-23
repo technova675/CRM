@@ -895,7 +895,7 @@ function concepts(c: Ctx): CommandAnswer {
     ],
     items: [],
     todos: [{ text: `Shortlist and brief 3–4 of the new creative concepts for ${cl.company}`, clientId: cl.id, priority: "Medium" }],
-    actions: s.access.creative ? [{ label: "Open in Creative Studio", href, primary: true }] : [],
+    actions: s.access.creative ? [{ label: "Open in Creative", href, primary: true }] : [],
   });
 }
 

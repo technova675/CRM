@@ -101,7 +101,7 @@ function CommandInner() {
   return (
     <div>
       <PageHeader
-        title="AI Command Center"
+        title="Command Center"
         icon={<BrainCircuit className="size-5 text-accent-text" />}
         description="Ask anything about the agency. Specialised agents answer from the data you're authorized to see — and show their work."
         actions={
