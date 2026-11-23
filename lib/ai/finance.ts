@@ -1,4 +1,4 @@
-import { receipts,retainerCovers,billingStatus } from "../domain/billing";
+import { receipts,retainerCovers,billingStatus,invoiceRevenue } from "../domain/billing";
 import { deadlineDay } from "../domain/projectTasks";
 // Finance engine — pure functions (no store imports) so the Finance page, the
 // Finance Agent and the seed can all share the same profitability maths.
@@ -216,7 +216,7 @@ export function monthlySeries({ invoices, expenses, team, months = 6, now = Date
     const key = monthKey(d);
     const inv = invoices.filter((x) => monthKey(new Date(x.issuedAt)) === key);
     const exp = expenses.filter((x) => monthKey(new Date(x.date)) === key).reduce((a, e) => a + e.amount, 0);
-    const revenue = inv.reduce((a, x) => a + x.amount, 0);
+    const revenue = inv.reduce((a, x) => a + invoiceRevenue(x), 0);
     const cost = payroll + exp;
     out.push({ month: d.toLocaleDateString("en-IN", { month: "short" }), key, revenue, collected: invoices.flatMap(receipts).filter(receipt=>receipt.receivedOn.slice(0,7)===deadlineDay(+d).slice(0,7)).reduce((sum,receipt)=>sum+receipt.amount,0), teamCost: payroll, expenses: exp, cost, net: revenue - cost });
   }
@@ -239,7 +239,7 @@ export interface ForecastRow {
 export function forecast({ clients, invoices, expenses, team, months = 3, now = Date.now() }: { clients: Client[]; invoices: Invoice[]; expenses: Expense[]; team: TeamMember[]; months?: number; now?: number }): { rows: ForecastRow[]; collectionRate: number; avgExpenses: number; avgRebilled: number; payroll: number; expired: { clientId: string; company: string; retainer: number; contractEnd: string }[] } {
   const since = now - 180 * DAY;
   const recentInv = invoices.filter((i) => new Date(i.issuedAt).getTime() >= since && new Date(i.dueDate).getTime() < now);
-  const billed = recentInv.reduce((a, i) => a + i.amount, 0);
+  const billed = recentInv.reduce((a, i) => a + invoiceRevenue(i), 0);
   const collectionRate = billed ? recentInv.reduce((a, i) => a + i.paid, 0) / billed : 1;
   const recentExp = expenses.filter((e) => new Date(e.date).getTime() >= since);
   const avgExpenses = recentExp.reduce((a, e) => a + e.amount, 0) / 6;

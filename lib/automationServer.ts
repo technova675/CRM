@@ -31,7 +31,8 @@ export function payloadFor(w:MarketingWorkflow,data:CRMLibrary,id:string,subject
  return {to,subject,body,purpose,source};
 }
 export function deliveryReady(){try{const u=new URL(process.env.AUTOMATION_DELIVERY_URL??"");return u.protocol==="https:"&&!u.username&&!u.password&&!!process.env.AUTOMATION_DELIVERY_TOKEN;}catch{return false;}}
-export function workerReady(owner?:string){return !!process.env.AUTOMATION_WORKER_SECRET&&!!process.env.AUTOMATION_WORKER_OWNER_IDS&&(!owner||(process.env.AUTOMATION_WORKER_OWNER_IDS??"").split(",").map(s=>s.trim()).includes(owner));}
+/** True when runs advance without the page open: the scheduled cron route, or the self-hosted worker for this account. */
+export function workerReady(owner?:string){if((process.env.CRON_SECRET??"").length>=16)return true;return !!process.env.AUTOMATION_WORKER_SECRET&&!!process.env.AUTOMATION_WORKER_OWNER_IDS&&(!owner||(process.env.AUTOMATION_WORKER_OWNER_IDS??"").split(",").map(s=>s.trim()).includes(owner));}
 export function validWorker(secret:string,owner:string){const expected=process.env.AUTOMATION_WORKER_SECRET??"",a=Buffer.from(expected),b=Buffer.from(secret);return !!expected&&a.length===b.length&&timingSafeEqual(a,b)&&(process.env.AUTOMATION_WORKER_OWNER_IDS??"").split(",").map(s=>s.trim()).includes(owner);}
 const locate=(data:CRMLibrary,id:string)=>{const w=data.marketingAutomations?.find(w=>w.id===id);if(!w)throw new WorkflowError("Workflow not found in this account.",404);return w;};
 function eventHash(w:MarketingWorkflow,source:unknown,entityId:string){return workflowHash({workflowId:w.id,entityId,event:w.entity==="lead"?(source as Lead).createdAt:w.entity==="report"?(source as {item:ReportSchedule}).item.nextRunAt:w.entity==="invoice"?{due:(source as {item:Invoice}).item.dueDate,balance:(source as {item:Invoice}).item.amount-(source as {item:Invoice}).item.paid}:performanceDrop(source as Campaign,w.nodes[0].config.metric,w.nodes[0].config.days)});}

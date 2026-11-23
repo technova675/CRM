@@ -2,12 +2,14 @@
 
 import {useCallback,useEffect,useState} from "react";
 import {Building2,Layers} from "lucide-react";
-import {Badge,Button,Card,CardHeader,Field,Input,Progress} from "@/components/ui";
+import {Badge,Button,Card,CardHeader,Field,Input,Progress,Select,Textarea} from "@/components/ui";
+import {STATE_NAMES,partyState,validGstin} from "@/lib/domain/gst";
+import type {TaxProfile} from "@/lib/domain/tenant";
 import {PLANS,type Plan,type UsageKey} from "@/lib/types";
 import {PLAN_LIMITS} from "@/lib/domain/tenant";
 import {flushCRMChanges,refreshCRMChanges} from "@/lib/crmSync";
 
-type Summary={id:string;name:string;billingEmail:string;plan:Plan;limits:Record<UsageKey,number>;usage:Record<UsageKey,number>;period:string};
+type Summary={id:string;name:string;billingEmail:string;tax:TaxProfile;plan:Plan;limits:Record<UsageKey,number>;usage:Record<UsageKey,number>;period:string};
 const descriptions:Record<UsageKey,{label:string;scope:string;unit?:string}>={
   aiCredits:{label:"AI credits",scope:"Provider jobs reserved this month"},
   videoMinutes:{label:"Video draft minutes",scope:"Timeline generation and revision this month",unit:"min"},
@@ -26,7 +28,7 @@ const format=(value:number,unit?:string)=>{
 
 export function PlanUsage({admin}:{admin:boolean}){
   const [summary,setSummary]=useState<Summary>();
-  const [name,setName]=useState(""),[billingEmail,setBillingEmail]=useState("");
+  const [name,setName]=useState(""),[billingEmail,setBillingEmail]=useState(""),[tax,setTax]=useState<TaxProfile>({});
   const [error,setError]=useState(""),[notice,setNotice]=useState(""),[busy,setBusy]=useState(false);
   const load=useCallback(async(signal?:AbortSignal)=>{
     const response=await fetch("/api/tenant",{cache:"no-store",signal});
@@ -35,6 +37,7 @@ export function PlanUsage({admin}:{admin:boolean}){
     setSummary(data);
     setName(data.name);
     setBillingEmail(data.billingEmail);
+    setTax(data.tax??{});
   },[]);
   useEffect(()=>{
     const controller=new AbortController();
@@ -46,7 +49,7 @@ export function PlanUsage({admin}:{admin:boolean}){
     setBusy(true);setError("");setNotice("");
     try{
       await flushCRMChanges();
-      const response=await fetch("/api/tenant",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"profile",name,billingEmail})});
+      const response=await fetch("/api/tenant",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"profile",name,billingEmail,tax:Object.fromEntries(Object.entries(tax).filter(([,value])=>value?.trim()))})});
       const data=await response.json();
       if(!response.ok)throw new Error(data.error);
       await refreshCRMChanges();
@@ -65,8 +68,20 @@ export function PlanUsage({admin}:{admin:boolean}){
           <Field label="Organization name"><Input className="min-h-11" value={name} maxLength={100} required disabled={!admin||busy} onChange={event=>setName(event.target.value)}/></Field>
           <Field label="Billing contact email"><Input className="min-h-11" type="email" value={billingEmail} maxLength={254} required disabled={!admin||busy} onChange={event=>setBillingEmail(event.target.value)}/></Field>
         </div>
+        <fieldset className="space-y-3 border-t border-border pt-4" disabled={!admin||busy}>
+          <legend className="text-sm font-semibold">Invoice and GST details</legend>
+          <p className="text-xs text-fg-3">Printed on every invoice PDF. Leave GSTIN empty if the agency is not GST-registered.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Legal business name"><Input className="min-h-11" value={tax.legalName??""} maxLength={200} placeholder={name} onChange={event=>setTax({...tax,legalName:event.target.value})}/></Field>
+            <Field label="GSTIN" hint={tax.gstin&&!validGstin(tax.gstin)?"15 characters, such as 29ABCDE1234F1Z5.":tax.gstin?`State: ${partyState(tax.gstin)||"unknown code"}`:undefined}><Input className="min-h-11 uppercase" value={tax.gstin??""} maxLength={15} onChange={event=>setTax({...tax,gstin:event.target.value.toUpperCase()})}/></Field>
+            <Field label="PAN"><Input className="min-h-11 uppercase" value={tax.pan??""} maxLength={10} onChange={event=>setTax({...tax,pan:event.target.value.toUpperCase()})}/></Field>
+            <Field label="State" hint="Used when there is no GSTIN. Decides CGST+SGST or IGST."><Select className="min-h-11" value={tax.state??""} onChange={event=>setTax({...tax,state:event.target.value})}><option value="">Select state</option>{STATE_NAMES.map(state=><option key={state}>{state}</option>)}</Select></Field>
+            <Field label="Registered address" className="sm:col-span-2"><Textarea value={tax.address??""} maxLength={500} onChange={event=>setTax({...tax,address:event.target.value})}/></Field>
+            <Field label="Payment instructions" hint="Bank account, IFSC or UPI ID, exactly as clients should see it." className="sm:col-span-2"><Textarea value={tax.paymentInstructions??""} maxLength={800} onChange={event=>setTax({...tax,paymentInstructions:event.target.value})}/></Field>
+          </div>
+        </fieldset>
         <p className="break-all text-xs text-fg-3">Workspace ID {summary.id}</p>
-        {admin&&<Button type="submit" variant="primary" className="min-h-11" loading={busy} disabled={busy||name===summary.name&&billingEmail===summary.billingEmail}>Save profile</Button>}
+        {admin&&<Button type="submit" variant="primary" className="min-h-11" loading={busy} disabled={busy||!validGstin(tax.gstin)||name===summary.name&&billingEmail===summary.billingEmail&&JSON.stringify(tax)===JSON.stringify(summary.tax??{})}>Save profile</Button>}
         {error&&<p role="alert" className="text-sm text-danger">{error}</p>}
         {notice&&<p role="status" className="text-sm text-success">{notice}</p>}
       </form>

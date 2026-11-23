@@ -5,6 +5,10 @@ import { deadlineDay } from "./projectTasks";
 
 export const rupeeAmount=(value:number)=>Math.round(value*100)/100;
 export const balance=(invoice:Invoice)=>Math.max(0,rupeeAmount(invoice.amount-invoice.paid));
+/** Agency revenue from an invoice: the taxable value. GST collected is owed to the government, not income. */
+export const invoiceRevenue=(invoice:Invoice)=>invoice.taxable??invoice.amount;
+/** Tax deducted at source by the client; it settles the invoice but is not cash received. */
+export const invoiceTds=(invoice:Invoice)=>rupeeAmount((invoice.payments??[]).reduce((sum,item)=>sum+(item.tds??0),0));
 export function billingStatus(invoice:Invoice,today:string):Invoice["status"] {
   if(balance(invoice)===0)return "Paid";
   const due=deadlineDay(invoice.dueDate);
@@ -19,7 +23,7 @@ export function retainerCovers(client:Client,day:string) {
 
 export function receipts(invoice:Invoice) {
   const recorded=invoice.payments??[];
-  const legacy=rupeeAmount(invoice.paid-recorded.reduce((sum,item)=>sum+item.amount,0));
+  const legacy=rupeeAmount(invoice.paid-recorded.reduce((sum,item)=>sum+item.amount+(item.tds??0),0));
   const day=deadlineDay(invoice.paidAt??"");
   return legacy>0&&day?[...recorded,{id:"legacy-"+invoice.id,amount:legacy,receivedOn:day}]:recorded;
 }
@@ -44,7 +48,7 @@ export function billingMonth(data:BillingInput,month:string,today:string) {
     if(project)project[key]+=value;
   };
   for(const invoice of data.invoices){
-    if(inMonth(deadlineDay(invoice.issuedAt)))add("billed",invoice.amount,invoice.clientId,invoice.projectId);
+    if(inMonth(deadlineDay(invoice.issuedAt)))add("billed",invoiceRevenue(invoice),invoice.clientId,invoice.projectId);
     add("outstanding",balance(invoice),invoice.clientId,invoice.projectId);
     for(const receipt of receipts(invoice))if(inMonth(receipt.receivedOn))add("collected",receipt.amount,invoice.clientId,invoice.projectId);
   }

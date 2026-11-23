@@ -11,13 +11,13 @@ import { toast } from "@/components/shell/toast";
 
 export function General() {
   const settings = useCRM((s) => s.settings);
-  const update = useCRM((s) => s.updateSettings);
   return (
     <Card className="space-y-3 p-4">
-      <CardHeader title="Agency" subtitle="Organization name, slug and data region live in Plan & usage." className="px-0 pt-0" />
+      <CardHeader title="Agency" subtitle="Your agency name is saved with your account under Plan & usage, so every device and teammate sees the same name." className="px-0 pt-0" />
       <div className="grid gap-3 sm:grid-cols-2">
+        {/* The old browser-only name field saved nowhere; the account name is edited in one place. */}
         <Field label="Agency name">
-          <Input value={settings.agencyName} onChange={(e) => update({ agencyName: e.target.value })} />
+          <Button href="/settings?tab=plan" className="min-h-8 w-full justify-start">Edit in Plan &amp; usage</Button>
         </Field>
         <Field label="Currency">
           <Select value={settings.currency} disabled>

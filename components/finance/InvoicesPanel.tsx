@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { AlertTriangle, BellRing, CheckCircle2, Clock, IndianRupee, Receipt, Timer } from "lucide-react";
-import { billingStatus,balance,receipts,rupeeAmount } from "@/lib/domain/billing";
+import { billingStatus,balance,receipts,rupeeAmount,invoiceTds } from "@/lib/domain/billing";
+import { DEFAULT_SAC,GST_RATES } from "@/lib/domain/gst";
 import { deadlineDay } from "@/lib/domain/projectTasks";
 import { useDeadlineToday } from "@/components/tasks/useDeadlineToday";
 import { useCRM } from "@/lib/store";
@@ -20,9 +21,14 @@ function PaymentModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
   const [amount, setAmount] = useState("");
   const [received,setReceived]=useState(()=>deadlineDay(Date.now()));
   const [reference,setReference]=useState("");
+  const [tdsText,setTds]=useState("");
   if (!invoice) return null;
   const pending = balance(invoice);
-  const value = amount===""?pending:rupeeAmount(Number(amount));
+  const tds = tdsText===""?0:rupeeAmount(Number(tdsText));
+  // With TDS, the client pays the balance minus the tax it deducted, and the two together settle the invoice.
+  const value = amount===""?rupeeAmount(pending-tds):rupeeAmount(Number(amount));
+  const settles = rupeeAmount(value+tds);
+  const base = invoice.taxable ?? invoice.amount;
   return (
     <Modal
       open
@@ -37,21 +43,21 @@ function PaymentModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
           </Button>
           <Button
             variant="primary"
-            disabled={!Number.isFinite(value)||value<=0||value>pending||!received||received>today||received<deadlineDay(invoice.issuedAt)}
+            disabled={!Number.isFinite(value)||!Number.isFinite(tds)||value<0||tds<0||settles<=0||settles>pending||!received||received>today||received<deadlineDay(invoice.issuedAt)}
             onClick={() => {
-              if(!record(invoice.id,value,received,reference)){toast("Check the amount and payment date",undefined,"warning");return;}
-              toast("Payment recorded", `${money(Math.min(value, pending))} · ${value >= pending ? "Invoice fully paid" : "Partially paid"}`);
+              if(!record(invoice.id,value,received,reference,tds)){toast("Check the amount, TDS and payment date",undefined,"warning");return;}
+              toast("Payment recorded", `${money(value)}${tds ? ` + TDS ${money(tds)}` : ""} · ${settles >= pending ? "Invoice settled" : "Partially paid"}`);
               onClose();
             }}
           >
-            Record {money(value)}
+            Record {money(value)}{tds ? ` + TDS` : ""}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
         <Field label="Amount received (₹)">
-          <Input type="number" autoFocus value={amount || ""} placeholder={String(pending)} onChange={(e) => setAmount(e.target.value)} />
+          <Input type="number" autoFocus value={amount || ""} placeholder={String(rupeeAmount(pending - tds))} onChange={(e) => setAmount(e.target.value)} />
         </Field>
         <div className="flex gap-1.5">
           {[0.25, 0.5, 1].map((f) => (
@@ -60,10 +66,18 @@ function PaymentModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
             </Button>
           ))}
         </div>
+        <Field label="TDS deducted by client (₹)" hint="Leave empty if none. TDS is worked out on the amount before GST.">
+          <Input type="number" min={0} value={tdsText} placeholder="0" onChange={(e) => setTds(e.target.value)} />
+        </Field>
+        <div className="flex gap-1.5">
+          {[{label:"2% · 194C",rate:0.02},{label:"10% · 194J",rate:0.1}].map(o=><Button key={o.label} size="xs" onClick={()=>{const t=rupeeAmount(base*o.rate);setTds(String(t));setAmount("");}}>{o.label}</Button>)}
+          {tdsText!==""&&<Button size="xs" variant="ghost" onClick={()=>setTds("")}>No TDS</Button>}
+        </div>
+        {settles>pending&&<p role="alert" className="text-xs text-danger">Cash plus TDS is more than the {money(pending)} outstanding.</p>}
         <Field label="Payment date"><Input type="date" value={received} onChange={e=>setReceived(e.target.value)}/></Field>
         <Field label="Payment reference"><Input value={reference} maxLength={180} onChange={e=>setReference(e.target.value)}/></Field>
         {receipts(invoice).length>0&&<ul className="space-y-1 text-sm text-fg-2">
-          {receipts(invoice).map(payment=><li key={payment.id}>{payment.receivedOn} · {money(payment.amount)} {payment.reference}</li>)}
+          {receipts(invoice).map(payment=><li key={payment.id}>{payment.receivedOn} · {money(payment.amount)}{"tds" in payment&&payment.tds?` + TDS ${money(payment.tds)}`:""} {payment.reference}</li>)}
         </ul>}
       </div>
     </Modal>
@@ -80,7 +94,11 @@ export function NewInvoiceModal({ open, onClose }: { open: boolean; onClose: () 
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [due, setDue] = useState(() => new Date(Date.now() + 15 * DAY).toISOString().slice(0, 10));
+  const [rate, setRate] = useState<number>(18);
+  const [sac, setSac] = useState(DEFAULT_SAC);
+  // The amount entered is the taxable value; GST is added on top and the invoice total is what the client pays.
   const amt = rupeeAmount(amount===""?client?.retainer??0:Number(amount));
+  const gst = rupeeAmount(amt * rate / 100), total = rupeeAmount(amt + gst);
   return (
     <Modal
       open={open}
@@ -93,10 +111,10 @@ export function NewInvoiceModal({ open, onClose }: { open: boolean; onClose: () 
           </Button>
           <Button
             variant="primary"
-            disabled={!clientId||!Number.isFinite(amt)||amt<=0||!due||due<today}
+            disabled={!clientId||!Number.isFinite(amt)||amt<=0||!due||due<today||!/^\d{4,8}$/.test(sac)}
             onClick={() => {
-              addInvoice({ clientId, projectId:projectId||undefined, amount: amt, issuedAt: new Date().toISOString(), dueDate: due, description: description || `Monthly retainer — ${client?.services.join(", ")}` });
-              toast("Invoice created", `${client?.company} · ${money(amt)}`);
+              addInvoice({ clientId, projectId:projectId||undefined, amount: total, taxable: amt, gstRate: rate, sac, issuedAt: new Date().toISOString(), dueDate: due, description: description || `Monthly retainer — ${client?.services.join(", ")}` });
+              toast("Invoice created", `${client?.company} · ${money(total)}${rate ? ` incl. ${rate}% GST` : ""}`);
               onClose();
             }}
           >
@@ -115,12 +133,15 @@ export function NewInvoiceModal({ open, onClose }: { open: boolean; onClose: () 
             ))}
           </Select>
         </Field>
-        <Field label="Amount (₹)" hint={client ? `Retainer: ${money(client.retainer)}` : undefined}>
+        <Field label="Amount before GST (₹)" hint={client ? `Retainer: ${money(client.retainer)}` : undefined}>
           <Input type="number" value={amount || ""} placeholder={String(client?.retainer ?? "")} onChange={(e) => setAmount(e.target.value)} />
         </Field>
         <Field label="Due date">
           <Input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
         </Field>
+        <Field label="GST rate"><Select value={rate} onChange={e=>setRate(Number(e.target.value))}>{GST_RATES.map(r=><option key={r} value={r}>{r ? `${r}%` : "No GST (0%)"}</option>)}</Select></Field>
+        <Field label="SAC code" hint="998361: advertising agency services"><Input value={sac} maxLength={8} inputMode="numeric" onChange={e=>setSac(e.target.value.replace(/\D/g,""))}/></Field>
+        <p className="col-span-2 rounded-lg bg-surface-2 px-3 py-2 text-sm">{money(amt)} + GST {money(gst)} = <b>{money(total)}</b> payable. CGST+SGST or IGST is worked out on the invoice from your state and the client&apos;s.</p>
         <Field label="Project" className="col-span-2"><Select value={projectId} onChange={e=>setProject(e.target.value)}><option value="">No project</option>{projects.filter(p=>p.clientId===clientId).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
         <Field label="Description" className="col-span-2">
           <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={client ? `Monthly retainer — ${client.services.join(", ")}` : ""} />
@@ -158,7 +179,8 @@ export function InvoicesPanel({ isClient, clientId, canWrite }: { isClient: bool
     const overdue = invoices.filter((i) => i.status === "Overdue");
     return {
       invoiced: sum(invoices.map((i) => i.amount)),
-      collected: sum(invoices.map((i) => i.paid)),
+      // Cash actually received; TDS settles the invoice but arrives later as a tax credit.
+      collected: sum(invoices.map((i) => i.paid - invoiceTds(i))),
       pending: sum(invoices.filter((i) => i.status !== "Paid").map((i) => i.amount - i.paid)),
       overdue: sum(overdue.map((i) => i.amount - i.paid)),
       overdueCount: overdue.length,
@@ -176,7 +198,7 @@ export function InvoicesPanel({ isClient, clientId, canWrite }: { isClient: bool
         const x = new Date(i.issuedAt);
         return `${x.getFullYear()}-${x.getMonth()}` === key;
       });
-      out.push({ month: d.toLocaleDateString("en-IN", { month: "short" }), collected: sum(inMonth.map((i) => i.paid)), outstanding: sum(inMonth.map((i) => i.amount - i.paid)) });
+      out.push({ month: d.toLocaleDateString("en-IN", { month: "short" }), collected: sum(inMonth.map((i) => i.paid - invoiceTds(i))), outstanding: sum(inMonth.map((i) => i.amount - i.paid)) });
     }
     return out;
   }, [invoices]);
@@ -192,7 +214,7 @@ export function InvoicesPanel({ isClient, clientId, canWrite }: { isClient: bool
         <Stat label="Collected" value={compactMoney(stats.collected)} hint={`${stats.invoiced ? Math.round((stats.collected / stats.invoiced) * 100) : 0}% collection rate`} icon={<CheckCircle2 className="size-3.5" />} tone="success" />
         <Stat label="Pending" value={compactMoney(stats.pending)} icon={<Clock className="size-3.5" />} tone="warning" />
         <Stat label="Overdue" value={compactMoney(stats.overdue)} hint={`${stats.overdueCount} invoices`} icon={<AlertTriangle className="size-3.5" />} tone="danger" />
-        <Stat label="Avg. days to pay" value={`${stats.dso.toFixed(0)}d`} hint="issue → paid" icon={<Timer className="size-3.5" />} />
+        <Stat label="Avg. days to pay" value={`${Math.max(0, Math.round(stats.dso))}d`} hint="issue → paid" icon={<Timer className="size-3.5" />} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -278,6 +300,7 @@ export function InvoicesPanel({ isClient, clientId, canWrite }: { isClient: bool
                     {canWrite && (
                       <Td>
                         <div className="flex justify-end gap-1">
+                          <Button className="min-h-11" href={`/api/invoices/${encodeURIComponent(i.id)}/pdf`} external>Invoice PDF</Button>
                           {i.paid>0&&<Button className="min-h-11" onClick={()=>setHistory(i)}>Payment history</Button>}
                           {balance(i)>0&&<Button className="min-h-11" onClick={()=>setPaying(i)}>Record payment</Button>}
                           {i.status==="Overdue"&&<Button className="min-h-11" onClick={()=>setReminder(i)}>Draft reminder</Button>}
@@ -297,8 +320,9 @@ export function InvoicesPanel({ isClient, clientId, canWrite }: { isClient: bool
         <textarea aria-label="Payment reminder draft" readOnly rows={5} className="w-full rounded-lg border border-border bg-surface p-3 text-sm" value={`Hello, invoice ${reminder.number} has an outstanding balance of ${money(balance(reminder))}. It was due on ${deadlineDay(reminder.dueDate)}. Please let us know when we can expect payment. Thank you.`}/>
       </Modal>}
       {history&&<Modal open onClose={()=>setHistory(undefined)} title={"Payment history · "+history.number}>
-        <ul className="space-y-2 text-sm">{receipts(history).map(p=><li key={p.id}>{p.receivedOn} · {money(p.amount)} {p.reference}</li>)}</ul>
-        {history.paid>receipts(history).reduce((total,p)=>total+p.amount,0)&&<p className="mt-2 text-sm text-fg-2">Some earlier payments have no saved receipt date.</p>}
+        <ul className="space-y-2 text-sm">{receipts(history).map(p=><li key={p.id}>{p.receivedOn} · {money(p.amount)}{"tds" in p&&p.tds?` + TDS ${money(p.tds)}`:""} {p.reference}</li>)}</ul>
+        {invoiceTds(history)>0&&<p className="mt-2 text-sm text-fg-2">TDS deducted by the client: {money(invoiceTds(history))}. Collect the TDS certificate (Form 16A) to claim it.</p>}
+        {history.paid>receipts(history).reduce((total,p)=>total+p.amount+("tds" in p?p.tds??0:0),0)&&<p className="mt-2 text-sm text-fg-2">Some earlier payments have no saved receipt date.</p>}
       </Modal>}
       <PaymentModal key={paying?.id ?? "none"} invoice={paying} onClose={() => setPaying(null)} />
     </div>

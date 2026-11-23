@@ -76,7 +76,7 @@ export async function GET(req: Request) {
     // A browser can close while its synchronous research request is running.
     // Surface an explicit retry state rather than leaving a lead running forever.
     const library=result.data as ReturnType<typeof emptyCRMLibrary>;
-    const notificationFeed=accountNotifications(library,user.userId);
+    const notificationFeed=accountNotifications(library,user.userId),agencyName=library.tenantProfile?.name;
     delete library.auditEvents;
     delete library.tenantMeter;
     delete library.staffInvites;
@@ -95,7 +95,7 @@ export async function GET(req: Request) {
     for(const key of ["campaigns","invoices","ads","creatives","socialPosts","seoProjects","influencers","engagements","assets","reports","recommendations","reportSchedules"] as const)library[key]??=[];
     library.outreach=library.outreach.map(c=>({...c,recipients:c.recipients.map(r=>r.state==="researching"&&(!r.draftStartedAt||Date.now()-Date.parse(r.draftStartedAt)>240000)?{...r,state:"queued",error:"Draft preparation was interrupted. Draft this lead again."}:r)}));
     library.leads=library.leads.map(lead=>lead.research?.status==="running"&&(!lead.research.startedAt||Date.now()-Date.parse(lead.research.startedAt)>180000)?{...lead,research:{...lead.research,status:"failed",error:"The previous research session was interrupted. Run public research again."}}:lead);
-    return Response.json({...result,notificationFeed},{headers:{"Cache-Control":"private, no-store"}});
+    return Response.json({...result,notificationFeed,agencyName},{headers:{"Cache-Control":"private, no-store"}});
   } catch(error){return dbError(error);}
 }
 export async function PUT(req: Request) {
@@ -163,11 +163,16 @@ export async function PUT(req: Request) {
           return Response.json({error:"Only one retainer invoice per client and month is allowed."},{status:400});
         retainerInvoices.add(key);
       }
+      // A GST invoice's total must equal its taxable value plus tax at a valid rate.
+      if(invoice.taxable!==undefined&&(typeof invoice.taxable!=="number"||!Number.isFinite(invoice.taxable)||invoice.taxable<=0||![0,5,12,18,28].includes(Number(invoice.gstRate))||
+         typeof invoice.amount!=="number"||Math.abs(invoice.amount-Math.round(invoice.taxable*(1+Number(invoice.gstRate)/100)*100)/100)>0.011||
+         (invoice.sac!==undefined&&(typeof invoice.sac!=="string"||!/^\d{4,8}$/.test(invoice.sac)))))
+        return Response.json({error:"Invoice tax amounts do not add up. Recreate the invoice."},{status:400});
       if(invoice.payments!==undefined){
-        const payments=z.array(z.object({id:z.string().uuid(),amount:z.number().positive().max(1e12),receivedOn:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value=>deadlineDay(value)===value),reference:z.string().max(180).optional()})).max(500).safeParse(invoice.payments);
+        const payments=z.array(z.object({id:z.string().uuid(),amount:z.number().nonnegative().max(1e12),tds:z.number().nonnegative().max(1e12).optional(),receivedOn:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value=>deadlineDay(value)===value),reference:z.string().max(180).optional()})).max(500).safeParse(invoice.payments);
         if(!payments.success||new Set(payments.data.map(payment=>payment.id)).size!==payments.data.length||
            typeof invoice.paid!=="number"||typeof invoice.amount!=="number"||invoice.paid>invoice.amount||
-           payments.data.reduce((sum,payment)=>sum+payment.amount,0)>invoice.paid+0.001)
+           payments.data.reduce((sum,payment)=>sum+payment.amount+(payment.tds??0),0)>invoice.paid+0.001||payments.data.some(payment=>payment.amount+(payment.tds??0)<=0))
           return Response.json({error:"Check the invoice payment history and outstanding balance."},{status:400});
       }
     }

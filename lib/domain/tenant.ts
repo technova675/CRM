@@ -8,7 +8,9 @@ export const PLAN_LIMITS: Record<Plan,Record<UsageKey,number>> = {
   Enterprise:{aiCredits:-1,leads:-1,clients:-1,campaigns:-1,reports:-1,videoMinutes:-1,storageGb:-1,teamMembers:-1},
 };
 
-export type TenantProfile={name:string;billingEmail:string;createdAt:string;basePlan:Plan};
+/** Tax identity printed on invoices. All optional: an agency without GST registration still invoices. */
+export type TaxProfile={legalName?:string;gstin?:string;pan?:string;address?:string;state?:string;paymentInstructions?:string};
+export type TenantProfile={name:string;billingEmail:string;createdAt:string;basePlan:Plan;tax?:TaxProfile};
 export type TenantMeter={period:string;aiCredits:number;videoMinutes:number};
 export const tenantPeriod=(at=new Date())=>at.toISOString().slice(0,7);
 
