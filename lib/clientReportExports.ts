@@ -63,7 +63,7 @@ export async function reportPDF(report: ClientReport) {
   const pages = document.getPages();
   pages.forEach((p,i) => {
     p.drawLine({ start:{x:48,y:40},end:{x:547,y:40}, color:rgb(.83,.84,.88), thickness:.5 });
-    p.drawText("Adbibe  /  " + (i + 1) + " of " + pages.length, { x:48,y:26,size:8,font:regular,color:ink });
+    p.drawText(report.facts.company + "  /  Page " + (i + 1) + " of " + pages.length, { x:48,y:26,size:8,font:regular,color:ink });
   });
   document.setTitle(title(report));
   return document.save();

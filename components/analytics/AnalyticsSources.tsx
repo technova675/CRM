@@ -32,7 +32,7 @@ export function AnalyticsSources({ writable, showCrm, onOpen }: { writable: bool
   const paid = new Set(campaigns.flatMap(campaign => (campaign.performanceRows ?? []).map(row => row.platform)));
   const hasGsc = seoProjects.some(project => project.workspace?.gsc?.daily.length);
   const hasSeoImport = seoProjects.some(project => project.workspace?.traffic.length);
-  const send = async (body: object, success: (data: { rows?: number; id?: string }) => void) => {
+  const send = async (body: object, success: (data: { rows?: number; id?: string; ignored?: string[]; skipped?: number }) => void) => {
     await flushCRMChanges();
     const response = await fetch("/api/analytics", {
       method: "POST", signal: AbortSignal.timeout(45000),
@@ -54,7 +54,7 @@ export function AnalyticsSources({ writable, showCrm, onOpen }: { writable: bool
       const fields = method === "import"
         ? { currency: form.get("currency"), csv: await (file as File).text() }
         : { start: form.get("start"), end: form.get("end") };
-      await send({ action: method, feed, ...fields }, result => setMessage("Saved " + result.rows + " measured rows. Open the feed below to explore it."));
+      await send({ action: method, feed, ...fields }, result => setMessage(["Saved " + result.rows + " measured rows.", result.skipped ? `Skipped ${result.skipped} total or summary ${result.skipped === 1 ? "row" : "rows"}.` : "", result.ignored?.length ? "Columns not used: " + result.ignored.join(", ") + "." : "", "Open the report below to explore it."].filter(Boolean).join(" ")));
     } catch (error) { setError((error as Error).message); } finally { setPending(false); }
   };
   const removeFeed = async (id: string, updatedAt: string) => {
@@ -85,7 +85,7 @@ export function AnalyticsSources({ writable, showCrm, onOpen }: { writable: bool
       </ul>
     </Card>
     {writable && <Card>
-      <CardHeader title="Add a source report" subtitle="Use a normalized CSV or sync a mapped report from an authorized account." />
+      <CardHeader title="Add a source report" subtitle="Upload the CSV you export from Meta Ads, Google Ads, LinkedIn Ads or Google Analytics as it is. Common column names, ₹ amounts and thousands separators are recognised." />
       {clients.length ? <form className="space-y-4 p-4" onSubmit={save}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Ingest method"><Select className="min-h-11" value={method} onChange={event => setMethod(event.target.value === "sync" ? "sync" : "import")}>
@@ -103,7 +103,7 @@ export function AnalyticsSources({ writable, showCrm, onOpen }: { writable: bool
             <Field label="Sync to"><Input className="min-h-11" name="end" type="date" required /></Field>
           </>}
         </div>
-        <p className="text-sm text-fg-2">Use one row per date and dimension combination. Reusing the same client, source, account and report name replaces all existing rows for the dates provided. Leave unreported metrics and unused dimensions blank.</p>
+        <p className="text-sm text-fg-2">Export with a daily breakdown (one row per day, or per day and campaign). Importing again under the same report name updates those dates instead of adding duplicates. Columns the engine does not use are listed after import and ignored.</p>
         <div className="flex flex-wrap gap-2">
           <Button className="min-h-11" variant="primary" type="submit" disabled={pending} loading={pending}>{method === "import" ? "Import CSV report" : "Sync live report"}</Button>
           {method === "import" && <Button className="min-h-11" type="button" icon={<Download size={16} />} onClick={() => downloadFile("analytics-template.csv", template, "text/csv")}>Download CSV template</Button>}

@@ -7,7 +7,7 @@ import { can } from "@/lib/permissions";
 import type { CRMLibrary } from "@/lib/domain/crmLibrary";
 import { boundedJSON, ownedLibrary } from "@/lib/outreachServer";
 import { mutateMedia } from "@/lib/mediaServer";
-import { analyticsRow, currencyCode, feedSpec, mergeAnalyticsFeed, parseAnalyticsCsv, validateAnalyticsRows } from "@/lib/domain/analyticsEngine";
+import { analyticsRow, currencyCode, feedSpec, mergeAnalyticsFeed, parseAnalyticsCsvReport, validateAnalyticsRows } from "@/lib/domain/analyticsEngine";
 import { seoDate } from "@/lib/domain/seoWorkspace";
 
 const operation = z.object({ operationId: z.string().uuid() });
@@ -66,10 +66,10 @@ export async function POST(req: Request) {
       return Response.json({ removed: true });
     }
     if (!library?.clients.some(client => client.id === input.feed.clientId)) return fail("Choose a client from this CRM account.", 404);
-    let rows, currency;
+    let rows, currency, ignored: string[] = [], skipped = 0;
     if (input.action === "import") {
       currency = input.currency;
-      try { rows = parseAnalyticsCsv(input.csv); } catch (error) { return fail((error as Error).message); }
+      try { ({ rows, ignored, skipped } = parseAnalyticsCsvReport(input.csv)); } catch (error) { return fail((error as Error).message); }
     } else {
       const url = connector(user.userId);
       if (!url) return fail("The live analytics connector is not configured for this account.", 503);
@@ -108,7 +108,7 @@ export async function POST(req: Request) {
       recordAudit(data,{actor:"api",actorId:user.userId,clientId:feed.clientId,entity:"analytics",entityId:feed.id,action:input.action==="import"?"Imported analytics data":"Synced analytics data",detail:feed.report,sources:[feed.platform+" · "+feed.method],before:(previous?.rows.length??0)+" rows",after:feed.rows.length+" rows",outcome:"Saved"});
       return data;
     });
-    return Response.json({ id, rows: rows.length });
+    return Response.json({ id, rows: rows.length, ignored, skipped });
   } catch (error) {
     return error instanceof AnalyticsError ? fail(error.message, error.status) : dbError(error);
   }

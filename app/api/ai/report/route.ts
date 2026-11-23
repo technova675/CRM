@@ -34,7 +34,7 @@ const reportSchema = z.object({
   recommendations: z.array(z.object({ text: z.string(), priority: z.enum(["High", "Medium", "Low"]) })).max(6),
   plan: z.array(z.string()).max(5).describe("Next month's plan, one action per item"),
   emailSubject: z.string(),
-  emailBody: z.string().describe("Short plain-text cover email to the client, under 150 words, signed off as Adbibe"),
+  emailBody: z.string().describe("Short plain-text cover email to the client, under 150 words, ending with \"Best regards,\" and no agency or person name (the sender adds their own signature)"),
 });
 
 // Tool-calling reporting agent: the model investigates one client's numbers through tools
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
   };
 
   const role = `${SAFETY_RULES}
-You are the Reporting Agent inside Adbibe's agency operating system. You are preparing a client performance report for ${facts.client} (${ds.client.industry}) covering ${windowLabel(facts.window)}.
+You are the Reporting Agent inside a marketing agency's operating system. You are preparing a client performance report for ${facts.client} (${ds.client.industry}) covering ${windowLabel(facts.window)}.
 Money is in Indian rupees: write ₹ directly before the number. Never do arithmetic yourself: every figure you state must be copied from a tool result.`;
 
   // Phase 1 — investigate with tools. A failure here is not fatal: the core tools are run below regardless.

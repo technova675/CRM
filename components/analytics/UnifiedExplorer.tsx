@@ -5,7 +5,7 @@ import { Database, Download } from "lucide-react";
 import Papa from "papaparse";
 import { useCRM } from "@/lib/store";
 import { downloadFile } from "@/lib/utils";
-import { campaignFacts, crmFacts, dimensions, metrics, metricValue, type Dimension, type Fact, type Metric } from "@/lib/domain/analyticsEngine";
+import { campaignFacts, crmFacts, dimensions, goalMetrics, metrics, metricValue, type Dimension, type Fact, type Metric } from "@/lib/domain/analyticsEngine";
 import { Button, Card, CardHeader, Field, Input, Select } from "@/components/ui";
 
 const keys = Object.keys(metrics) as Metric[];
@@ -29,7 +29,7 @@ export function UnifiedExplorer({ clientId, showCrm, initialFeed, onSources }: {
   const projects = useCRM(s => s.seoProjects);
   const feeds = useCRM(s => s.analyticsFeeds);
   const [source, setSource] = useState(initialFeed);
-  const [dimension, setDimension] = useState<Dimension>("platform");
+  const [pickedDimension, setDimension] = useState<Dimension | "">("");
   const [pickedMetric, setMetric] = useState<Metric | "">("");
   const [dates, setDates] = useState({ start: "", end: "" });
   const [page, setPage] = useState(1);
@@ -41,6 +41,8 @@ export function UnifiedExplorer({ clientId, showCrm, initialFeed, onSources }: {
   const selectedProject = projects.find(project => ["gsc:" + project.id, "seo:" + project.id].includes(source) && scoped(project.clientId));
   const compare = source === "compare" && showCrm;
   const active = activeFeed || selectedProject || showCrm && source === "crm" || compare ? source : "paid";
+  // A single report covers one platform, so a platform breakdown is one bar; show it over time instead.
+  const dimension: Dimension = pickedDimension || (activeFeed || selectedProject ? "date" : "platform");
   const byAd = active === "paid" && adBreakdowns.includes(dimension);
 
   const facts = useMemo((): Fact[] => {
@@ -69,7 +71,8 @@ export function UnifiedExplorer({ clientId, showCrm, initialFeed, onSources }: {
   const filtered = useMemo(() => scopedFacts.filter(row => (!dates.start || row.date >= dates.start) && (!dates.end || row.date <= dates.end)), [scopedFacts, dates]);
   const coverage = useMemo(() => Object.fromEntries(keys.map(key => [key, metricValue(filtered, key)])) as Record<Metric, ReturnType<typeof metricValue>>, [filtered]);
   const available = keys.filter(key => coverage[key].measured);
-  const metric = pickedMetric && available.includes(pickedMetric) ? pickedMetric : available[0] ?? (pickedMetric || "spend");
+  const goals = goalMetrics(filtered).filter(key => available.includes(key));
+  const metric = pickedMetric && available.includes(pickedMetric) ? pickedMetric : goals[0] ?? available[0] ?? (pickedMetric || "spend");
   const currency = activeFeed?.currency ?? (active === "paid" ? "INR" : undefined);
   const origin = [...new Set(filtered.map(row => row.origin))].join(" · ");
   const rows = (() => {
@@ -131,7 +134,7 @@ export function UnifiedExplorer({ clientId, showCrm, initialFeed, onSources }: {
     </Card>}
     {!!rows.length && <>
       {!compare && <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {[metric, ...available.filter(key => key !== metric)].slice(0, 4).map(key => <Card key={key} className="p-4">
+        {[...new Set([metric, ...goals, ...available])].slice(0, 4).map(key => <Card key={key} className="p-4">
           <p className="text-sm text-fg-2">{metrics[key]}</p>
           <p className="mt-1 break-words text-xl font-semibold tabular-nums sm:text-2xl">{display(coverage[key].value, key, currency)}</p>
           <p className="mt-1 text-xs text-fg-2">{coverage[key].measured.toLocaleString()} of {filtered.length.toLocaleString()} rows measured</p>

@@ -61,7 +61,8 @@ export function AnalyticsView() {
           ...(!isClient ? [{ value: "sources" as const, label: "Data sources" }] : []),
           ...(!isClient ? [{ value: "insights" as const, label: "AI Insights" }] : []),
           { value: "compare", label: "Month comparison" },
-          { value: "legacy", label: "Legacy explorer" },
+          // The older explorer stays reachable by link, but staff use Explore and AI Insights.
+          ...(isClient || tab === "legacy" ? [{ value: "legacy" as const, label: "Weekly review" }] : []),
         ]}
       />
       {tab === "explore" && <UnifiedExplorer key={params.get("feed") ?? "default"} initialFeed={params.get("feed") ?? (isClient ? "paid" : "compare")} clientId={clientId} showCrm={!isClient} onSources={isClient ? undefined : () => nav({ tab: "sources" })} />}

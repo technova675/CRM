@@ -39,21 +39,97 @@ export type Fact = Omit<AnalyticsRow, "date"> & {
   date: string; clientId: string; platform: string; currency?: string; deals?: number; origin: string; feed?: string; feedId?: string; dimensionIds?: Partial<Record<Dimension, string>>;
 };
 
-export function parseAnalyticsCsv(csv: string): AnalyticsRow[] {
-  const parsed = Papa.parse<Record<string, string>>(csv, { header: true, skipEmptyLines: "greedy", transformHeader: h => { const key = h.trim().toLowerCase(); return key === "landingpage" || key === "landing_page" ? "landingPage" : key; } });
-  if (parsed.errors.length || Object.keys(parsed.meta.renamedHeaders ?? {}).length) throw new Error("Check CSV headers, field counts and quoting. Headers must be unique.");
-  if (!parsed.data.length || parsed.data.length > 3000) throw new Error("Import 1–3,000 rows per file.");
-  const allowed = new Set<string>(["date", ...detailKeys, ...baseMetrics.filter(key => key !== "deals"), "reach"]);
-  const unsupported = parsed.meta.fields?.find(key => !allowed.has(key));
-  if (unsupported) throw new Error("Unsupported column: " + unsupported + ". Use the downloadable template.");
-  return parsed.data.map((raw, index) => {
-    const input = Object.fromEntries(Object.entries(raw).filter(([, v]) => v.trim()).map(([k, v]) => [
-      k, k === "date" || (detailKeys as readonly string[]).includes(k) ? v.trim() : /^\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN,
-    ]));
+// Column names that ad platforms and analytics tools use in their own exports, in priority order per field.
+// Matching ignores case, punctuation and a trailing currency such as "(INR)", so a Meta, Google Ads or LinkedIn
+// export can be imported without rebuilding it in a spreadsheet.
+const COLUMN_ALIASES: Record<string, string[]> = {
+  date: ["date", "day", "reporting starts", "start date", "week", "month"],
+  campaign: ["campaign", "campaign name"],
+  ad: ["ad", "ad name"],
+  creative: ["creative", "creative name", "ad creative"],
+  audience: ["audience", "ad set name", "ad set", "ad group", "ad group name", "audience segment"],
+  geography: ["geography", "region", "country", "city", "location", "country territory"],
+  product: ["product", "product name", "item", "item name"],
+  placement: ["placement", "platform position", "network"],
+  landingPage: ["landingpage", "landing page", "final url", "website url", "page path", "landing page path"],
+  spend: ["spend", "amount spent", "cost", "spent", "total spent", "media cost"],
+  revenue: ["revenue", "purchases conversion value", "conversion value", "total conv value", "conv value", "purchase revenue", "total revenue"],
+  reach: ["reach"],
+  impressions: ["impressions", "impr"],
+  clicks: ["clicks", "link clicks", "clicks all", "outbound clicks"],
+  leads: ["leads", "website leads", "on facebook leads", "lead form completions"],
+  conversions: ["conversions", "purchases", "all conv", "results", "key events", "total conversions"],
+  sessions: ["sessions", "visits"],
+  orders: ["orders", "transactions"],
+};
+const headerKey = (header: string) => header.toLowerCase().replace(/\((?:[a-z]{3}|[^)]*currency[^)]*)\)\s*$/i, "").replace(/[^a-z0-9]+/g, " ").trim();
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+/** ISO dates pass through. "Nov 1, 2026", "1 Nov 2026" and day-first "01/11/2026" (the Indian default) become YYYY-MM-DD. */
+export function exportDate(raw: string) {
+  const text = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let m = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (m) return `${m[3]}-${pad(+m[2])}-${pad(+m[1])}`;
+  m = text.match(/^([a-z]{3})[a-z]*\.? (\d{1,2}),? (\d{4})$/i) ?? text.match(/^(\d{1,2}) ([a-z]{3})[a-z]*\.?,? (\d{4})$/i);
+  if (m) {
+    const [day, month] = /^\d/.test(m[1]) ? [+m[1], m[2]] : [+m[2], m[1]];
+    const index = MONTHS.indexOf(month.toLowerCase());
+    if (index >= 0) return `${m[3]}-${pad(index + 1)}-${pad(day)}`;
+  }
+  return text;
+}
+/** "₹4,250.50", "1,234", "12%" and "--" (no data) as exported by ad platforms. */
+const exportNumber = (raw: string) => {
+  const text = raw.trim().replace(/^[^\d.-]+/, "").replace(/[,\s%]/g, "");
+  if (!text || /^-+$/.test(text)) return undefined;
+  return /^\d+(\.\d+)?$/.test(text) ? Number(text) : NaN;
+};
+
+export function parseAnalyticsCsvReport(csv: string): { rows: AnalyticsRow[]; ignored: string[]; skipped: number } {
+  const parsed = Papa.parse<Record<string, string>>(csv.replace(/^\uFEFF/, ""), { header: true, skipEmptyLines: "greedy" });
+  if (parsed.errors.some(error => error.type !== "FieldMismatch" || error.code !== "TooFewFields") || Object.keys(parsed.meta.renamedHeaders ?? {}).length) throw new Error("Check CSV headers, field counts and quoting. Headers must be unique.");
+  const headers = parsed.meta.fields ?? [];
+  const byKey = new Map(headers.map(header => [headerKey(header), header]));
+  const source: Partial<Record<string, string>> = {};
+  for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
+    const found = aliases.find(alias => byKey.has(alias));
+    if (found) source[field] = byKey.get(found);
+  }
+  // Meta exports carry both a reporting range and a Day column; the day is the row's date.
+  if (source.date && byKey.has("day")) source.date = byKey.get("day");
+  if (!source.date) throw new Error("Add a date column (such as Date, Day or Reporting starts) so each row has a date.");
+  // Meta's "Results" counts whatever the campaign optimises for; its result indicator says when that is leads.
+  const indicator = byKey.get("result indicator") ?? byKey.get("result type");
+  if (!source.leads && source.conversions && headerKey(source.conversions) === "results" && indicator && parsed.data.some(row => /lead/i.test(row[indicator] ?? ""))) {
+    source.leads = source.conversions; delete source.conversions;
+  }
+  const used = new Set(Object.values(source));
+  const ignored = headers.filter(header => !used.has(header));
+  const rows: AnalyticsRow[] = [];
+  let skipped = 0;
+  parsed.data.forEach((raw, index) => {
+    const date = raw[source.date!]?.trim() ?? "";
+    // Exports end with totals or notes rows that have no date; they are not measurements.
+    if (!date || /^(total|totals|grand total|summary)/i.test(date)) { skipped++; return; }
+    const input: Record<string, unknown> = { date: exportDate(date) };
+    for (const [field, header] of Object.entries(source)) {
+      if (field === "date" || !header) continue;
+      const cell = raw[header]?.trim() ?? "";
+      if (!cell || /^-+$/.test(cell)) continue;
+      input[field] = (detailKeys as readonly string[]).includes(field) ? cell : exportNumber(cell);
+      if (input[field] === undefined) delete input[field];
+    }
     const result = analyticsRow.safeParse(input);
     if (!result.success) throw new Error("Row " + (index + 2) + ": check the date and use plain non-negative numbers for metrics.");
-    return result.data;
+    rows.push(result.data);
   });
+  if (!rows.length || rows.length > 3000) throw new Error("Import 1–3,000 dated rows per file.");
+  return { rows, ignored, skipped };
+}
+
+export function parseAnalyticsCsv(csv: string): AnalyticsRow[] {
+  return parseAnalyticsCsvReport(csv).rows;
 }
 
 export function validateAnalyticsRows(rows: AnalyticsRow[]) {
@@ -133,4 +209,20 @@ export function metricValue(rows: Fact[], metric: Metric): { value: number | nul
     denominator += b ?? 0;
   }
   return { value: measured && (!ratio || denominator > 0) ? ratio ? numerator / denominator * ratio[2] : numerator : null, measured };
+}
+
+/**
+ * The numbers that matter for what a report actually measures: revenue reports lead with ROAS, lead reports with CPL,
+ * conversion reports with CPA, otherwise delivery. Metrics whose total is zero (for example Revenue ₹0 in a lead campaign) are left out.
+ */
+export function goalMetrics(rows: Pick<AnalyticsRow, "revenue" | "leads" | "conversions" | "orders">[]): Metric[] {
+  const total = (key: "revenue" | "leads" | "conversions" | "orders") => rows.reduce((sum, row) => sum + (row[key] ?? 0), 0);
+  if (total("revenue") > 0) return ["roas", "spend", "revenue", total("orders") > 0 ? "orders" : "conversions"];
+  if (total("leads") > 0) return ["cpl", "spend", "leads", "ctr"];
+  if (total("conversions") > 0) return ["cpa", "spend", "conversions", "ctr"];
+  return ["spend", "impressions", "clicks", "ctr"];
+}
+/** Largest comparison window for which two consecutive windows fit in the data. */
+export function windowFor(dates: number): 1 | 7 | 14 | 30 {
+  return ([30, 14, 7] as const).find(days => dates >= days * 2) ?? 1;
 }

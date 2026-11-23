@@ -129,7 +129,7 @@ test("account workspace is stable across devices and return paths cannot redirec
   assert.match(accountWorkspace(id),/^[a-f0-9]{64}$/);
   assert.throws(()=>accountWorkspace("u_admin"),AuthenticationRequiredError);
   assert.equal(safeReturnPath("/reports?file=example"),"/reports?file=example");
-  for(const path of ["//evil.test","https://evil.test","/\\evil.test","/\n/evil.test",null]) assert.equal(safeReturnPath(path),"/reports");
+  for(const path of ["//evil.test","https://evil.test","/\\evil.test","/\n/evil.test",null]) assert.equal(safeReturnPath(path),"/dashboard");
 });
 
 test("authentication callbacks retain the external HTTPS origin behind a local tunnel", () => {

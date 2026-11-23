@@ -16,31 +16,32 @@ export class UnsupportedFileError extends Error {
   }
 }
 
-export async function parseReportFile(file: File): Promise<{ kind: ReportFileKind; tables: ReportTable[] }> {
+export async function parseReportFile(file: File): Promise<{ kind: ReportFileKind; tables: ReportTable[]; warnings: string[] }> {
   const k = fileKind(file.name);
   if ("error" in k) throw new UnsupportedFileError(k.error, k.hint);
   const base = file.name.replace(/\.[^.]+$/, "");
-  let tables: ReportTable[];
-  if (k.kind === "excel") tables = await parseExcel(file);
+  let tables: ReportTable[], warnings: string[] = [];
+  if (k.kind === "excel") ({ tables, warnings } = await parseExcel(file));
   else if (k.kind === "csv") tables = await parseCsv(file, base);
   else if (k.kind === "pdf") tables = await parsePdf(file);
   else tables = await parsePptx(file);
   if (!tables.length) throw new UnsupportedFileError("No data found in this file", "The file contains no readable cells, tables or text.");
   if (tables.length > MAX_TABLES) throw new Error(`This file has more than ${MAX_TABLES} tables. Split it before uploading; no tables have been discarded.`);
-  return { kind: k.kind, tables };
+  return { kind: k.kind, tables, warnings };
 }
 
 async function parseExcel(file: File) {
   let parts: Record<string, Uint8Array>;
   try {
-    parts = unzipSync(new Uint8Array(await file.arrayBuffer()), { filter: (entry) => /^xl\/worksheets\/[^/]+\.xml$/.test(entry.name) });
+    parts = unzipSync(new Uint8Array(await file.arrayBuffer()), { filter: (entry) => /^xl\/worksheets\/[^/]+\.xml$/.test(entry.name) || entry.name === "xl/workbook.xml" || entry.name === "xl/_rels/workbook.xml.rels" });
   } catch {
     throw new UnsupportedFileError("Could not open this Excel workbook", "It may be damaged, encrypted or password-protected. Open it in Excel and save an unprotected .xlsx copy before uploading.");
   }
-  const issues = Object.entries(parts).flatMap(([path, bytes]) => {
+  const names = sheetNames(parts);
+  const issues = Object.entries(parts).filter(([path]) => path.startsWith("xl/worksheets/")).flatMap(([path, bytes]) => {
     const doc = new DOMParser().parseFromString(strFromU8(bytes), "application/xml");
     if (doc.getElementsByTagName("parsererror").length) throw new UnsupportedFileError("Could not read worksheet XML", `The worksheet ${path} is damaged. Open the original in Excel and save a new .xlsx copy.`);
-    return worksheetIssues(path, Array.from(doc.getElementsByTagNameNS("*", "c")).map((cell) => {
+    return worksheetIssues(names.get(path) ?? path.replace(/^.*\//, ""), Array.from(doc.getElementsByTagNameNS("*", "c")).map((cell) => {
       const type = cell.getAttribute("t");
       const saved = cell.getElementsByTagNameNS("*", "v")[0];
       return {
@@ -50,7 +51,9 @@ async function parseExcel(file: File) {
       };
     }));
   });
-  if (issues.length) throw new UnsupportedFileError(`Cannot read ${issues.length} Excel cell${issues.length === 1 ? "" : "s"} reliably`, `${issues.slice(0, 3).map((issue) => `${issue.sheet}, ${issue.cell}: ${issue.reason}`).join("; ")}. Open the file in Excel or LibreOffice, recalculate formulas, fix cell errors, then save as .xlsx and upload again. Nothing has been imported.`);
+  // One #DIV/0! or an unsaved formula result should not block a whole workbook. Those cells import as
+  // "Not provided" (never zero) and the review step lists them so the person decides before saving.
+  const warnings = issueSummary(issues);
   let sheets: { sheet: string; data: unknown[][] }[];
   try {
     sheets = (await readExcelFile(file)) as unknown as { sheet: string; data: unknown[][] }[];
@@ -58,7 +61,36 @@ async function parseExcel(file: File) {
     throw new UnsupportedFileError("Could not read this Excel file", "It may be damaged or password-protected. Re-save it as .xlsx and try again.");
   }
   if (!sheets.some((sheet) => sheet.data.some((row) => row.some((value) => value != null && String(value).trim() !== "")))) throw new UnsupportedFileError("No readable worksheet values found", "The workbook is empty or contains only visual objects. This importer reads worksheet cells, not text inside images or charts. Nothing has been imported.");
-  return sheets.map((s) => gridToTable(s.sheet, s.data) ?? { name: s.sheet, columns: ["Column 1"], rows: [], rawRows: [], headerRow: null });
+  return { tables: sheets.map((s) => gridToTable(s.sheet, s.data) ?? { name: s.sheet, columns: ["Column 1"], rows: [], rawRows: [], headerRow: null }), warnings };
+}
+
+/** Worksheet part path → the sheet name people see on the tab, from the workbook and its relationships. */
+function sheetNames(parts: Record<string, Uint8Array>) {
+  const names = new Map<string, string>();
+  if (!parts["xl/workbook.xml"] || !parts["xl/_rels/workbook.xml.rels"]) return names;
+  const read = (path: string) => new DOMParser().parseFromString(strFromU8(parts[path]), "application/xml");
+  const targets = new Map(Array.from(read("xl/_rels/workbook.xml.rels").getElementsByTagNameNS("*", "Relationship")).map((rel) => [rel.getAttribute("Id") ?? "", (rel.getAttribute("Target") ?? "").replace(/^\/?(xl\/)?/, "xl/")]));
+  for (const sheet of Array.from(read("xl/workbook.xml").getElementsByTagNameNS("*", "sheet"))) {
+    const id = sheet.getAttribute("r:id") ?? Array.from(sheet.attributes).find((attr) => attr.localName === "id")?.value ?? "";
+    const target = targets.get(id);
+    if (target) names.set(target, sheet.getAttribute("name") ?? target);
+  }
+  return names;
+}
+
+/** "Sheet 'Monthly Summary': 6 formulas without a saved result (C10, D10, E10…)" per sheet and reason. */
+function issueSummary(issues: { sheet: string; cell: string; reason: string }[]) {
+  const groups = new Map<string, string[]>();
+  for (const issue of issues) {
+    const reason = issue.reason === "Formula has no saved result" ? "formula without a saved result" : issue.reason.replace(/^Excel error /, "error ");
+    const key = JSON.stringify([issue.sheet, reason.startsWith("error") ? "error" : reason]);
+    groups.set(key, [...(groups.get(key) ?? []), issue.cell]);
+  }
+  return [...groups].map(([key, cells]) => {
+    const [sheet, reason] = JSON.parse(key) as [string, string];
+    const label = reason === "error" ? `cell${cells.length === 1 ? "" : "s"} with an Excel error such as #DIV/0!` : `${reason}${cells.length === 1 ? "" : "s"}`.replace("formula without a saved results", "formulas without a saved result");
+    return `Sheet "${sheet}": ${cells.length} ${label} (${cells.slice(0, 6).join(", ")}${cells.length > 6 ? "…" : ""}) will show as Not provided.`;
+  });
 }
 
 function parseCsv(file: File, name: string) {

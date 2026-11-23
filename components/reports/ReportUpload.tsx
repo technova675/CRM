@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FileSpreadsheet, Loader2, Upload } from "lucide-react";
 import { ACCEPTED_EXTENSIONS, detectCompany, gridToTable, type ReportFileKind, type ReportTable } from "@/lib/domain/reportFiles";
 import { Badge, Button, Input, Modal, Select, Table, Td, Th } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import { cn } from "@/lib/utils";
+import { useCRM } from "@/lib/store";
 import { parseReportFile, UnsupportedFileError } from "./parseReportFile";
 import { transferReport } from "./transferUpload";
 import { validateUploadSize } from "@/lib/domain/reportTransfer";
@@ -17,7 +18,9 @@ export const KIND_LABEL: Record<ReportFileKind, string> = { excel: "Excel", csv:
 // every slide table and chart), previewed, and the chosen tables are saved to the database.
 export function ReportUploadModal({ onClose, companies, defaultCompany, uploadedBy, onSaved }: { onClose: () => void; companies: string[]; defaultCompany?: string; uploadedBy: string; onSaved: (fileId: string) => void }) {
   const [companyName, setCompanyName] = useState(defaultCompany ?? "");
-  const [file, setFile] = useState<{ name: string; size: number; kind: ReportFileKind; tables: ReportTable[]; originalFile: File } | null>(null);
+  const clients = useCRM((s) => s.clients);
+  const clientNames = useMemo(() => clients.map((c) => c.company), [clients]);
+  const [file, setFile] = useState<{ name: string; size: number; kind: ReportFileKind; tables: ReportTable[]; originalFile: File; warnings: string[] } | null>(null);
   const [preview, setPreview] = useState(0);
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -31,10 +34,12 @@ export function ReportUploadModal({ onClose, companies, defaultCompany, uploaded
     setFile(null);
     try {
       validateUploadSize(f.size);
-      const { kind, tables } = await parseReportFile(f);
-      setFile({ name: f.name, size: f.size, kind, tables, originalFile: f });
-      const detected = detectCompany(tables);
-      if (detected) setCompanyName(detected);
+      const { kind, tables, warnings } = await parseReportFile(f);
+      setFile({ name: f.name, size: f.size, kind, tables, originalFile: f, warnings });
+      // A company column wins; otherwise a CRM client named in the file name or the title rows above the table.
+      const titleText = [f.name, ...tables.flatMap((t) => (t.rawRows ?? []).slice(0, Math.max(0, t.headerRow ?? 0)).flat())].join(" ").toLowerCase();
+      const detected = detectCompany(tables) || clientNames.find((name) => name.length >= 3 && titleText.includes(name.toLowerCase())) || clientNames.find((name) => name.length >= 3 && titleText.replace(/[-_]+/g, " ").includes(name.toLowerCase().split(" ").slice(0, 2).join(" ")));
+      if (detected && !companyName.trim()) setCompanyName(detected);
       setPreview(0);
     } catch (e) {
       setReadError(e instanceof UnsupportedFileError ? `${e.message}. ${e.hint}` : e instanceof Error ? e.message : "The file could not be read. Nothing has been imported.");
@@ -99,7 +104,7 @@ export function ReportUploadModal({ onClose, companies, defaultCompany, uploaded
             <span className="ml-auto flex items-center gap-2 text-xs text-fg-3">
               Company / report owner
               <Input aria-label="Company name" list="report-companies" value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Enter company name" className="w-48" maxLength={300} disabled={saving} />
-              <datalist id="report-companies">{companies.map((c) => <option key={c} value={c} />)}</datalist>
+              <datalist id="report-companies">{[...new Set([...companies, ...clientNames])].map((c) => <option key={c} value={c} />)}</datalist>
             </span>
           </div>
 
@@ -122,9 +127,10 @@ export function ReportUploadModal({ onClose, companies, defaultCompany, uploaded
                 <Select aria-label="Header interpretation" disabled={saving} value={shown.headerRow == null ? "none" : "row"} onChange={(e) => remap(e.target.value === "none" ? null : 0)}><option value="none">No header row — keep every row as data</option><option value="row">Use a row as headers</option></Select>
                 {shown.headerRow != null && <label className="flex items-center gap-2">Row <Input aria-label="Header row number" disabled={saving} type="number" className="w-24" min={1} max={shown.rawRows?.length ?? 1} value={shown.headerRow + 1} onChange={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n > 0 && n <= (shown.rawRows?.length ?? 1)) remap(n - 1); }} /></label>}
               </div>
+              {file.warnings.length > 0 && <div role="alert" className="mb-3 rounded-lg border border-warning/40 bg-warning-soft p-3 text-xs leading-6 text-fg"><p className="font-semibold">Some cells could not be read</p><ul className="mt-1 list-inside list-disc">{file.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><p className="mt-1">Everything else imports normally. To fill these in, open the file in Excel or Google Sheets, let it recalculate, save, and upload again.</p></div>}
               {file.kind === "pdf" && <p className="mb-3 rounded-lg bg-info-soft p-3 text-xs leading-6 text-fg">PDF tables are recovered from the page layout, so check each one in the preview before saving. Text-based PDFs only: scanned pages are not read, and charts or images are not extracted. If no table is found, the page text is imported instead.</p>}
               <p className="mb-3 text-xs leading-6 text-fg-2">Header detection is a suggestion. Check the selected row before saving. The clean preview hides fully empty rows and columns; original cells are preserved. Missing values are labeled, never replaced with zero.</p>
-              {file.kind === "excel" && <p className="mb-3 rounded-lg bg-info-soft p-3 text-xs leading-6 text-fg">All worksheet cell data is read, including saved formula results. This reader does not calculate formulas or render Excel charts, images, formatting or macros. Formula cells without saved results and Excel errors block the import with a cell location. Merged cells may leave empty positions; values are not copied into them.</p>}
+              {file.kind === "excel" && <p className="mb-3 rounded-lg bg-info-soft p-3 text-xs leading-6 text-fg">All worksheet cell data is read, including saved formula results. This reader does not calculate formulas or render Excel charts, images, formatting or macros. Formula cells without saved results and Excel errors import as Not provided and are listed above. Merged cells may leave empty positions; values are not copied into them.</p>}
               <p className="mb-2 text-xs text-fg-2">Preview · <b className="font-medium">{shown.name}</b> · first {Math.min(5, cleanPreview?.rows.length ?? 0)} of {cleanPreview?.rows.length.toLocaleString()} populated rows · {cleanPreview?.hiddenRows} empty rows / {cleanPreview?.hiddenColumns} empty columns hidden</p>
               <div className="overflow-hidden rounded-lg border border-border">
                 <Table>

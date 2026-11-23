@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { ClipboardList, Sparkles } from "lucide-react";
 import { Badge, Button, Card, CardHeader, Field, Input, Select } from "@/components/ui";
 import { useCRM } from "@/lib/store";
-import { metrics, type Metric } from "@/lib/domain/analyticsEngine";
+import { goalMetrics, metrics, windowFor, type Metric } from "@/lib/domain/analyticsEngine";
 import { investigationSources, type AnalyticsNarrative, type Brief, type Evidence, type InvestigationInput } from "@/lib/domain/analyticsInvestigation";
 
 type Result = { brief: NonNullable<Brief>; narrative?: AnalyticsNarrative; provider?: string; note?: string };
@@ -26,8 +26,12 @@ export function AnalyticsAgent({ clientId, initialFeed, writable, onSources }: {
   const options = investigationSources({ clients, campaigns, seoProjects, analyticsFeeds }, clientId);
   const [picked, setPicked] = useState(initialFeed ?? "");
   const source = options.find(option => option.id === picked)?.id ?? options[0]?.id ?? "";
-  const [metric, setMetric] = useState<Metric>("cpa");
-  const [days, setDays] = useState<InvestigationInput["days"]>(7);
+  // Start from the report's own goal and a window its dates can fill, so the first run compares something real.
+  const feedRows = analyticsFeeds.find(feed => feed.id === source)?.rows;
+  const [pickedMetric, setMetric] = useState<Metric | "">("");
+  const [pickedDays, setDays] = useState<InvestigationInput["days"] | 0>(0);
+  const metric: Metric = pickedMetric || (feedRows ? goalMetrics(feedRows)[0] : "cpa");
+  const days: InvestigationInput["days"] = pickedDays || (feedRows ? windowFor(new Set(feedRows.map(row => row.date)).size) : 7);
   const [end, setEnd] = useState("");
   const [pending, setPending] = useState<"evidence" | "ai" | "">("");
   const [result, setResult] = useState<Result>();
@@ -56,7 +60,7 @@ export function AnalyticsAgent({ clientId, initialFeed, writable, onSources }: {
       <CardHeader title="Investigate a metric" subtitle="Compare two equal, consecutive date windows from one measured feed." />
       <form className="space-y-4 p-4" onSubmit={run}>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Field label="Investigation feed"><Select className="min-h-11" value={source} disabled={!!pending} onChange={event => { setPicked(event.target.value); clear(); }}>
+          <Field label="Investigation feed"><Select className="min-h-11" value={source} disabled={!!pending} onChange={event => { setPicked(event.target.value); setMetric(""); setDays(0); clear(); }}>
             {options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
           </Select></Field>
           <Field label="Metric to investigate"><Select className="min-h-11" value={metric} disabled={!!pending} onChange={event => { setMetric(event.target.value as Metric); clear(); }}>
