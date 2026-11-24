@@ -57,3 +57,7 @@ next-env.d.ts
 
 # Local secret notes: never commit
 /Keys.txt
+
+# Waitlist page drafts: kept locally, not in the repository
+/waitlist-landing/
+/waitlist-stamp/
