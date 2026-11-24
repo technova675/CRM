@@ -23,6 +23,7 @@ import {strategyDocSchema,strategyReviewIssues,strategyContent} from "@/lib/doma
 import {campaignSchema,campaignReferenceIssues,campaignReadyIssues} from "@/lib/domain/campaign";
 import {conceptReviewRequired,creativeConceptSchema,creativeReportSchema} from "@/lib/domain/creativeStrategy";
 import {validMediaRecommendation} from "@/lib/mediaServer";
+import {attachCampaignRows,campaignMetricsReady,stripCampaignRows} from "@/lib/campaignMetrics";
 
 const id = z.string().min(1).max(150);
 const text = z.string().max(100_000);
@@ -64,7 +65,7 @@ const schema = z.object({ revision: z.number().int().nonnegative(), operationId:
 }) });
 
 function withoutVault(data:CRMLibrary){
-  const {credentialVault,calendarLinks,...visible}=data; void credentialVault; void calendarLinks;
+  const {credentialVault,calendarLinks,socialConnections,socialPending,...visible}=data; void credentialVault; void calendarLinks; void socialConnections; void socialPending;
   return visible;
 }
 
@@ -85,6 +86,8 @@ export async function GET(req: Request) {
     delete library.aiVisibility;
     delete library.socialStudio;
     delete library.calendarLinks;
+    delete library.socialConnections;
+    delete library.socialPending;
     delete library.indiaCommerce;
     delete library.tenantProfile;
     delete library.integrationRuns;
@@ -95,6 +98,7 @@ export async function GET(req: Request) {
     library.clients??=[];library.tasks??=[];library.projects??=[];library.knowledge??=[];library.approvals??=[];library.proposals??=[];library.meetings??=[];library.onboardingTemplates??=DEFAULT_ONBOARDING_TEMPLATES;
     library.concepts??=[];library.strategies??=[];library.proposalPriceBook??=[];
     for(const key of ["campaigns","invoices","ads","creatives","socialPosts","seoProjects","influencers","engagements","assets","reports","recommendations","reportSchedules"] as const)library[key]??=[];
+    await attachCampaignRows(user.userId,library);
     library.outreach=library.outreach.map(c=>({...c,recipients:c.recipients.map(r=>r.state==="researching"&&(!r.draftStartedAt||Date.now()-Date.parse(r.draftStartedAt)>240000)?{...r,state:"queued",error:"Draft preparation was interrupted. Draft this lead again."}:r)}));
     library.leads=library.leads.map(lead=>lead.research?.status==="running"&&(!lead.research.startedAt||Date.now()-Date.parse(lead.research.startedAt)>180000)?{...lead,research:{...lead.research,status:"failed",error:"The previous research session was interrupted. Run public research again."}}:lead);
     return Response.json({...result,notificationFeed,agencyName},{headers:{"Cache-Control":"private, no-store"}});
@@ -199,8 +203,10 @@ export async function PUT(req: Request) {
         return Response.json({error:"Project milestones need unique IDs, titles and valid deadlines."},{status:400});
     }
     {const knownClients=new Set(data.data.clients.map(c=>c.id));for(const concept of data.data.concepts)if(!knownClients.has(concept.clientId)||concept.existingCreativeIds?.some(id=>!data.data.creatives.some(c=>c.id===id&&c.clientId===concept.clientId)))return Response.json({error:"Concept client and existing creative references must belong to this account."},{status:400});const mapped=new Map<string,string>();for(const creative of data.data.creatives){if(creative.performanceLinks===undefined)continue;const parsedLinks=z.array(z.object({campaignId:id,platform:z.string().min(1).max(100),adId:z.string().min(1).max(200)})).max(100).safeParse(creative.performanceLinks);if(!parsedLinks.success)return Response.json({error:"Invalid creative/ad performance mapping."},{status:400});for(const link of parsedLinks.data){const campaign=data.data.campaigns.find(c=>c.id===link.campaignId&&c.clientId===creative.clientId);const exists=(campaign?.performanceRows as import("@/lib/types").MediaMetricRow[]|undefined)?.some(r=>r.adId===link.adId&&r.platform===link.platform);const key=`${link.campaignId}|${link.platform}|${link.adId}`;if(!exists||mapped.has(key)&&mapped.get(key)!==creative.id)return Response.json({error:"Each dated ad must map to one creative belonging to its client."},{status:400});mapped.set(key,creative.id);}}}
+    // Campaign performance rows are saved only through the media API into campaign_metrics; the browser's copy is dropped here.
+    const metricsTable=await campaignMetricsReady();if(metricsTable)stripCampaignRows(data.data as unknown as CRMLibrary);
     const [auditBase]=await supabaseRequest<{data:CRMLibrary;revision:number}[]>("crm_libraries",{query:{owner_id:`eq.${user.userId}`,select:"data,revision",limit:"1"}});
-    {const previous=auditBase;Object.assign(data.data,{integrationRuns:previous?.data.integrationRuns,aiApprovalPolicy:previous?.data.aiApprovalPolicy,auditEvents:previous?.data.auditEvents??[],tenantProfile:previous?.data.tenantProfile??(previous?undefined:emptyCRMLibrary({id:user.userId,email:user.email}).tenantProfile),tenantMeter:previous?.data.tenantMeter,staffInvites:previous?.data.staffInvites,workspaceApiKeys:previous?.data.workspaceApiKeys,credentialVault:previous?.data.credentialVault,aiVisibility:previous?.data.aiVisibility,socialStudio:previous?.data.socialStudio,calendarLinks:previous?.data.calendarLinks,indiaCommerce:previous?.data.indiaCommerce});data.data.notificationPrefs??=previous?.data.notificationPrefs;data.data.readNotificationIds??=previous?.data.readNotificationIds;data.data.clientReporting=previous?.data.clientReporting;data.data.creativeReviews=previous?.data.creativeReviews;const existingStaff=new Map((previous?.data.team??[]).map(member=>[member.id,member]));
+    {const previous=auditBase;Object.assign(data.data,{integrationRuns:previous?.data.integrationRuns,aiApprovalPolicy:previous?.data.aiApprovalPolicy,auditEvents:previous?.data.auditEvents??[],tenantProfile:previous?.data.tenantProfile??(previous?undefined:emptyCRMLibrary({id:user.userId,email:user.email}).tenantProfile),tenantMeter:previous?.data.tenantMeter,staffInvites:previous?.data.staffInvites,workspaceApiKeys:previous?.data.workspaceApiKeys,credentialVault:previous?.data.credentialVault,aiVisibility:previous?.data.aiVisibility,socialStudio:previous?.data.socialStudio,calendarLinks:previous?.data.calendarLinks,socialConnections:previous?.data.socialConnections,socialPending:previous?.data.socialPending,indiaCommerce:previous?.data.indiaCommerce});data.data.notificationPrefs??=previous?.data.notificationPrefs;data.data.readNotificationIds??=previous?.data.readNotificationIds;data.data.clientReporting=previous?.data.clientReporting;data.data.creativeReviews=previous?.data.creativeReviews;const existingStaff=new Map((previous?.data.team??[]).map(member=>[member.id,member]));
     const invited=new Set(previous?.data.staffInvites?.map(invite=>invite.memberId)??[]);
     for(const old of existingStaff.values()){
       if(!old.staffAuthId&&!invited.has(old.id))continue;
@@ -239,7 +245,7 @@ export async function PUT(req: Request) {
     for(const client of onboarding.data.clients){if(!client.onboardingWorkspace)continue;const normalized=applyOnboarding(onboarding.data,client.id,client.onboardingWorkspace);if(JSON.stringify(normalized)!==JSON.stringify(onboarding.data)){onboarding.data=normalized;onboarding.changed=true;}}
     if(onboarding.changed&&(!schema.safeParse({...data,data:onboarding.data}).success||Buffer.byteLength(JSON.stringify(onboarding.data))>8_000_000))return Response.json({error:"Onboarding exceeds the CRM library limits. Reduce the batch of won deals and retry."},{status:413});
     // Return the originally persisted snapshot when retrying an uncertain save.
-    if(onboarding.changed){const [previous]=await supabaseRequest<{revision:number;data:CRMLibrary;last_operation:string}[]>("crm_libraries",{query:{owner_id:`eq.${user.userId}`,select:"revision,data,last_operation",limit:"1"}});if(previous?.last_operation===data.operationId)return Response.json({revision:previous.revision,data:withoutVault(previous.data)});}
+    if(onboarding.changed){const [previous]=await supabaseRequest<{revision:number;data:CRMLibrary;last_operation:string}[]>("crm_libraries",{query:{owner_id:`eq.${user.userId}`,select:"revision,data,last_operation",limit:"1"}});if(previous?.last_operation===data.operationId){const replay=withoutVault(previous.data);if(metricsTable)await attachCampaignRows(user.userId,replay);return Response.json({revision:previous.revision,data:replay});}}
     if((auditBase?.revision??0)===data.revision)auditLibraryChanges(auditBase?.data,onboarding.data,user.userId);
     checkTenantQuota(auditBase?.data??emptyCRMLibrary({id:user.userId,email:user.email}),onboarding.data,tenantPlan(user.userId,auditBase?.data));
     trimAudit(onboarding.data);
@@ -251,6 +257,7 @@ export async function PUT(req: Request) {
       catch(error){if(!(error instanceof SupabaseDbError)||error.code!=="connection_failed"||attempt===2)throw error;}
     }
     if(revision!==undefined && revision<0)return Response.json({error:"This CRM was updated on another laptop. Export your unsaved changes before reloading the latest version.",code:"crm_conflict"},{status:409});
-    return Response.json({revision,...(onboarding.changed?{data:withoutVault(onboarding.data)}:{})},{headers:{"Cache-Control":"private, no-store"}});
+    const saved=onboarding.changed?withoutVault(onboarding.data):undefined;if(saved&&metricsTable)await attachCampaignRows(user.userId,saved);
+    return Response.json({revision,...(saved?{data:saved}:{})},{headers:{"Cache-Control":"private, no-store"}});
   }catch(error){if(error instanceof SupabaseDbError&&error.code==="40001")return Response.json({error:"This CRM was updated on another laptop. Export your unsaved changes before reloading the latest version.",code:"crm_conflict"},{status:409});return dbError(error);}
 }

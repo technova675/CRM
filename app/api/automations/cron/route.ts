@@ -1,5 +1,6 @@
 import {timingSafeEqual} from "node:crypto";
 import {accountsWithAutomations,automationTick} from "@/lib/automationTick";
+import {accountsWithSocial,publishDue} from "@/lib/social/publish";
 export const maxDuration=300;
 
 const BUDGET_MS=240_000,RUNS_PER_ACCOUNT=5;
@@ -32,5 +33,11 @@ export async function GET(req:Request){
       }
     }catch{failed++;}
   }
-  return Response.json({accounts:owners.length,visited,queued,advanced,failed,ms:Date.now()-started},{headers:{"Cache-Control":"no-store"}});
+  // Scheduled social posts: approved posts whose planned time has passed go out through the official APIs.
+  let published=0,publishFailed=0;
+  for(const owner of await accountsWithSocial().catch(()=>[] as string[])){
+    if(Date.now()-started>BUDGET_MS)break;
+    try{const r=await publishDue(owner);published+=r.sent;publishFailed+=r.failed;}catch{publishFailed++;}
+  }
+  return Response.json({accounts:owners.length,visited,queued,advanced,failed,published,publishFailed,ms:Date.now()-started},{headers:{"Cache-Control":"no-store"}});
 }

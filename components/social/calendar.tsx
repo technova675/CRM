@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SocialPost } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button, Card } from "@/components/ui";
-import { PlatformChip, STAGE_TONE } from "./shared";
+import { PLATFORMS, PlatformChip, PlatformLogo, STAGE_TONE } from "./shared";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const key = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -61,15 +61,16 @@ export function SocialCalendar({ posts, month, onMonth, onOpen, writable, client
   const byDay = useMemo(() => {
     const m = new Map<string, SocialPost[]>();
     posts.forEach((p) => {
-      const at = p.publishedAt ?? p.scheduledAt;
+      // Uploaded calendar drafts sit on their planned date until they are approved and scheduled.
+      const at = p.publishedAt ?? p.scheduledAt ?? p.plannedAt;
       if (!at) return;
       const k = key(new Date(at));
       m.set(k, [...(m.get(k) ?? []), p]);
     });
-    m.forEach((list) => list.sort((a, b) => (a.publishedAt ?? a.scheduledAt ?? "").localeCompare(b.publishedAt ?? b.scheduledAt ?? "")));
+    m.forEach((list) => list.sort((a, b) => (a.publishedAt ?? a.scheduledAt ?? a.plannedAt ?? "").localeCompare(b.publishedAt ?? b.scheduledAt ?? b.plannedAt ?? "")));
     return m;
   }, [posts]);
-  const unscheduled = useMemo(() => posts.filter((p) => !p.scheduledAt && !p.publishedAt), [posts]);
+  const unscheduled = useMemo(() => posts.filter((p) => !p.scheduledAt && !p.publishedAt && !p.plannedAt), [posts]);
 
   const onDrop = (e: React.DragEvent, d: Date) => {
     e.preventDefault();
@@ -134,6 +135,12 @@ export function SocialCalendar({ posts, month, onMonth, onOpen, writable, client
           </div>
         </div>
       )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border px-3 py-2.5" aria-label="Networks">
+        {PLATFORMS.map((n) => {
+          const count = posts.filter((p) => p.platform === n).length;
+          return <span key={n} className="flex items-center gap-1.5 text-xs text-fg-2"><PlatformLogo platform={n} size={18} />{n}{count > 0 && <span className="tabular-nums text-fg-3">· {count}</span>}</span>;
+        })}
+      </div>
     </Card>
   );
 }

@@ -16,6 +16,7 @@
     "test:outreach": "node --test scripts/outreach.test.mjs",
     "test:outreach:integration": "node --env-file=.env.local scripts/outreach-integration.mjs",
     "test:research": "node --test scripts/research.test.mjs scripts/lead-enrich.test.mjs",
+    "test:social": "node --import ./scripts/test-loader.mjs --test scripts/social-publishing.test.mjs scripts/social-publishers.test.mjs scripts/social-oauth.test.mjs scripts/social-studio.test.mjs",
     "test:research:integration": "node --env-file=.env.local scripts/research-integration.mjs",
     "test:crm": "node --test scripts/crm.test.mjs",
     "test:crm:integration": "node --env-file=.env.local scripts/crm-integration.mjs",

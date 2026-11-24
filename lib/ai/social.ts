@@ -138,6 +138,8 @@ export const PLATFORM_FORMATS: Record<SocialPlatform, { format: SocialFormat; we
   LinkedIn: [{ format: "Carousel", weight: 4 }, { format: "Static", weight: 3 }, { format: "Text", weight: 3 }],
   YouTube: [{ format: "Short", weight: 1 }],
   X: [{ format: "Text", weight: 7 }, { format: "Static", weight: 3 }],
+  Threads: [{ format: "Text", weight: 5 }, { format: "Static", weight: 3 }, { format: "Carousel", weight: 2 }],
+  Reddit: [{ format: "Text", weight: 6 }, { format: "Static", weight: 3 }],
 };
 // Common benchmark windows (industry guidance, not client data) — used until the client has enough history.
 export const BEST_HOURS: Record<SocialPlatform, number[]> = {
@@ -146,15 +148,19 @@ export const BEST_HOURS: Record<SocialPlatform, number[]> = {
   LinkedIn: [9, 12, 17],
   YouTube: [18, 20],
   X: [9, 13, 18],
+  Threads: [12, 19],
+  Reddit: [8, 20],
 };
-export const HASHTAG_RANGE: Record<SocialPlatform, [number, number]> = { Instagram: [3, 10], Facebook: [0, 3], LinkedIn: [3, 5], YouTube: [2, 3], X: [0, 2] };
-const CAPTION_RANGE: Record<SocialPlatform, [number, number]> = { Instagram: [80, 1200], Facebook: [40, 500], LinkedIn: [150, 1300], YouTube: [20, 300], X: [20, 280] };
+export const HASHTAG_RANGE: Record<SocialPlatform, [number, number]> = { Instagram: [3, 10], Facebook: [0, 3], LinkedIn: [3, 5], YouTube: [2, 3], X: [0, 2], Threads: [0, 3], Reddit: [0, 0] };
+const CAPTION_RANGE: Record<SocialPlatform, [number, number]> = { Instagram: [80, 1200], Facebook: [40, 500], LinkedIn: [150, 1300], YouTube: [20, 300], X: [20, 280], Threads: [20, 500], Reddit: [100, 4000] };
 const VALID_FORMATS: Record<SocialPlatform, SocialFormat[]> = {
   Instagram: ["Reel", "Carousel", "Static", "Story"],
   Facebook: ["Reel", "Static", "Carousel", "Story", "Text"],
   LinkedIn: ["Carousel", "Static", "Text", "Short"],
   YouTube: ["Short"],
   X: ["Text", "Static"],
+  Threads: ["Text", "Static", "Carousel", "Reel"],
+  Reddit: ["Text", "Static", "Carousel"],
 };
 export function defaultPlatforms(client: Client): SocialPlatform[] {
   if (["Fintech", "Real Estate", "Education"].includes(client.industry)) return ["Instagram", "LinkedIn"];

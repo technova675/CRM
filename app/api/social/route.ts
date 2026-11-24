@@ -11,6 +11,7 @@ import {socialContent,socialDraftSchema,socialGenerationSchema,socialOutputSchem
 import {socialDigest,socialConnector,socialConnectorConfigured,publicationURL} from "@/lib/socialServer";
 import type {SocialPost,Client} from "@/lib/types";
 import {studioState,LIMITS,rateOf} from "@/lib/domain/socialStudio";
+import {SUPPORT,formatFor,postIssues} from "@/lib/domain/socialPublishing";
 import type {CRMLibrary} from "@/lib/domain/crmLibrary";
 export const maxDuration=120;
 const envelope=z.object({operationId:z.string().uuid(),action:z.enum(["save","delete","generate","review","submit","approve","reject","schedule","dispatch","record-publication","metrics","analyze"]),postId:z.string().min(1).max(150).optional(),expectedUpdatedAt:z.string().max(100).optional(),data:z.unknown().optional()});
@@ -66,6 +67,9 @@ export async function POST(req:Request){if(!sameOrigin(req))return Response.json
  if(["generate","review","analyze"].includes(input.action)){if(active.has(user.userId))throw new SocialError("A social AI request is already running. Please wait.",429);active.add(user.userId);lock=user.userId;}
  if(input.action==="save"){
   const draft=check(socialDraftSchema,input.data);if(!library.clients.some(c=>c.id===draft.clientId))throw new SocialError("Client not found in this account.",404);
+  // The post type decides the network rules; format is kept in step for older screens.
+  if(draft.postType){const rule=SUPPORT[draft.platform][draft.postType];if(!rule.ok)throw new SocialError(rule.why!);draft.format=formatFor(draft.postType,draft.platform);}
+  if(draft.platform!=="Reddit")delete draft.subreddit;else if(draft.subreddit)draft.subreddit=draft.subreddit.replace(/^r\//i,"");
   if(draft.strategyId&&!library.strategies.some(s=>s.id===draft.strategyId&&s.clientId===draft.clientId&&s.status==="Approved"))throw new SocialError("Select an approved strategy for this client.");
   if(input.postId&&!post)throw new SocialError("Post not found in this account.",404);
   if(post&&(post.delivery||post.stage==="Published"))throw new SocialError("Published or dispatched content is locked. Create a new draft to change the content.",409);
@@ -94,6 +98,7 @@ export async function POST(req:Request){if(!sameOrigin(req))return Response.json
   const generated=await synthesize(user.userId,socialReviewSchema,"Review hook clarity, caption, hashtag relevance, format fit, accessibility/asset needs and unsupported claims. The score is editorial opinion, not predicted performance. Flag unverified claims, missing assets and assumptions. A human must approve separately.",{post,knowledge:library.knowledge.find(k=>k.clientId===post!.clientId)});
   result=await mutate(data=>{const p=current(data);unchanged(p);Object.assign(p,{workflowVersion:2,stage:"AI Review",review:{...generated.output,digest:socialDigest(p),at,source:generated.source},humanApproval:undefined,scheduledAt:undefined,scheduleTimezone:undefined,updatedAt:at});});
  }else if(input.action==="dispatch"){
+  {const problems=postIssues(post!);if(problems.length)throw new SocialError(`This post cannot go to ${post!.platform} yet: ${problems.join(" ")}`);}
   if(!socialConnectorConfigured())throw new SocialError("Live scheduling is not configured. Planned dates do not publish automatically. Publish manually and record the live post URL, or connect an authorized social scheduler.",503);
   if(post!.delivery)throw new SocialError("This post was already dispatched. Check the scheduler before any retry.",409);
   if(post!.format!=="Text"&&!post!.mediaUrls?.length&&!post!.creativeId)throw new SocialError("Add approved media URLs before submitting this format to a scheduler. A production plan alone is not a media asset.");
@@ -114,7 +119,7 @@ export async function POST(req:Request){if(!sameOrigin(req))return Response.json
     else if(input.action==="reject")Object.assign(p,editableSocial(p,{},at));
     else if(input.action==="submit"){if(!p.review||p.review.digest!==socialDigest(p))throw new SocialError("Run AI review on the current saved content first.");p.stage="Awaiting Approval";p.humanApproval=undefined;}
     else if(input.action==="approve"){if(p.humanApproval)throw new SocialError("This post is already approved.",409);if(p.stage!=="Awaiting Approval"||p.review?.digest!==socialDigest(p))throw new SocialError("Submit the current reviewed content for human approval first.");p.humanApproval={digest:socialDigest(p),by:user.userId,at};}
-    else if(input.action==="schedule"){const schedule=check(z.object({scheduledAt:z.string().datetime(),timezone:z.string().min(1).max(100)}),input.data),issue=socialScheduleIssue(p,socialDigest(p),schedule.scheduledAt,schedule.timezone);if(issue)throw new SocialError(issue);const gate=clientApprovalIssue(data,p);if(gate)throw new SocialError(gate);p.stage="Scheduled";p.scheduledAt=schedule.scheduledAt;p.scheduleTimezone=schedule.timezone;}
+    else if(input.action==="schedule"){const schedule=check(z.object({scheduledAt:z.string().datetime(),timezone:z.string().min(1).max(100)}),input.data),issue=socialScheduleIssue(p,socialDigest(p),schedule.scheduledAt,schedule.timezone);if(issue)throw new SocialError(issue);const gate=clientApprovalIssue(data,p);if(gate)throw new SocialError(gate);p.stage="Scheduled";p.scheduledAt=schedule.scheduledAt;p.scheduleTimezone=schedule.timezone;delete p.publishError;}
    }
    p.workflowVersion=2;p.updatedAt=at;
   });

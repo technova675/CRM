@@ -798,7 +798,7 @@ export interface Recommendation {
   resolvedBy?: ID;
 }
 export interface MediaMetricRow {
- id:string;date:string;platform:string;adId?:string;adName?:string;source:"CSV import"|"Platform sync";importedAt:string;
+ id:string;date:string;platform:string;adId?:string;adName?:string;source:"Manual entry"|"CSV import"|"Platform sync";importedAt:string;
  spend:number|null;impressions:number|null;reach:number|null;clicks:number|null;leads:number|null;conversions:number|null;revenue:number|null;frequency?:number|null;
 }
 
@@ -994,12 +994,20 @@ export interface VideoProject {
 // ---------- Social ----------
 export const SOCIAL_STAGES = ["Idea", "Draft", "AI Review", "Awaiting Approval", "Scheduled", "Published"] as const;
 export type SocialStage = (typeof SOCIAL_STAGES)[number];
-export type SocialPlatform = "Instagram" | "LinkedIn" | "Facebook" | "X" | "YouTube";
+export type SocialPlatform = "Instagram" | "LinkedIn" | "Facebook" | "X" | "YouTube" | "Threads" | "Reddit";
 export interface SocialPost {
   id: ID;
   clientId: ID;
   platform: SocialPlatform;
   format: "Reel" | "Carousel" | "Static" | "Story" | "Text" | "Short";
+  /** What the post carries; decides which networks can publish it. Older posts derive it from format and media. */
+  postType?: "Text only" | "Image only" | "Text + images" | "Video only" | "Text + video";
+  /** Date the content calendar planned it for; scheduling still needs review and approval. */
+  plannedAt?: string;
+  /** Reddit only: the community to post in, without "r/". */
+  subreddit?: string;
+  /** Why the last publishing attempt did not go through, in plain words. Cleared when the post is edited or rescheduled. */
+  publishError?: { at: string; message: string };
   stage: SocialStage;
   pillar: string;
   title: string;

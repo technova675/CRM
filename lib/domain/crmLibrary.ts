@@ -9,6 +9,10 @@ export interface CRMLibrary extends OnboardingLibrary {
   socialStudio?: import("./socialStudio").SocialStudioState;
   /** External calendar connection per login; holds sealed credentials, so it never leaves the server. */
   calendarLinks?: Record<string, import("./calendar").CalendarLink>;
+  /** Server-owned: connected social accounts per client and network, tokens sealed. */
+  socialConnections?: Record<string, import("../social/connections").StoredConnection>;
+  /** Server-owned: a Meta sign-in waiting for the team to pick which Facebook Page to use. */
+  socialPending?: Record<string, import("../social/connections").PendingPages>;
   credentialVault?: Partial<Record<import("../workspaceVault").VaultSlot,import("../workspaceVault").SealedCredential>>;
   workspaceApiKeys?: {id:string;name:string;prefix:string;hash:string;createdAt:string;revokedAt?:string}[];
   staffInvites?: {memberId:string;hash:string;expiresAt:string}[];

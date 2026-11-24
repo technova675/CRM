@@ -26,6 +26,8 @@ export function createBackup(owner:string,workspace:string,data:CRMLibrary){
   delete snapshot.workspaceApiKeys;
   delete snapshot.credentialVault;
   delete snapshot.calendarLinks;
+  delete snapshot.socialConnections;
+  delete snapshot.socialPending;
   for(const member of snapshot.team)delete member.staffAuthId;
   for(const campaign of snapshot.outreach??[])for(const recipient of campaign.recipients)delete recipient.approvalToken;
   const payload:Backup={version:2,createdAt:new Date().toISOString(),workspace,data:snapshot};

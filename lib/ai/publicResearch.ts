@@ -50,6 +50,22 @@ export async function fetchPublicHtml(value:string,signal?:AbortSignal,onUrl?:(u
     return{url:current,html};
   }throw new Error("Too many public-page redirects");
 }
+/** Downloads a public media file (image or video) through the private-network guard, up to maxBytes. */
+export async function fetchPublicMedia(value:string,maxBytes:number,signal?:AbortSignal):Promise<{url:string;bytes:Buffer;contentType:string}>{
+  let current=value;
+  for(let redirects=0;redirects<4;redirects++){
+    const url=publicResearchUrl(current);current=url.href;
+    const response=await fetch(url,{dispatcher,redirect:"manual",cache:"no-store",signal:signal??AbortSignal.timeout(120_000)} as RequestInit & {dispatcher:Agent});
+    if([301,302,303,307,308].includes(response.status)){await response.body?.cancel();const location=response.headers.get("location");if(!location)throw new Error("Media link redirects nowhere.");current=new URL(location,url).href;continue;}
+    if(!response.ok){await response.body?.cancel();throw new Error(`Media link returned HTTP ${response.status}.`);}
+    const declared=Number(response.headers.get("content-length")??0);if(declared>maxBytes){await response.body?.cancel();throw new Error(`Media file is larger than ${Math.round(maxBytes/1e6)} MB.`);}
+    const reader=response.body?.getReader();if(!reader)throw new Error("Media link has no file.");
+    const parts:Uint8Array[]=[];let size=0;
+    try{while(true){const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>maxBytes)throw new Error(`Media file is larger than ${Math.round(maxBytes/1e6)} MB.`);parts.push(part.value);}}catch(error){await reader.cancel();throw error;}
+    return {url:current,bytes:Buffer.concat(parts),contentType:(response.headers.get("content-type")??"application/octet-stream").split(";")[0].trim()};
+  }
+  throw new Error("Media link redirects too many times.");
+}
 export async function readPublicDocument(value:string,id:string,signal?:AbortSignal):Promise<PublicDocument>{
   const checkedAt=new Date().toISOString();let current=value;
   try{

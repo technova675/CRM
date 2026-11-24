@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCRM } from "@/lib/store";
 import type { SocialPlatform, SocialPost, SocialStage } from "@/lib/types";
 import { reviewPost, type SocialCtx } from "@/lib/ai/social";
@@ -7,14 +8,21 @@ import { runAgentJob, callAgent } from "@/lib/ai/client";
 import { cn, uid } from "@/lib/utils";
 import type { Tone } from "@/components/ui";
 
-export const PLATFORMS: SocialPlatform[] = ["Instagram", "Facebook", "LinkedIn", "YouTube", "X"];
-export const PLATFORM_META: Record<SocialPlatform, { short: string; color: string; integration?: string }> = {
-  Instagram: { short: "IG", color: "#e1306c", integration: "instagram" },
-  Facebook: { short: "FB", color: "#1877f2", integration: "facebook_pages" },
-  LinkedIn: { short: "IN", color: "#0a66c2", integration: "linkedin" },
-  YouTube: { short: "YT", color: "#ff0000", integration: "youtube" },
-  X: { short: "X", color: "#71717a" },
+export const PLATFORMS: SocialPlatform[] = ["Instagram", "Facebook", "LinkedIn", "X", "Threads", "Reddit", "YouTube"];
+// Official marks, downloaded from each network's own site into public/integrations.
+export const PLATFORM_META: Record<SocialPlatform, { short: string; color: string; logo: string; integration?: string }> = {
+  Instagram: { short: "IG", color: "#e1306c", logo: "/integrations/instagram.webp", integration: "instagram" },
+  Facebook: { short: "FB", color: "#1877f2", logo: "/integrations/facebook.png", integration: "facebook_pages" },
+  LinkedIn: { short: "IN", color: "#0a66c2", logo: "/integrations/linkedin.svg", integration: "linkedin" },
+  YouTube: { short: "YT", color: "#ff0000", logo: "/integrations/youtube.png", integration: "youtube" },
+  X: { short: "X", color: "#71717a", logo: "/integrations/x.png" },
+  Threads: { short: "TH", color: "#52525b", logo: "/integrations/threads.webp" },
+  Reddit: { short: "RD", color: "#ff4500", logo: "/integrations/reddit.png" },
 };
+export function PlatformLogo({ platform, size = 16, className }: { platform: SocialPlatform; size?: number; className?: string }) {
+  const m = PLATFORM_META[platform];
+  return <Image src={m.logo} alt="" width={size} height={size} title={platform} unoptimized={m.logo.endsWith(".svg")} className={cn("shrink-0 rounded-[4px] object-contain", className)} style={{ width: size, height: size }} />;
+}
 export const STAGE_TONE: Record<SocialStage, Tone> = {
   Idea: "neutral",
   Draft: "neutral",
@@ -25,12 +33,7 @@ export const STAGE_TONE: Record<SocialStage, Tone> = {
 };
 
 export function PlatformChip({ platform, className }: { platform: SocialPlatform; className?: string }) {
-  const m = PLATFORM_META[platform];
-  return (
-    <span className={cn("inline-flex h-4 min-w-5 shrink-0 items-center justify-center rounded px-1 text-[9px] font-bold text-white", className)} style={{ background: m.color }} title={platform}>
-      {m.short}
-    </span>
-  );
+  return <span className={cn("inline-flex shrink-0", className)} aria-label={platform}><PlatformLogo platform={platform} /></span>;
 }
 
 // Returns the integration status for a platform: connected | error | available | missing.

@@ -10,11 +10,12 @@ import {reserveTenantUsage} from "@/lib/tenantServer";
 import {knowledgeAccess,knowledgeForDraft,CLIENT_SOURCE_RULES} from "@/lib/domain/clientKnowledge";
 import {editableSocial,socialFormats,socialPlatforms} from "@/lib/domain/socialWorkspace";
 import {socialDigest} from "@/lib/socialServer";
+import {calendarRows,formatFor} from "@/lib/domain/socialPublishing";
 import {writeLibraryAsset,removeLibraryAsset} from "@/lib/reportR2";
 import type {CRMLibrary} from "@/lib/domain/crmLibrary";
 import type {SocialPost} from "@/lib/types";
 import {studioState,LIMITS,accountInputSchema,auditOutputSchema,planInputSchema,planOutputSchema,studioInputSchema,studioOutputSchema,recommendationSchema,STUDIO_TASKS,
-  importMetrics,mergeMetrics,postResults,analyticsSummary,accountFacts,bulkPosts,unsupportedClaims,type SocialStudioState} from "@/lib/domain/socialStudio";
+  importMetrics,mergeMetrics,postResults,analyticsSummary,accountFacts,bulkPosts,parseCSV,unsupportedClaims,type SocialStudioState} from "@/lib/domain/socialStudio";
 export const maxDuration=120;
 
 class StudioError extends Error{constructor(message:string,public status=400){super(message);}}
@@ -149,6 +150,17 @@ export async function POST(req:Request){
     await save(data=>{for(let i=0;i<v.data.copies;i++){const id=`${operationId}-${i}`;if(data.socialPosts.some(p=>p.id===id))continue;
      data.socialPosts.unshift({id,clientId:post.clientId,platform:post.platform,format:post.format,stage:"Draft",pillar:post.pillar,title:`${post.title} (copy${v.data.copies>1?" "+(i+1):""})`.slice(0,300),hook:post.hook,caption:post.caption,hashtags:post.hashtags,contentPlan:post.contentPlan,brief:post.brief,campaign:post.campaign,mediaUrls:post.mediaUrls,ownerId:user.userId,createdAt:at,updatedAt:at,workflowVersion:2} as SocialPost);}});
     return reply({ok:true});
+   }
+   case "calendar":{
+    // A whole content calendar: one post per row and network, placed on its planned date as a draft.
+    // Rows with problems are imported too when asked, so the team can fix them in the post window.
+    const v=z.object({clientId:z.string(),csv:z.string().min(1).max(2_400_000),skipIssues:z.boolean().default(false)}).safeParse(raw);if(!v.success)throw new StudioError("Choose a calendar file.");clientOf(v.data.clientId);
+    const {posts,errors}=calendarRows(parseCSV(v.data.csv)),chosen=posts.filter(p=>!v.data.skipIssues||!p.issues.length);
+    if(!chosen.length)throw new StudioError(errors.slice(0,3).join(" ")||"No posts could be imported. Fix the rows shown in the preview.");
+    await save(data=>{chosen.forEach((x,i)=>{const id=`${operationId}-${i}`;if(data.socialPosts.some(p=>p.id===id))return;
+      data.socialPosts.unshift({id,clientId:v.data.clientId,platform:x.platform,format:formatFor(x.postType,x.platform),postType:x.postType,title:x.title,pillar:x.pillar,hook:"",caption:x.caption,hashtags:x.hashtags,mediaUrls:x.mediaUrls,
+        ...(x.subreddit?{subreddit:x.subreddit}:{}),...(x.plannedAt?{plannedAt:x.plannedAt}:{}),campaign:x.campaign||undefined,stage:"Draft",ownerId:user.userId,createdAt:at,updatedAt:at,workflowVersion:2,generationSource:"Content calendar upload"} as SocialPost);});});
+    return reply({ok:true,created:chosen.length,needFixing:chosen.filter(p=>p.issues.length).length,skipped:posts.length-chosen.length,errors});
    }
    case "bulk":{
     const v=z.object({clientId:z.string(),csv:z.string().min(1).max(2_000_000)}).safeParse(raw);if(!v.success)throw new StudioError("Choose a CSV file.");clientOf(v.data.clientId);

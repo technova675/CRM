@@ -1,14 +1,15 @@
 import {z} from "zod";
 import type {SocialPost} from "../types.ts";
 
-export const socialPlatforms=["Instagram","LinkedIn","Facebook","X","YouTube"] as const;
+export const socialPlatforms=["Instagram","LinkedIn","Facebook","X","YouTube","Threads","Reddit"] as const;
 export const socialFormats=["Reel","Carousel","Static","Story","Text","Short"] as const;
 export const socialDraftSchema=z.object({
   clientId:z.string().min(1).max(150),platform:z.enum(socialPlatforms),format:z.enum(socialFormats),
   title:z.string().trim().min(1).max(300),pillar:z.string().trim().min(1).max(200),
   hook:z.string().max(2000),caption:z.string().max(15000),hashtags:z.array(z.string().max(100)).max(40),
   brief:z.string().max(12000).default(""),strategyId:z.string().max(150).optional(),contentPlan:z.string().max(12000).default(""),campaign:z.string().trim().max(120).optional(),
-  mediaUrls:z.array(z.string().url().max(2000).refine(s=>s.startsWith("https://"))).max(10).default([]),
+  mediaUrls:z.array(z.string().url().max(2000).refine(s=>s.startsWith("https://"))).max(20).default([]),
+  postType:z.enum(["Text only","Image only","Text + images","Video only","Text + video"]).optional(),subreddit:z.string().trim().regex(/^(r\/)?[A-Za-z0-9_]{2,21}$/,"Enter a subreddit name like r/IndiaInvestments").optional(),plannedAt:z.string().datetime().optional(),
 });
 export const socialGenerationSchema=z.object({clientId:z.string().min(1).max(150),platform:z.enum(socialPlatforms),format:z.enum(socialFormats),brief:z.string().trim().min(10).max(12000),strategyId:z.string().max(150).optional(),count:z.number().int().min(1).max(8)});
 export const socialOutputSchema=z.object({posts:z.array(z.object({title:z.string().min(1).max(300),pillar:z.string().min(1).max(200),hook:z.string().min(1).max(2000),caption:z.string().min(1).max(15000),hashtags:z.array(z.string().max(100)).max(40),contentPlan:z.string().min(1).max(12000)})).min(1).max(8)});
@@ -20,10 +21,10 @@ export const socialEvidenceSchema=z.array(z.object({url:z.string().url().max(200
 export const socialAnalysisSchema=z.object({summary:z.string().max(4000),competitors:z.array(z.string().max(2000)).max(10),gaps:z.array(z.string().max(2000)).max(10),trends:z.array(z.string().max(2000)).max(10),performance:z.array(z.string().max(2000)).max(10),nextIdeas:z.array(z.string().max(2000)).max(10)});
 
 // Fixed order and explicit fields keep approvals bound to the exact copy and destination.
-export function socialContent(post:SocialPost){return JSON.stringify({clientId:post.clientId,platform:post.platform,format:post.format,title:post.title,pillar:post.pillar,hook:post.hook,caption:post.caption,hashtags:post.hashtags,brief:post.brief??"",strategyId:post.strategyId??"",contentPlan:post.contentPlan??"",mediaUrls:post.mediaUrls??[]});}
+export function socialContent(post:SocialPost){return JSON.stringify({clientId:post.clientId,platform:post.platform,format:post.format,title:post.title,pillar:post.pillar,hook:post.hook,caption:post.caption,hashtags:post.hashtags,brief:post.brief??"",strategyId:post.strategyId??"",contentPlan:post.contentPlan??"",mediaUrls:post.mediaUrls??[],postType:post.postType,subreddit:post.subreddit});}
 export function editableSocial(post:SocialPost,patch:Partial<SocialPost>,at:string):SocialPost {
   if(post.stage==="Published"||post.delivery)throw new Error("Published or dispatched posts are locked. Create a new draft to change the content.");
-  return {...post,...patch,workflowVersion:2,stage:"Draft",updatedAt:at,review:undefined,aiReview:undefined,humanApproval:undefined,scheduledAt:undefined,scheduleTimezone:undefined};
+  return {...post,...patch,workflowVersion:2,stage:"Draft",updatedAt:at,review:undefined,aiReview:undefined,humanApproval:undefined,scheduledAt:undefined,scheduleTimezone:undefined,publishError:undefined};
 }
 export function socialScheduleIssue(post:SocialPost,digest:string,at:string,timezone:string,now=Date.now()){
   if(!post.review||post.review.digest!==digest||!post.humanApproval||post.humanApproval.digest!==digest)return "AI review and human approval of the current content are required.";
