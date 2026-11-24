@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, BarChart3, CheckCircle2, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight, CheckCircle2, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { safeReturnPath } from "@/lib/auth/redirect";
@@ -70,11 +71,11 @@ function LoginForm() {
   const copy = COPY[mode];
   return <main className="grid min-h-dvh lg:grid-cols-2">
     <section className="relative hidden flex-col justify-between overflow-hidden lg:flex bg-[#151e38] px-8 py-10 text-white sm:px-14 lg:p-16">
-      <div className="flex items-center gap-3 text-lg font-semibold tracking-tight"><span className="grid size-10 place-items-center rounded-xl bg-white/10"><BarChart3 size={22} aria-hidden="true" /></span>Adbibe OS</div>
+      <div className="flex items-center gap-3 text-lg font-semibold tracking-tight"><Image src="/logo.png" alt="" width={40} height={40} priority className="size-10 rounded-xl" />Adbibe OS</div>
       <div className="my-12 max-w-lg lg:my-24"><p className="mb-5 text-xs font-semibold tracking-[.2em] text-indigo-200">FOR MARKETING AGENCIES</p><h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">Leads to clients.<br /><span className="text-indigo-200">Campaigns to reports.</span></h1><p className="mt-6 max-w-md text-sm leading-7 text-slate-300">Your pipeline, clients, campaigns and client reports in one workspace, with AI that works from your real data. Everything is saved to your account, on every device.</p><div className="mt-8 flex items-center gap-2 text-xs text-slate-300"><LockKeyhole size={15} aria-hidden="true" /> Each workspace is private to its own team</div></div>
       <p className="text-xs text-slate-300">© Adbibe OS</p>
     </section>
-    <section className="flex min-h-dvh items-center justify-center px-6 py-12 sm:px-12"><div className="w-full max-w-sm"><div className="mb-10 flex items-center gap-2 text-lg font-semibold lg:hidden"><BarChart3 className="text-accent-text" size={24} aria-hidden="true" />Adbibe OS</div>
+    <section className="flex min-h-dvh items-center justify-center px-6 py-12 sm:px-12"><div className="w-full max-w-sm"><div className="mb-10 flex items-center gap-2 text-lg font-semibold lg:hidden"><Image src="/logo.png" alt="" width={28} height={28} className="size-7 rounded-lg" />Adbibe OS</div>
       <h2 className="text-3xl font-semibold tracking-tight">{copy.title}</h2>
       <p className="mb-8 mt-3 text-sm leading-6 text-fg-2">{copy.sub}</p>
       {notice && <div role="status" className="mb-5 flex gap-2 rounded-xl border border-success/30 bg-success-soft p-4 text-sm leading-6"><CheckCircle2 size={18} className="mt-1 shrink-0 text-success" aria-hidden="true" />{notice}</div>}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Image from "next/image";
 import { Bell, CircleHelp, LogOut, Lock, Menu, Moon, Search, Settings, Sparkles, Sun, X } from "lucide-react";
 import { useCRM, useMe } from "@/lib/store";
 import { can, moduleFromPath, MODULE_LABEL, ROLE_LABEL, setPermissionOverrides } from "@/lib/permissions";
@@ -45,7 +46,7 @@ function useTheme() {
 function Logo() {
   return (
     <Link href="/dashboard" className="flex items-center gap-2 px-2">
-      <span className="ai-gradient grid size-7 place-items-center rounded-lg text-white font-bold text-sm shadow-card">A</span>
+      <Image src="/logo.png" alt="" width={28} height={28} priority className="size-7 rounded-lg shadow-card" />
       <span className="font-semibold tracking-tight">Adbibe</span>
       <span className="rounded-md border border-border px-1.5 text-[10px] font-medium text-fg-3">OS</span>
     </Link>

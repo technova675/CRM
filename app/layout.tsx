@@ -9,6 +9,10 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: { default: "Adbibe OS", template: "%s · Adbibe OS" },
   description: "AI-powered CRM and agency operating system for Adbibe.",
+  // Link previews (Slack, WhatsApp, email) show the logo. APP_URL makes the image address absolute in production.
+  ...(process.env.APP_URL ? { metadataBase: new URL(process.env.APP_URL) } : {}),
+  openGraph: { title: "Adbibe OS", description: "AI-powered CRM and agency operating system for Adbibe.", siteName: "Adbibe OS", images: [{ url: "/logo.png", width: 64, height: 64, alt: "Adbibe OS" }] },
+  twitter: { card: "summary", images: ["/logo.png"] },
 };
 
 export const viewport: Viewport = {
