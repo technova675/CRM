@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adbibe OS · Four questions, every morning · Join the waitlist</title>
+<meta name="description" content="Adbibe OS is an operating system for Indian marketing agencies. Every morning it asks what is happening, why, what to do and how, across every client, and your team approves the answer.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#18191b;--surface:#222427;--surface-2:#2b2d31;--ink:#eff0f1;--muted:#a9abb0;--accent:#ff4a1f;--accent-ink:#18191b;
+  --field:#eff0f1;--field-ink:#18191b;
+  --step-small:clamp(.8125rem,.79rem + .1vw,.875rem);--step-body:clamp(1.125rem,1.05rem + .3vw,1.3125rem);
+  --step-lead:clamp(1.25rem,1.1rem + .7vw,1.625rem);--step-head:clamp(2rem,1.3rem + 3.2vw,4rem);
+  --m:clamp(20px,3.4vw,48px);--axis:42vw;--ease:cubic-bezier(.16,.84,.2,1);
+  --serif:"EB Garamond",Garamond,Georgia,serif;--ui:system-ui,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font:400 var(--step-body)/1.5 var(--serif);-webkit-font-smoothing:antialiased;border-top:10px solid var(--accent)}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+::selection{background:var(--accent);color:var(--accent-ink)}
+h1,h2,h3{font-weight:400;letter-spacing:-.01em;line-height:1.1}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:52px;padding:0 26px;background:var(--accent);color:var(--accent-ink);font:500 1.125rem var(--serif);text-decoration:none;border:0;cursor:pointer;transition:background .2s,transform .15s var(--ease)}
+.btn:hover{background:#ff6a45}.btn:active{transform:scale(.97)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Hero: a composed void, then the statement hanging from the axis. */
+.hero{min-height:calc(100svh - 10px);display:grid;grid-template-rows:auto 1fr auto;padding:34px var(--m) 72px;position:relative}
+.top{display:grid;grid-template-columns:calc(var(--axis) - var(--m)) 1fr auto;align-items:center}
+.wordmark{font:500 1.5rem var(--serif);text-decoration:none}
+.top ul{display:flex;gap:32px;list-style:none;padding:0}
+.top ul a{text-decoration:none}.top ul a:hover{color:var(--accent)}
+.statement{display:grid;grid-template-columns:calc(var(--axis) - var(--m)) 1fr;align-items:end}
+.statement p{max-width:32ch;color:var(--muted);font-size:18px;padding-right:32px}
+.statement h1{font-size:clamp(56px,6.6vw,104px);line-height:.95;letter-spacing:-.04em}
+.line{display:block;overflow:hidden;padding-bottom:.08em}
+.line>span{display:block;animation:up .9s var(--ease) both}
+.line+.line>span{animation-delay:.11s}
+@keyframes up{from{transform:translateY(105%)}}
+.statement .after{animation:fade .8s ease .5s both}
+@keyframes fade{from{opacity:0;transform:translateY(10px)}}
+.ask{display:flex;align-items:center;gap:24px;margin-top:40px}
+.ask span{color:var(--muted);font-size:17px}
+
+.qs{padding:8vh 0 6vh calc(var(--axis) - var(--m))}
+.qs ol{list-style:none;padding:0;display:grid;gap:4px}
+.qs a{font-size:var(--step-lead);text-decoration:none;color:var(--muted);display:inline-block;transition:color .2s,transform .25s var(--ease)}
+.qs a:hover,.qs a:focus-visible{color:var(--ink);transform:translateX(8px)}
+.qs li:first-child a{color:var(--accent)}
+/* Showcase: the clients as a departure board. */
+.board-sec{padding:clamp(120px,16vh,200px) 0 clamp(120px,16vh,200px)}
+.board-head{display:grid;grid-template-columns:calc(var(--axis) - var(--m)) 1fr;padding:0 var(--m);margin-bottom:40px;align-items:end}
+.board-head h2{font-size:clamp(32px,2.8vw,40px)}
+.board-head p{color:var(--muted);font-size:18px;max-width:52ch}
+.board{padding:0 12px;display:grid;gap:4px;font:400 clamp(20px,1.9vw,28px)/1.2 var(--serif);font-variant-numeric:tabular-nums lining-nums}
+.row{display:grid;grid-template-columns:5fr 2fr 2fr 2fr 1.6fr;align-items:center;gap:16px;min-height:72px;padding:0 20px;background:var(--surface);width:100%;border:0;color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:background .2s}
+.row:hover{background:var(--surface-2)}
+.row .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .f{color:var(--muted);font-size:.78em}
+.row .f b{color:var(--ink);font-weight:400}
+.status{justify-self:end;font:500 15px var(--ui);padding:8px 12px;min-width:110px;text-align:center}
+.s-ok{background:#2f6b45;color:#fff}.s-watch{background:#b8860b;color:#18191b}.s-risk{background:#b3261e;color:#fff}
+.row.open{background:var(--accent);color:var(--accent-ink);min-height:216px;align-items:start;padding-top:24px;grid-template-rows:auto 1fr}
+.row.open .f{color:#2a1a14}.row.open .f b{color:var(--accent-ink)}
+.detail{display:none;grid-column:1/-1;font:400 17px/1.5 var(--ui);max-width:96ch;align-self:end;padding-bottom:22px}
+.row.open .detail{display:block}
+.board-foot{padding:16px var(--m) 0;color:var(--muted);font-size:16px}
+
+/* How it works: what you ask and what comes back. */
+.ask-sec{padding:clamp(120px,16vh,200px) var(--m)}
+.col{margin-left:calc(var(--axis) - var(--m));max-width:560px}
+.ask-sec h2{font-size:28px;margin-bottom:56px}
+.ex+.ex{margin-top:88px}
+.ex h3{font:500 20px/1.3 var(--serif);margin-bottom:16px}
+.call{background:var(--surface);padding:20px;font:400 17px var(--ui);display:flex;gap:12px;align-items:center}
+.call::before{content:"Ask";font:500 14px var(--ui);background:var(--surface-2);padding:4px 10px;color:var(--muted)}
+.resp{margin:24px 0 0 56px}
+.resp .shot{position:relative;overflow:hidden;aspect-ratio:var(--ar,16/10);background:#0a0a0c}
+.resp .shot img{position:absolute;left:0;top:0;width:var(--zoom,200%);max-width:none;height:auto;transform:translate(var(--x,0),var(--y,0))}
+.resp .cap{font-size:16px;color:var(--muted);margin-top:10px}
+.ex.wide .resp{width:min(760px,calc(100vw - var(--axis) - var(--m) - 56px))}
+
+/* Features: the output stays still, the reader operates the controls. */
+.ops{display:grid;grid-template-columns:repeat(12,1fr);gap:24px;background:var(--surface)}
+.ops-out{grid-column:1/7;position:sticky;top:0;height:100svh;background:var(--field);color:var(--field-ink);display:grid;place-items:center;padding:40px}
+.action{width:min(440px,100%);background:#fff;color:#1d1d1f;font:400 15px/1.5 var(--ui);padding:24px}
+.action .t{font-weight:600;font-size:18px}
+.action .sub{color:#5b5d63;margin-bottom:16px}
+.flow{list-style:none;padding:0;display:grid;gap:6px;margin:12px 0 16px}
+.flow li{display:flex;gap:10px;align-items:center;background:#f3f3f5;padding:8px 12px}
+.flow li b{font-weight:600;min-width:84px}
+.flow li.hl{background:#ffe3da}
+.preview{background:#f7f7f8;padding:12px 14px;font-size:15px}
+.note{margin-top:12px;font-size:14px;color:#8a2b12;font-weight:500;min-height:1.5em}
+.ops-ctrl{grid-column:8/13;padding:72px var(--m) 25vh 0}
+.ops-ctrl h2{font-size:clamp(40px,3vw,44px);margin-bottom:8vh}
+.blk{min-height:50vh;display:flex;flex-direction:column;justify-content:center;max-width:44ch}
+.blk h3{font-size:clamp(28px,2.2vw,32px);margin-bottom:10px}
+.blk p{font-size:17px;color:var(--muted);margin-bottom:18px}
+.seg{display:flex;flex-wrap:wrap;gap:4px}
+.seg button{min-height:46px;padding:0 16px;background:var(--surface-2);color:var(--ink);border:0;font:500 16px var(--ui);cursor:pointer;transition:background .15s}
+.seg button:hover{background:#383b40}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+.ops select{min-height:46px;background:var(--surface-2);color:var(--ink);border:0;font:500 16px var(--ui);padding:0 14px;min-width:240px}
+.toggle{display:flex;gap:12px;align-items:center;min-height:46px;font:500 16px var(--ui);cursor:pointer}
+.toggle input{width:22px;height:22px;accent-color:var(--accent)}
+
+/* FAQ: a band per question. */
+.faq-title{min-height:40svh;background:var(--field);color:var(--field-ink);display:flex;align-items:flex-end;padding:0 var(--m) 40px}
+.faq-title h2{font-size:7vw;line-height:.9}
+.band{display:grid;grid-template-columns:repeat(12,1fr);gap:24px;padding:56px var(--m);background:var(--bg)}
+.band:nth-child(even){background:var(--surface)}
+.band h3{grid-column:1/6;font:500 clamp(24px,2.1vw,30px)/1.2 var(--serif)}
+.band p{grid-column:7/13;font-size:18px;line-height:1.5}
+
+/* CTA: the opening idea again, inverted. */
+.close{min-height:90svh;background:var(--field);color:var(--field-ink);display:grid;grid-template-rows:1fr auto;padding:12vh var(--m) 40px}
+.close h2{font-size:clamp(64px,10vw,150px);line-height:.9;letter-spacing:-.04em}
+.close-row{display:grid;grid-template-columns:5fr 4fr 3fr;align-items:end;gap:24px}
+.close-row p{font-size:20px;max-width:38ch}
+.close-row .btn{grid-column:3;justify-self:end;min-height:56px}
+
+/* Footer: the name first. */
+footer{background:var(--bg);padding:72px var(--m) 40px;overflow:hidden}
+.mark svg{display:block;width:100%;height:auto}
+.foot{display:grid;grid-template-columns:5fr 1fr 6fr;margin-top:72px;gap:24px}
+.places a{display:block;font-size:clamp(26px,2.4vw,36px);color:var(--accent);text-decoration:none;line-height:1.3}
+.places a:hover{text-decoration:underline}
+.links{grid-column:3;display:grid;grid-template-columns:repeat(3,1fr);gap:24px;font-size:15px}
+.links ul{list-style:none;padding:0;display:grid;gap:6px}
+.links a{text-decoration:none;color:var(--muted)}.links a:hover{color:var(--ink)}
+.legal{display:flex;justify-content:space-between;margin-top:96px;font-size:13px;color:var(--muted)}
+
+/* Entrances: visible without script. */
+.js .reveal>*{opacity:0;transform:translateY(22px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
+.js .reveal.in>*{opacity:1;transform:none}
+.js .reveal.in>*:nth-child(2){transition-delay:.08s}.js .reveal.in>*:nth-child(3){transition-delay:.16s}.js .reveal.in>*:nth-child(4){transition-delay:.24s}
+
+@media (max-width:860px){
+  :root{--axis:20px}
+  .top{grid-template-columns:1fr auto}.top ul{display:none}
+  .statement{grid-template-columns:1fr;align-items:start}
+  .statement h1{font-size:12.5vw;order:-1;margin-bottom:24px}
+  .statement p{font-size:17px}
+  .board-head{grid-template-columns:1fr;gap:12px}
+  .board{padding:0 8px}
+  .row{grid-template-columns:1fr auto;min-height:64px;font-size:20px}
+  .row .f{display:none}.row.open .f{display:block;grid-column:1/-1;font-size:16px}
+  .row.open{min-height:200px}
+  .col{margin-left:0;max-width:none}
+  .resp{margin-left:0}.ex.wide .resp{width:auto}
+  .ops{display:block}
+  .ops-out{position:sticky;top:0;height:42svh;z-index:2;padding:12px;overflow:hidden;place-items:start center}
+  .action{transform:scale(.86);transform-origin:top center}
+  .ops-ctrl{padding:48px 20px 16svh}
+  .blk{min-height:auto;margin-bottom:56px;max-width:none}
+  .qs{padding:6vh 0}.blk h3{font-size:22px}.blk p{font-size:16px}
+  .faq-title{min-height:30svh}.faq-title h2{font-size:13vw}
+  .band{display:block;padding:32px 20px}.band p{margin-top:12px;font-size:17px}
+  .close{min-height:80svh}.close h2{font-size:15vw}
+  .close-row{grid-template-columns:1fr}.close-row p{font-size:17px}.close-row .btn{grid-column:1;justify-self:stretch}
+  .foot{grid-template-columns:1fr}.links{grid-column:1;grid-template-columns:1fr 1fr}
+  .places a{font-size:26px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .js .reveal>*{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+<header class="hero" id="top">
+  <div class="top">
+    <a class="wordmark" href="#top">Adbibe OS</a>
+    <ul><li><a href="#board">This morning</a></li><li><a href="#control">Who decides</a></li></ul>
+    <a class="btn" href="#join">Join the waitlist</a>
+  </div>
+  <nav class="qs" aria-label="The four questions">
+    <ol>
+      <li><a href="#board">What is happening?</a></li>
+      <li><a href="#ask-title">Why is it happening?</a></li>
+      <li><a href="#ask-title">What should we do?</a></li>
+      <li><a href="#control">How do we execute it?</a></li>
+    </ol>
+  </nav>
+  <div class="statement">
+    <p class="after">Adbibe OS is an operating system for Indian marketing agencies. Every morning it asks what is happening, why, what to do and how, across every client, and your team approves the answer.</p>
+    <h1><span class="line"><span>Four questions,</span></span><span class="line"><span>every morning.</span></span></h1>
+  </div>
+</header>
+
+<main>
+<section class="board-sec" id="board" aria-labelledby="board-title">
+  <div class="board-head reveal">
+    <h2 id="board-title">What is happening</h2>
+    <p>Every client on one board, from the ad data you import or connect. Open a row to see why it moved and what the AI would do about it.</p>
+  </div>
+  <div class="board" data-ui role="list">
+    <button class="row" role="listitem" aria-expanded="false"><span class="n">Glowleaf Skincare</span><span class="f">Spend <b>₹1,20,000</b></span><span class="f">ROAS <b>3.4</b></span><span class="f">CPA <b>₹412</b></span><span class="status s-ok">On track</span><span class="detail">Reels carry 71% of conversions this month. Nothing to change; the next creative test starts on Monday.</span></button>
+    <button class="row" role="listitem" aria-expanded="false"><span class="n">Kaveri Silks</span><span class="f">Spend <b>₹2,40,000</b></span><span class="f">ROAS <b>4.1</b></span><span class="f">CPA <b>₹690</b></span><span class="status s-ok">On track</span><span class="detail">Wedding-season catalogue ads are ahead of plan. The AI suggests raising the daily cap by ₹3,000, waiting for the media buyer.</span></button>
+    <button class="row" role="listitem" aria-expanded="false"><span class="n">Masala Box</span><span class="f">Spend <b>₹85,000</b></span><span class="f">ROAS <b>2.2</b></span><span class="f">CPA <b>₹318</b></span><span class="status s-watch">Watch</span><span class="detail">Click-through fell from 1.9% to 1.3% after the menu change. Two new hooks are drafted for review.</span></button>
+    <button class="row open" role="listitem" aria-expanded="true"><span class="n">Tara Diagnostics</span><span class="f">Spend <b>₹3,10,000</b></span><span class="f">ROAS <b>1.6</b></span><span class="f">CPA <b>₹1,240</b></span><span class="status s-risk">At risk</span><span class="detail">Cost per booking is up 27% in nine days. Both ad sets on the full-body checkup offer show fatigue (frequency 4.8). The AI suggests moving ₹40,000 to the new carousel set; it is waiting for your approval.</span></button>
+    <button class="row" role="listitem" aria-expanded="false"><span class="n">Northbay Realty</span><span class="f">Spend <b>₹4,50,000</b></span><span class="f">Leads <b>182</b></span><span class="f">CPL <b>₹2,470</b></span><span class="status s-watch">Watch</span><span class="detail">Lead volume is steady but 38% have no budget answer. A qualifying question is proposed for the form.</span></button>
+    <button class="row" role="listitem" aria-expanded="false"><span class="n">Spice Route Foods</span><span class="f">Spend <b>₹95,000</b></span><span class="f">ROAS <b>3.0</b></span><span class="f">CPA <b>₹270</b></span><span class="status s-ok">On track</span><span class="detail">Quick-commerce listings now drive a third of orders. The monthly report is drafted and waiting for review.</span></button>
+    <button class="row" role="listitem" aria-expanded="false"><span class="n">UrbanBrew Coffee</span><span class="f">Spend <b>₹70,000</b></span><span class="f">ROAS <b>2.5</b></span><span class="f">CPA <b>₹350</b></span><span class="status s-watch">Watch</span><span class="detail">Weekend spend converts at half the weekday rate. The AI proposes a weekday-only schedule for two weeks.</span></button>
+    <button class="row" role="listitem" aria-expanded="false"><span class="n">Pedal Pune</span><span class="f">Spend <b>₹60,000</b></span><span class="f">ROAS <b>2.9</b></span><span class="f">CPA <b>₹505</b></span><span class="status s-ok">On track</span><span class="detail">Test rides booked from Instagram are up 14%. No action today.</span></button>
+  </div>
+  <p class="board-foot">Sample clients and figures, to show how the board reads.</p>
+</section>
+
+<section class="ask-sec" aria-labelledby="ask-title">
+  <div class="col">
+    <h2 id="ask-title" class="reveal">Why, and what next</h2>
+    <div class="ex reveal">
+      <h3>First, ask what happened.</h3>
+      <div class="call">How did Glowleaf's posts do this month?</div>
+      <div class="resp"><figure class="shot"><img src="assets/app-social-analytics.jpg" alt="Adbibe OS analytics: best and lowest performing posts with reach and engagement rate" width="1208" height="1644" loading="lazy" style="--zoom:200%;--y:-52.5%"></figure><p class="cap">The best and weakest posts, worked out from the Instagram export.</p></div>
+    </div>
+    <div class="ex reveal">
+      <h3>Then ask why.</h3>
+      <div class="call">Why are the static posts doing badly?</div>
+      <div class="resp"><figure class="shot" style="--ar:16/9"><img src="assets/app-social-overview.jpg" alt="AI recommendations in Adbibe OS: convert static posts into education-led carousels, post on Tuesday and Thursday evenings" width="1208" height="1644" loading="lazy" style="--zoom:205%;--x:-48%;--y:-47%"></figure><p class="cap">Advice from measured results, each point marked as data or inference.</p></div>
+    </div>
+    <div class="ex reveal">
+      <h3>Check the account itself.</h3>
+      <div class="call">Audit Glowleaf's Instagram profile.</div>
+      <div class="resp"><figure class="shot"><img src="assets/app-social-accounts.jpg" alt="Adbibe OS account audit: 68 of 100, with bio and profile advice" width="1208" height="1644" loading="lazy" style="--zoom:185%;--y:-48%"></figure><p class="cap">A scored audit with rewritten bios and an action plan.</p></div>
+    </div>
+    <div class="ex wide reveal">
+      <h3>Finally, plan the month.</h3>
+      <div class="call">Plan December for Glowleaf: engagement, Instagram and Facebook.</div>
+      <div class="resp"><figure class="shot" style="--ar:16/8"><img src="assets/app-social-strategy.jpg" alt="A December strategy in Adbibe OS with a warning about claims not in the client's facts" width="1208" height="1644" loading="lazy" style="--zoom:140%;--y:-56%"></figure><p class="cap">Personas, pillars and KPIs, with a warning where the AI went beyond the client's own facts.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="ops" id="control" aria-labelledby="control-title">
+  <div class="ops-out" aria-live="polite">
+    <div class="action" data-ui>
+      <div class="t" id="o-title">Monthly client report</div>
+      <div class="sub" id="o-sub">Tara Diagnostics · November</div>
+      <ol class="flow" id="o-flow"></ol>
+      <div class="preview" id="o-preview"></div>
+      <div class="note" id="o-note"></div>
+    </div>
+  </div>
+  <div class="ops-ctrl">
+    <h2 id="control-title" class="reveal">How we execute</h2>
+    <div class="blk reveal"><h3>Pick the action.</h3><p>Every kind of AI work has its own rule.</p>
+      <select id="c-action" aria-label="Action"><option value="report">Monthly client report</option><option value="budget">Campaign budget change</option><option value="creative">Ten creative concepts</option><option value="task">Internal follow-up task</option></select></div>
+    <div class="blk reveal"><h3>Decide how much the AI may do.</h3><p>Manual: it recommends. Approval: it prepares and waits. Automatic: it acts and logs it.</p>
+      <div class="seg" role="group" aria-label="AI mode"><button type="button" data-mode="Manual" aria-pressed="false">Manual</button><button type="button" data-mode="Approval" aria-pressed="true">Approval</button><button type="button" data-mode="Automatic" aria-pressed="false">Automatic</button></div></div>
+    <div class="blk reveal"><h3>Name who approves.</h3><p>The approver is notified and the decision is written to the audit log.</p>
+      <select id="c-who" aria-label="Approver"><option>Riya Menon, account manager</option><option>Arjun Rao, media buyer</option><option>Founder</option></select></div>
+    <div class="blk reveal"><h3>Ask the client too.</h3><p>For clients who sign off everything, their approval is recorded before anything goes out.</p>
+      <label class="toggle"><input type="checkbox" id="c-client">Client signs off</label></div>
+    <div class="blk reveal"><h3>Write in their language.</h3><p>Reports and messages follow the client's brand voice notes.</p>
+      <div class="seg" role="group" aria-label="Language"><button type="button" data-lang="en" aria-pressed="true">English</button><button type="button" data-lang="hinglish" aria-pressed="false">Hinglish</button><button type="button" data-lang="hi" aria-pressed="false">Hindi</button></div></div>
+  </div>
+</section>
+
+<section id="questions" aria-labelledby="faq-title">
+  <div class="faq-title"><h2 id="faq-title">Questions</h2></div>
+  <div>
+    <div class="band reveal"><h3>Who is Adbibe OS for?</h3><p>Indian marketing agencies with a few clients or a few dozen: performance, social, SEO, influencer and full-service teams.</p></div>
+    <div class="band reveal"><h3>Can the AI change a budget by itself?</h3><p>Not unless an administrator turns that on for that action. Budget changes start on Approval, and every action, by a person or the AI, is logged with who, what, when, before and after.</p></div>
+    <div class="band reveal"><h3>Where do the numbers come from?</h3><p>From the platforms' own exports and connections. When a figure is the AI's estimate rather than data, it is labelled as an inference.</p></div>
+    <div class="band reveal"><h3>Is our clients' data kept apart?</h3><p>Yes. Each agency has its own workspace, each client's records stay with that client, and staff see only the sections you give them.</p></div>
+    <div class="band reveal"><h3>When can we start, and what will it cost?</h3><p>Agencies are invited a few at a time. Pricing is set before launch, in rupees with GST shown, and the waitlist hears it first.</p></div>
+  </div>
+</section>
+
+<section class="close" id="join" aria-labelledby="join-title">
+  <h2 id="join-title">Ask the first<br>question.</h2>
+  <div class="close-row"><p>Write to us with your agency's name, city and number of clients, and we will save you a place.</p><a class="btn" href="mailto:hello@adbibe.com?subject=Adbibe%20OS%20waitlist&amp;body=Agency%20name%3A%0ACity%3A%0ATeam%20size%3A%0AClients%3A%0A">Join the waitlist</a></div>
+</section>
+</main>
+
+<footer>
+  <div class="mark"><svg viewBox="0 0 1000 150" role="img" aria-label="Adbibe OS"><text x="0" y="122" textLength="1000" lengthAdjust="spacingAndGlyphs" font-family="EB Garamond, serif" font-size="170" fill="currentColor">Adbibe OS</text></svg></div>
+  <div class="foot">
+    <div class="places"><a href="mailto:hello@adbibe.com">hello@adbibe.com</a><a href="#join">Join the waitlist</a></div>
+    <div class="links">
+      <ul><li><a href="#board">What is happening</a></li><li><a href="#control">How we execute</a></li></ul>
+      <ul><li><a href="#questions">Questions</a></li><li><a href="#join">Waitlist</a></li></ul>
+      <ul><li>Made in India</li><li>for Indian agencies</li></ul>
+    </div>
+  </div>
+  <div class="legal"><span>© 2026 Adbibe. Screens show Adbibe OS with sample client data.</span><a href="#top">Back to top</a></div>
+</footer>
+
+<script>
+document.documentElement.classList.add("js");
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target);}}),{threshold:.12});
+document.querySelectorAll(".reveal").forEach(el=>io.observe(el));
+
+/* The board: one row open at a time. */
+const rows=[...document.querySelectorAll(".row")];
+rows.forEach(r=>r.addEventListener("click",()=>rows.forEach(x=>{const on=x===r;x.classList.toggle("open",on);x.setAttribute("aria-expanded",on);})));
+
+/* The live thing: set who does what, and watch the action change. */
+const ACTIONS={report:{t:"Monthly client report",sub:"Tara Diagnostics · November",prep:"AI drafts the report from the month's data",send:"Sent to the client as PDF"},
+  budget:{t:"Campaign budget change",sub:"Tara Diagnostics · move ₹40,000 to carousel set",prep:"AI prepares the change with its evidence",send:"Applied in the ad account"},
+  creative:{t:"Ten creative concepts",sub:"Kaveri Silks · wedding season",prep:"AI writes concepts, hooks and scripts",send:"Moved to the creative board"},
+  task:{t:"Internal follow-up task",sub:"Masala Box · review new hooks",prep:"AI creates the task with a due date",send:"Assigned to the team"}};
+const LANG={en:"Hi Dr Tara, cost per booking rose 27% this month as two ad sets tired. We have a fix ready and will walk you through it on Thursday.",
+  hinglish:"Hi Dr Tara, is mahine cost per booking 27% badha kyunki do ad sets thak gaye the. Fix ready hai, Thursday ko aapko dikhate hain.",
+  hi:"नमस्ते डॉ. तारा, इस महीने प्रति बुकिंग लागत 27% बढ़ी क्योंकि दो विज्ञापन सेट थक गए थे। समाधान तैयार है, गुरुवार को हम आपको दिखाएँगे।"};
+const st={action:"report",mode:"Approval",lang:"en",client:false};
+const $=id=>document.getElementById(id);
+function draw(){
+  const a=ACTIONS[st.action],who=$("c-who").value.split(",")[0],steps=[];let mode=st.mode,note="";
+  if(st.action==="budget"&&mode==="Automatic"){mode="Approval";note="Budget changes stay on Approval until an administrator allows automatic changes for this action.";}
+  steps.push(["AI",a.prep,false]);
+  if(mode==="Manual")steps.push(["You",`${who} reads the recommendation and does the work`,true]);
+  if(mode==="Approval")steps.push(["Approval",`${who} approves or asks for changes`,true]);
+  if(st.client&&st.action!=="task")steps.push(["Client","Client signs off; who and how is recorded",true]);
+  if(mode!=="Manual")steps.push([mode==="Automatic"?"Automatic":"Then",a.send,false]);
+  steps.push(["Log","Who, what, when, before and after",false]);
+  $("o-title").textContent=a.t;$("o-sub").textContent=a.sub;
+  $("o-flow").innerHTML=steps.map(([k,v,h])=>`<li class="${h?"hl":""}"><b>${k}</b><span>${v}</span></li>`).join("");
+  $("o-preview").textContent=LANG[st.lang];$("o-note").textContent=note;
+}
+document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>{st.mode=b.dataset.mode;document.querySelectorAll("[data-mode]").forEach(x=>x.setAttribute("aria-pressed",x===b));draw();}));
+document.querySelectorAll("[data-lang]").forEach(b=>b.addEventListener("click",()=>{st.lang=b.dataset.lang;document.querySelectorAll("[data-lang]").forEach(x=>x.setAttribute("aria-pressed",x===b));draw();}));
+$("c-action").addEventListener("change",e=>{st.action=e.target.value;draw();});
+$("c-who").addEventListener("change",draw);
+$("c-client").addEventListener("change",e=>{st.client=e.target.checked;draw();});
+draw();
+</script>
+</body>
+</html>
