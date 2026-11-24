@@ -100,7 +100,7 @@ function LeadsInner() {
   return (
     <div className={styles.workspace}>
       <PageHeader
-        title="CRM"
+        title="Lead & CRM System"
         description={`${leads.length.toLocaleString()} leads · account library · contacts, pipeline, communication and AI research`}
         actions={
           <>

@@ -344,7 +344,7 @@ function PipelineInner() {
         </div>
       </Modal>}
       <PageHeader
-        title="Sales"
+        title="Sales Pipeline"
         description="Lead → Qualified → Meeting → Proposal → Negotiation → Won / Lost. Drag a card or use its move menu; Won starts client onboarding."
         actions={
           <>

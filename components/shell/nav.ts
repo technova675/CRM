@@ -52,8 +52,8 @@ export const NAV: NavItem[] = [
   { href: "/command", label: "Command Center", icon: BrainCircuit, module: "command", group: "Overview" },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, module: "dashboard", group: "Overview" },
 
-  { href: "/leads", label: "CRM", icon: Users, module: "leads", group: "CRM & sales" },
-  { href: "/pipeline", label: "Sales", icon: KanbanSquare, module: "pipeline", group: "CRM & sales" },
+  { href: "/leads", label: "Lead & CRM System", icon: Users, module: "leads", group: "CRM & sales" },
+  { href: "/pipeline", label: "Sales Pipeline", icon: KanbanSquare, module: "pipeline", group: "CRM & sales" },
   { href: "/research", label: "AI Research", icon: Sparkles, module: "research", secondary: true, group: "CRM & sales" },
   { href: "/outreach", label: "Outreach", icon: Send, module: "outreach", secondary: true, group: "CRM & sales" },
   { href: "/inbox", label: "Inbox", icon: Inbox, module: "inbox", secondary: true, group: "CRM & sales" },
@@ -62,7 +62,7 @@ export const NAV: NavItem[] = [
 
   { href: "/clients", label: "Clients", icon: Building2, module: "clients", group: "Accounts" },
   { href: "/onboarding", label: "Onboarding", icon: ClipboardCheck, module: "onboarding", secondary: true, group: "Accounts" },
-  { href: "/strategy", label: "Strategy", icon: Target, module: "strategy", group: "Accounts" },
+  { href: "/strategy", label: "Marketing Strategy", icon: Target, module: "strategy", group: "Accounts" },
   { href: "/documents", label: "Documents & Assets", icon: FolderOpen, module: "documents", secondary: true, group: "Accounts" },
   { href: "/knowledge", label: "AI Knowledge Base", icon: BookOpen, module: "documents", secondary: true, group: "Accounts" },
 

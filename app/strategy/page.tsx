@@ -66,7 +66,7 @@ function StrategyInner() {
   return (
     <div>
       <PageHeader
-        title="Strategy"
+        title="Marketing Strategy"
         icon={<Compass className="size-5 text-fg-3" />}
         description="AI strategy workspace — personas, funnel, channels, budget, testing and KPIs. Humans review and approve before execution."
         actions={writable && <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => go("new=1")}>New strategy</Button>}
