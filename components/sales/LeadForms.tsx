@@ -17,14 +17,12 @@ export const INDUSTRIES: string[] = [...LEAD_INDUSTRIES];
 export const SIZES: CompanySize[] = ["Unknown","1-10", "11-50", "51-200", "201-1000", "1000+"];
 
 type Draft = {
-  name: string; company: string; jobTitle: string; email: string; phone: string; linkedin: string; instagram: string; website: string;
-  location: string; industry: string; companySize: CompanySize; source: LeadSource; ownerId: string; services: Service[]; notes: string;
-  dealValue: string; customFields: Record<string, string>; status: LeadStatus; leadScore: string; tags: string; communicationHistory: string;
+  company: string; website: string; companySize: CompanySize; source: LeadSource; ownerId: string; services: Service[]; notes: string;
+  customFields: Record<string, string>; status: LeadStatus; communicationHistory: string;
 };
 
 const empty = (ownerId: string): Draft => ({
-  name: "", company: "", jobTitle: "", email: "", phone: "", linkedin: "", instagram: "", website: "", location: "", industry: "Other",
-  companySize: "Unknown", status: "New", leadScore: "", tags: "", communicationHistory: "", source: "Website", ownerId, services: [], notes: "", dealValue: "", customFields: {},
+  company: "", website: "", companySize: "Unknown", status: "New", communicationHistory: "", source: "Website", ownerId, services: [], notes: "", customFields: {},
 });
 
 export function ServicePicker({ value, onChange, ...accessibility }: { value: Service[]; onChange: (v: Service[]) => void; "aria-labelledby"?: string }) {
@@ -46,54 +44,55 @@ export function AddLeadModal({ open, onClose }: { open: boolean; onClose: () => 
   const team = useCRM((s) => s.team);
   const me = useCRM((s) => s.currentUserId);
   const addLead = useCRM((s) => s.addLead);
+  const enrichAndResearch = useCRM((s) => s.enrichAndResearchLead);
   const leads = useCRM((s) => s.leads);
   const customDefs = useCRM((s) => s.settings.leadCustomFields);
   const [d, setD] = useState<Draft>(() => empty(me));
-  const dups = useMemo(() => (d.email || d.phone || d.company ? findDuplicatesFor(d, leads) : []), [d, leads]);
+  const website = d.website.trim() ? (/^https?:\/\//i.test(d.website.trim()) ? d.website.trim() : `https://${d.website.trim()}`) : "";
+  const host = (() => { try { return website ? new URL(website).hostname.replace(/^www\./, "") : ""; } catch { return ""; } })();
+  const dups = useMemo(() => {
+    const byCompany = d.company.trim() ? findDuplicatesFor({ email: "", phone: "", company: d.company }, leads) : [];
+    const bySite = host ? leads.filter(l => l.website && l.website.replace(/^https?:\/\/(www\.)?/i, "").split(/[/?#]/)[0].toLowerCase() === host.toLowerCase() && !byCompany.some(x => x.lead.id === l.id)).map(lead => ({ lead, reasons: ["same website"] })) : [];
+    return [...byCompany, ...bySite];
+  }, [d.company, host, leads]);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((x) => ({ ...x, [k]: v }));
   const sellers = team.filter((t) => ["admin", "sales"].includes(t.role));
 
   const submit = () => {
-    if (!d.name.trim() || !d.company.trim()) return toast("Name and company are required", undefined, "warning");
-    const { dealValue, customFields, leadScore, tags, ...rest } = d;
-    if (d.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) return toast("Enter a valid email", undefined, "warning");
-    const initialScore = leadScore.trim() === "" ? undefined : Number(leadScore);
-    if (initialScore !== undefined && (!Number.isInteger(initialScore) || initialScore < 0 || initialScore > 100)) return toast("Lead score must be 0–100", undefined, "warning");
-    if (dealValue && (!Number.isFinite(Number(dealValue)) || Number(dealValue) < 0)) return toast("Deal value must be non-negative",undefined,"warning");
-    const cf = Object.fromEntries(Object.entries(customFields).filter(([, v]) => v !== ""));
-    const lead = addLead({ ...rest, name: d.name.trim(), company: d.company.trim(), email: d.email.trim(), initialScore, tags: tags.split(/[;,]/).map(tag => tag.trim().replace(/^#/, "")).filter(Boolean), linkedin: d.linkedin || undefined, instagram: d.instagram || undefined, website: d.website.trim() ? (/^https?:\/\//i.test(d.website.trim()) ? d.website.trim() : `https://${d.website.trim()}`) : undefined, dealValue: dealValue.trim() === "" ? undefined : Number(dealValue), customFields: Object.keys(cf).length ? cf : undefined });
-    toast("Lead added", `${lead.company} · ${lead.status}`);
+    const company = d.company.trim();
+    if (!company || !website) return toast("Company name and website are required", undefined, "warning");
+    if (!host || !host.includes(".")) return toast("Enter a valid website", "For example example.com", "warning");
+    const cf = Object.fromEntries(Object.entries(d.customFields).filter(([, v]) => v !== ""));
+    // The contact person is not known yet, so the lead is named after the company until someone edits it.
+    const lead = addLead({ ...d, company, name: company, website, jobTitle: "", email: "", phone: "", location: "", industry: "Other", tags: [], customFields: Object.keys(cf).length ? cf : undefined }, { research: false });
+    toast("Lead added", `Reading ${host} and researching ${company}…`);
     setD(empty(me));
     onClose();
+    void enrichAndResearch(lead.id).then((r) => {
+      const found = r.found.length ? `Found ${r.found.join(", ")} on the website. ` : r.websiteError ? "Could not read contact details from the website. " : "No contact details were published on the website. ";
+      if (r.researchError) toast(`Research could not finish: ${company}`, found + r.researchError, "warning");
+      else if (r.status === "Qualified") toast(`Qualified: ${company}`, `${found}Score ${r.score} (threshold ${r.threshold}).`);
+      else toast(`Not qualified yet: ${company}`, `${found}Score ${r.score}, below your threshold of ${r.threshold}.`, "warning");
+    }).catch(() => undefined);
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add lead" subtitle="Create a complete lead profile. Scores are calculated automatically; AI research is also available from the lead profile." size="lg"
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={submit}>Save lead</Button></>}>
+    <Modal open={open} onClose={onClose} title="Add lead" subtitle="Enter the company and its website. Phone, email, social profiles and location are read from the website, then AI research scores the lead and tells you if it qualifies." size="lg"
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={submit}>Add and research</Button></>}>
       {dups.length > 0 && (
         <div className="mb-3 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
           <p className="font-medium">Possible duplicate{dups.length > 1 ? "s" : ""} already in the CRM:</p>
           <ul className="mt-1 space-y-0.5">
             {dups.map(({ lead, reasons }) => (
-              <li key={lead.id}><Link href={`/leads/${lead.id}`} className="underline" onClick={onClose}>{lead.name} · {lead.company}</Link> <span className="opacity-80">({reasons.join(", ")} · {lead.status})</span></li>
+              <li key={lead.id}><Link href={`/leads/${lead.id}`} className="underline" onClick={onClose}>{lead.company}</Link> <span className="opacity-80">({reasons.join(", ")} · {lead.status})</span></li>
             ))}
           </ul>
           <p className="mt-1 opacity-80">You can still save — merge later from Leads → Duplicates.</p>
         </div>
       )}
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Full name *"><Input value={d.name} onChange={(e) => set("name", e.target.value)} autoFocus /></Field>
-        <Field label="Company / brand *"><Input value={d.company} onChange={(e) => set("company", e.target.value)} /></Field>
-        <Field label="Job title"><Input value={d.jobTitle} onChange={(e) => set("jobTitle", e.target.value)} /></Field>
-        <Field label="Email"><Input type="email" value={d.email} onChange={(e) => set("email", e.target.value)} /></Field>
-        <Field label="Phone"><Input value={d.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
-        <Field label="Website"><Input value={d.website} placeholder="https://" onChange={(e) => set("website", e.target.value)} /></Field>
-        <Field label="LinkedIn"><Input value={d.linkedin} onChange={(e) => set("linkedin", e.target.value)} /></Field>
-        <Field label="Instagram"><Input value={d.instagram} placeholder="@handle" onChange={(e) => set("instagram", e.target.value)} /></Field>
-        <Field label="Location"><Input value={d.location} onChange={(e) => set("location", e.target.value)} /></Field>
-        <Field label="Industry">
-          <Select value={d.industry} onChange={(e) => set("industry", e.target.value)}>{INDUSTRIES.map((i) => <option key={i}>{i}</option>)}</Select>
-        </Field>
+        <Field label="Company name *"><Input value={d.company} onChange={(e) => set("company", e.target.value)} autoFocus /></Field>
+        <Field label="Website *"><Input value={d.website} placeholder="example.com" inputMode="url" onChange={(e) => set("website", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} /></Field>
         <Field label="Company size">
           <Select value={d.companySize} onChange={(e) => set("companySize", e.target.value as CompanySize)}>{SIZES.map((i) => <option key={i}>{i}</option>)}</Select>
         </Field>
@@ -104,9 +103,6 @@ export function AddLeadModal({ open, onClose }: { open: boolean; onClose: () => 
           <Select value={d.ownerId} onChange={(e) => set("ownerId", e.target.value)}>{sellers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select>
         </Field>
         <Field label="Status"><Select value={d.status} onChange={(e) => set("status", e.target.value as LeadStatus)}>{LEAD_STATUSES.map(status => <option key={status}>{status}</option>)}</Select></Field>
-        <Field label="Lead score (0–100)"><Input type="number" min={0} max={100} value={d.leadScore} placeholder="Leave blank to calculate automatically" onChange={(e) => set("leadScore", e.target.value)} /></Field>
-        <Field label="Tags"><Input value={d.tags} placeholder="Separate tags with commas" onChange={(e) => set("tags",e.target.value)} /></Field>
-        <Field label="Deal value (₹)"><Input type="number" value={d.dealValue} placeholder="e.g. 150000" onChange={(e) => set("dealValue", e.target.value)} /></Field>
         {customDefs.map((def) => (
           <Field key={def.key} label={def.label}>
             <CustomFieldInput def={def} value={d.customFields[def.key] ?? ""} onChange={(v) => set("customFields", { ...d.customFields, [def.key]: v })} />

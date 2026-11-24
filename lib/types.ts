@@ -134,6 +134,8 @@ export interface Lead {
   phone: string;
   linkedin?: string;
   instagram?: string;
+  /** Other public profiles found on the company website. */
+  socials?: { facebook?: string; twitter?: string; youtube?: string; whatsapp?: string };
   website?: string;
   location: string;
   industry: string;

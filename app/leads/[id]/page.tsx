@@ -265,14 +265,15 @@ export default function LeadDetail({ params }: { params: Promise<{ id: string }>
               {lead.optedOut && <Badge tone="danger">Opted out</Badge>}
               {lead.tags.map((t) => <Badge key={t}>{t}</Badge>)}
             </div>
-            <p className="text-[13px] text-fg-2">{lead.jobTitle} at <span className="font-medium text-fg">{lead.company}</span></p>
+            <p className="text-[13px] text-fg-2">{lead.jobTitle ? <>{lead.jobTitle} at </> : null}<span className="font-medium text-fg">{lead.company}</span></p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-3">
               {lead.email && <a href={`mailto:${lead.email}`} className="flex items-center gap-1 hover:text-fg"><Mail className="size-3" />{lead.email}</a>}
               {lead.phone && <a href={`tel:${lead.phone}`} className="flex items-center gap-1 hover:text-fg"><Phone className="size-3" />{lead.phone}</a>}
               {lead.website && <a href={lead.website} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-fg"><Globe className="size-3" />{lead.website.replace(/^https?:\/\//, "")}</a>}
               {lead.linkedin && <a href={`https://${lead.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-fg"><Linkedin className="size-3" />LinkedIn</a>}
               {lead.instagram && <a href={`https://instagram.com/${lead.instagram.replace("@", "")}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-fg"><Instagram className="size-3" />{lead.instagram}</a>}
-              <span className="flex items-center gap-1"><MapPin className="size-3" />{lead.location}</span>
+              {(["facebook","twitter","youtube","whatsapp"] as const).map(key => lead.socials?.[key] && <a key={key} href={lead.socials[key]} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-fg"><Globe className="size-3" />{({facebook:"Facebook",twitter:"X",youtube:"YouTube",whatsapp:"WhatsApp"})[key]}</a>)}
+              {lead.location && <span className="flex items-center gap-1"><MapPin className="size-3" />{lead.location}</span>}
             </div>
           </div>
         </div>

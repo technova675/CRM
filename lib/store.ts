@@ -139,12 +139,15 @@ export interface CRMState extends SeedData {
   resetDemo: () => void;
 
   // Leads
-  addLead: (l: NewLead) => Lead;
+  /** `research: false` when the caller runs research itself, so the lead is not researched twice. */
+  addLead: (l: NewLead, options?: { research?: boolean }) => Lead;
   importLeads: (ls: NewLead[]) => { added: number; skipped: number };
   updateLead: (id: string, patch: Partial<Lead>) => void;
   deleteLeads: (ids: string[]) => void;
   setLeadStatus: (id: string, status: LeadStatus, actor?: Activity["actor"]) => void;
   researchLead: (id: string) => Promise<void>;
+  /** Reads the lead's website for contact details, then researches and qualifies it. Returns the verdict for the person who added it. */
+  enrichAndResearchLead: (id: string) => Promise<LeadIntakeResult>;
   rescoreLeads: (ids?: string[]) => void;
   overrideScore: (id: string, value: number | undefined, reason?: string) => void;
   optOutLead: (id: string, reason?: string) => void;
@@ -288,6 +291,15 @@ const STAGE_TO_STATUS: Record<DealStage, LeadStatus> = {
 };
 export const STAGE_PROB: Record<DealStage, number> = { "New": 10, Researching: 15, Replied: 35, Qualified: 20, Contacted: 25, Meeting: 40, Proposal: 60, Negotiation: 80, Won: 100, Lost: 0 };
 
+export type LeadIntakeResult = { found: string[]; websiteError?: string; status: LeadStatus; score: number; threshold: number; verified: boolean; researchError?: string };
+const handle = (url: string) => "@" + url.replace(/^https?:\/\/(?:www\.)?instagram\.com\//i, "").replace(/\/.*$/, "");
+async function callEnrichAPI(website: string) {
+  const response = await fetch("/api/leads/enrich", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({website}), signal:AbortSignal.timeout(60000) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.contacts) throw new Error(data.error ?? "The website could not be read.");
+  return data as { contacts: { phone?: string; email?: string; location?: string; socials: Record<string, string> }; website: string };
+}
+
 async function callResearchAPI(lead: Lead): Promise<NonNullable<Lead["research"]>> {
   await flushCRMChanges();
   const response = await fetch("/api/ai/research", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({leadId:lead.id}), signal:AbortSignal.timeout(175000) });
@@ -341,7 +353,7 @@ export const useCRM = create<CRMState>()(
         }),
 
         // ---------------- Leads ----------------
-        addLead: (input) => {
+        addLead: (input, options) => {
           const { initialScore, ...fields } = input;
           const lead: Lead = {
             tags: [],
@@ -358,7 +370,7 @@ export const useCRM = create<CRMState>()(
           log({ actor: "human", actorId: me(), entity: "lead", entityId: lead.id, action: "Added lead", detail: `${lead.name} · ${lead.company}` });
           // Trigger: "New lead added" automation → research + score
           const auto = get().automations.find((a) => a.enabled && a.nodes[0]?.config.event === "lead.created");
-          if (auto && !/^[a-f0-9-]{36}$/i.test(me())) {
+          if (auto && options?.research !== false && !/^[a-f0-9-]{36}$/i.test(me())) {
             set((s) => ({ automations: s.automations.map((a) => (a.id === auto.id ? { ...a, runs: a.runs + 1, lastRunAt: now() } : a)) }));
             void get().researchLead(lead.id);
           }
@@ -465,6 +477,48 @@ export const useCRM = create<CRMState>()(
           const updated = get().leads.find((l) => l.id === id)!;
           log({ actor: "ai", entity: "lead", entityId: id, action: "Researched & scored lead", detail: `${updated.company} — score ${updated.score?.value}${research.mode === "public_ai" ? " (public sources + AI)" : " (evidence only)"}` });
           get().setLeadStatus(id, updated.status, "ai");
+        },
+        enrichAndResearchLead: async (id) => {
+          const account = get().currentUserId;
+          const lead = get().leads.find((l) => l.id === id);
+          if (!lead) throw new Error("Lead not found");
+          const found: string[] = [];
+          let websiteError: string | undefined;
+          if (lead.website) {
+            try {
+              const { contacts: c } = await callEnrichAPI(lead.website);
+              if (get().currentUserId !== account) throw new Error("Signed-in account changed");
+              const current = get().leads.find((l) => l.id === id);
+              if (current) {
+                // Only empty fields are filled: anything typed by a person wins over the website.
+                const patch: Partial<Lead> = {};
+                if (!current.phone && c.phone) { patch.phone = c.phone; found.push("phone"); }
+                if (!current.email && c.email) { patch.email = c.email; found.push("email"); }
+                if (!current.location && c.location) { patch.location = c.location; found.push("location"); }
+                if (!current.linkedin && c.socials.linkedin) { patch.linkedin = c.socials.linkedin; found.push("LinkedIn"); }
+                if (!current.instagram && c.socials.instagram) { patch.instagram = handle(c.socials.instagram); found.push("Instagram"); }
+                const others = Object.fromEntries((["facebook","twitter","youtube","whatsapp"] as const).filter(k => c.socials[k] && !current.socials?.[k]).map(k => [k, c.socials[k]]));
+                if (Object.keys(others).length) { patch.socials = { ...current.socials, ...others }; found.push(...Object.keys(others).map(k => ({facebook:"Facebook",twitter:"X",youtube:"YouTube",whatsapp:"WhatsApp"})[k]!)); }
+                if (Object.keys(patch).length) {
+                  get().updateLead(id, patch);
+                  log({ actor: "ai", entity: "lead", entityId: id, action: "Read company website", detail: `${current.company}: found ${found.join(", ")}` });
+                }
+              }
+            } catch (error) { websiteError = error instanceof Error ? error.message : "The website could not be read."; }
+          }
+          if (get().currentUserId !== account || !get().leads.some(l => l.id === id)) throw new Error("Lead is no longer available");
+          get().rescoreLeads([id]);
+          await get().researchLead(id);
+          const done = get().leads.find((l) => l.id === id)!;
+          const threshold = get().settings.qualifyThreshold;
+          const score = done.score?.override ?? done.score?.value ?? 0;
+          const result: LeadIntakeResult = { found, websiteError, status: done.status, score, threshold, verified: done.research?.mode === "public_ai", researchError: done.research?.status === "failed" ? done.research.error : undefined };
+          notify(result.researchError
+            ? { title: `Research could not finish: ${done.company}`, body: result.researchError, href: `/leads/${id}`, kind: "warning", category: "New leads" }
+            : done.status === "Qualified"
+              ? { title: `Qualified: ${done.company}`, body: `Score ${score}, at or above your threshold of ${threshold}.`, href: `/leads/${id}`, kind: "success", category: "New leads" }
+              : { title: `Not qualified yet: ${done.company}`, body: `Score ${score}, below your threshold of ${threshold}.${result.verified ? "" : " AI research could not verify the company, so the stage was not changed."}`, href: `/leads/${id}`, kind: "info", category: "New leads" });
+          return result;
         },
         rescoreLeads: (ids) => {
           const criteria = get().settings.scoringCriteria;

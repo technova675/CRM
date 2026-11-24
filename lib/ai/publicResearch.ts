@@ -34,23 +34,29 @@ export function readablePublicPage(html:string,base:string){
   const links=[...clean.matchAll(/<a\b[^>]*href\s*=\s*["']([^"']+)["']/gi)].flatMap(match=>{try{return[publicResearchUrl(new URL(decode(match[1]),base).href).href];}catch{return[];}});
   return {title,text,links:[...new Set(links)],tracking:[/connect\.facebook\.net|\bfbq\s*\(/i.test(html)?"Meta tracking reference":null,/googletagmanager\.com|\bgtag\s*\(/i.test(html)?"Google tagging reference":null].filter((value):value is string=>!!value)};
 }
+/** Fetches a public page's HTML through the private-network guard, following up to three redirects. Throws a readable reason on failure. */
+export async function fetchPublicHtml(value:string,signal?:AbortSignal,onUrl?:(url:string)=>void):Promise<{url:string;html:string}>{
+  let current=value;
+  for(let redirects=0;redirects<4;redirects++){
+    const url=publicResearchUrl(current);current=url.href;onUrl?.(current);
+    if(/\/(?:login|signin|sign-in|authwall|checkpoint|challenge|accounts\/login)(?:\/|$)/i.test(url.pathname))throw new Error("Public content requires login or an access check");
+    const response=await fetch(url,{dispatcher,redirect:"manual",cache:"no-store",signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),headers:{"User-Agent":"AdbibePublicResearch/1.0",Accept:"text/html,text/plain"}} as RequestInit & {dispatcher:Agent});
+    if([301,302,303,307,308].includes(response.status)){await response.body?.cancel();const location=response.headers.get("location");if(!location)throw new Error("Redirect has no public destination");current=new URL(location,url).href;continue;}
+    if(!response.ok){await response.body?.cancel();throw new Error(`Public page returned HTTP ${response.status}`);}
+    const type=response.headers.get("content-type")??"";if(!/text\/(html|plain)|application\/xhtml\+xml/i.test(type)){await response.body?.cancel();throw new Error("Page is not readable HTML or text");}
+    const reader=response.body?.getReader();if(!reader)throw new Error("Page has no readable body");
+    let bytes=0,html="";const decoder=new TextDecoder();
+    try{while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.byteLength;if(bytes>600000)throw new Error("Public page exceeded the safe read limit");html+=decoder.decode(part.value,{stream:true});}html+=decoder.decode();}catch(error){await reader.cancel();throw error;}
+    return{url:current,html};
+  }throw new Error("Too many public-page redirects");
+}
 export async function readPublicDocument(value:string,id:string,signal?:AbortSignal):Promise<PublicDocument>{
   const checkedAt=new Date().toISOString();let current=value;
   try{
-    for(let redirects=0;redirects<4;redirects++){
-      const url=publicResearchUrl(current);current=url.href;
-      if(/\/(?:login|signin|sign-in|authwall|checkpoint|challenge|accounts\/login)(?:\/|$)/i.test(url.pathname))throw new Error("Public content requires login or an access check");
-      const response=await fetch(url,{dispatcher,redirect:"manual",cache:"no-store",signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),headers:{"User-Agent":"AdbibePublicResearch/1.0",Accept:"text/html,text/plain"}} as RequestInit & {dispatcher:Agent});
-      if([301,302,303,307,308].includes(response.status)){await response.body?.cancel();const location=response.headers.get("location");if(!location)throw new Error("Redirect has no public destination");current=new URL(location,url).href;continue;}
-      if(!response.ok){await response.body?.cancel();throw new Error(`Public page returned HTTP ${response.status}`);}
-      const type=response.headers.get("content-type")??"";if(!/text\/(html|plain)|application\/xhtml\+xml/i.test(type)){await response.body?.cancel();throw new Error("Page is not readable HTML or text");}
-      const reader=response.body?.getReader();if(!reader)throw new Error("Page has no readable body");
-      let bytes=0,html="";const decoder=new TextDecoder();
-      try{while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.byteLength;if(bytes>600000)throw new Error("Public page exceeded the safe read limit");html+=decoder.decode(part.value,{stream:true});}html+=decoder.decode();}catch(error){await reader.cancel();throw error;}
-      const content=readablePublicPage(html,current);
-      if(content.text.length<80||(content.text.length<1500&&/captcha|verify.{0,10}human|access denied|just a moment|sign in to|log in to|enable javascript/i.test(content.text)))throw new Error("Public content unavailable, blocked or requires a browser/login");
-      return{id,url:current,...content,status:"ok",checkedAt};
-    }throw new Error("Too many public-page redirects");
+    const page=await fetchPublicHtml(value,signal,url=>{current=url;});current=page.url;
+    const content=readablePublicPage(page.html,current);
+    if(content.text.length<80||(content.text.length<1500&&/captcha|verify.{0,10}human|access denied|just a moment|sign in to|log in to|enable javascript/i.test(content.text)))throw new Error("Public content unavailable, blocked or requires a browser/login");
+    return{id,url:current,...content,status:"ok",checkedAt};
   }catch(error){return{id,url:current,title:"Source unavailable",text:"",links:[],status:"unavailable",checkedAt,reason:error instanceof Error&&/public|Private|HTTP|limit|Redirect|redirect|readable|blocked/.test(error.message)?error.message:"Public page could not be reached within the time limit"};}
 }
 
@@ -80,6 +86,13 @@ async function firecrawlScrape(value:string,id:string,signal?:AbortSignal):Promi
   const text=normalizeEvidence(markdownToText(markdown)).slice(0,14000);if(text.length<80)return null;
   const links=(result.data?.links??[]).flatMap(link=>{try{return[publicResearchUrl(new URL(link,url).href).href];}catch{return[];}});
   return{id,url:url.href,title:normalizeEvidence(result.data?.metadata?.title??url.hostname),text,links:[...new Set(links)],status:"ok",checkedAt:new Date().toISOString()};
+}
+/** The rendered HTML of a page via Firecrawl, for sites that build their content with JavaScript or block plain requests. Null when Firecrawl is not configured. */
+export async function firecrawlHtml(value:string,signal?:AbortSignal):Promise<{url:string;html:string;links:string[]}|null>{
+  const url=publicResearchUrl(value);
+  const result=await firecrawlPost<{success?:boolean;data?:{rawHtml?:string;html?:string;links?:string[];metadata?:{sourceURL?:string}}}>("/scrape",{url:url.href,formats:["rawHtml","links"],onlyMainContent:false,timeout:25000},signal);
+  const html=result?.data?.rawHtml??result?.data?.html;if(!result?.success||!html)return null;
+  return{url:url.href,html,links:result.data?.links??[]};
 }
 // Plain fetch first (free, unlimited); Firecrawl only when the page is empty, blocked or JS-rendered.
 async function readPage(value:string,id:string,signal?:AbortSignal,limitations:string[]=[]):Promise<PublicDocument>{
