@@ -160,7 +160,7 @@ function CampaignsInner() {
                       ))}
                     </div>
                   </Td>
-                  <Td>{c.metrics.length ? <Sparkline data={campaignMetricRows(c).map((m) => m.spend)} /> : <span className="text-xs text-fg-3">No data</span>}</Td>
+                  <Td>{campaignMetricRows(c).length ? <Sparkline data={campaignMetricRows(c).map((m) => m.spend)} /> : <span className="text-xs text-fg-3">No data</span>}</Td>
                 </tr>
               ))}
             </tbody>

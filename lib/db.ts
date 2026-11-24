@@ -21,7 +21,7 @@ export class SupabaseDbError extends Error {
 
 export const dbConfigured = () => !!((process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY));
 
-type RequestOptions = { query?: Record<string, string>; method?: "GET" | "POST" | "DELETE"; body?: unknown; prefer?: string; timeoutMs?: number };
+type RequestOptions = { query?: Record<string, string>; method?: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown; prefer?: string; timeoutMs?: number };
 
 export async function supabaseRequest<T>(resource: string, options: RequestOptions = {}): Promise<T> {
   const base = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -55,7 +55,9 @@ export async function supabaseRequest<T>(resource: string, options: RequestOptio
     throw new SupabaseDbError(typeof error.code === "string" ? error.code : `http_${response.status}`, response.status);
   }
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  // return=minimal writes answer 201 with an empty body.
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export function dbError(error: unknown) {

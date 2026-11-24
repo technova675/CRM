@@ -1,9 +1,11 @@
 import {z} from "zod";
 import type {Campaign,MediaMetricRow,Recommendation} from "../types.ts";
 export const MEDIA_PLATFORMS=["Meta Ads","Google Ads","LinkedIn Ads","Programmatic","Retail Media"] as const;
+/** Live sync for these is being built; until then their results are entered on each campaign. */
+export const COMING_SOON_PLATFORMS:readonly string[]=["Meta Ads","Google Ads"];
 export const MEDIA_METRICS=["spend","impressions","reach","clicks","leads","conversions","revenue"] as const;
 const number=z.number().finite().min(0).max(1e15).nullable();
-export const mediaMetricSchema=z.object({id:z.string().min(1).max(250),date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>{try{return new Date(v).toISOString().slice(0,10)===v;}catch{return false;}}),platform:z.string().min(1).max(100),adId:z.string().max(200).optional(),adName:z.string().max(500).optional(),source:z.enum(["CSV import","Platform sync"]),importedAt:z.string().datetime(),spend:number,impressions:number,reach:number,clicks:number,leads:number,conversions:number,revenue:number,frequency:number.optional()});
+export const mediaMetricSchema=z.object({id:z.string().min(1).max(250),date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>{try{return new Date(v).toISOString().slice(0,10)===v;}catch{return false;}}),platform:z.string().min(1).max(100),adId:z.string().max(200).optional(),adName:z.string().max(500).optional(),source:z.enum(["Manual entry","CSV import","Platform sync"]),importedAt:z.string().datetime(),spend:number,impressions:number,reach:number,clicks:number,leads:number,conversions:number,revenue:number,frequency:number.optional()});
 export type MediaTotals=ReturnType<typeof mediaTotals>;
 const ratio=(a:number|null,b:number|null,m=1)=>a===null||b===null||b<=0?null:a/b*m;
 export function mediaTotals(rows:Partial<MediaMetricRow>[]){const values=Object.fromEntries(MEDIA_METRICS.map(key=>[key,!rows.length||rows.some(r=>r[key]===null||r[key]===undefined)?null:rows.reduce((sum,r)=>sum+(r[key]??0),0)])) as Record<typeof MEDIA_METRICS[number],number|null>;return {...values,ctr:ratio(values.clicks,values.impressions,100),cpc:ratio(values.spend,values.clicks),cpm:ratio(values.spend,values.impressions,1000),cpl:ratio(values.spend,values.leads),cpa:ratio(values.spend,values.conversions),roas:ratio(values.revenue,values.spend),cvr:ratio(values.conversions,values.clicks,100)};}

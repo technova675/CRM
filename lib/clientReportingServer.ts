@@ -157,7 +157,7 @@ export async function sendClientReport(owner: string, id: string) {
 }
 
 export async function tickClientReporting(owner: string, deliver: boolean) {
-  const data = await ownedLibrary(owner);
+  const data = await ownedLibrary(owner,{campaignMetrics:true});
   const actor = data?.team.find(p=>p.id===owner);
   if (!data || !actor || actor.status!=="active" || actor.role==="client" || !can(actor.role,"reports","write")) return null;
   const { reports, schedules } = reporting(data);

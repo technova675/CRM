@@ -54,7 +54,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return reply({error:"Request origin is not allowed."},403);
   try {
-    const user = await reportIdentity(req), data = await ownedLibrary(user.userId);
+    const user = await reportIdentity(req), data = await ownedLibrary(user.userId,{campaignMetrics:true});
     access(data,user.userId,true);
     let body;
     try { body = await boundedJSON(req,14000); } catch { return reply({error:"Invalid reporting request."},400); }

@@ -14,7 +14,7 @@ export async function POST(req:Request){
  if(!sameOrigin(req))return Response.json({error:"Request origin is not allowed."},{status:403});let lock:string|undefined;
  try{const user=await reportIdentity(req),parsed=requestSchema.safeParse(await boundedJSON(req,100000));if(!parsed.success)return Response.json({error:"Check the strategy inputs and enter a whole-rupee monthly budget from 0 to 1 billion."},{status:400});
  const input=parsed.data;for(const key of ["business","product","audience","geography","goals"] as const)if(!input.inputs[key].trim())return Response.json({error:`Complete ${key} before generating a strategy.`},{status:400});
- const library=await ownedLibrary(user.userId),client=library?.clients.find(c=>c.id===input.clientId),existing=library?.strategies.find(s=>s.id===input.existingId),knowledge=library?.knowledge.find(k=>k.clientId===input.clientId);
+ const library=await ownedLibrary(user.userId,{campaignMetrics:true}),client=library?.clients.find(c=>c.id===input.clientId),existing=library?.strategies.find(s=>s.id===input.existingId),knowledge=library?.knowledge.find(k=>k.clientId===input.clientId);
  if(input.clientId&&!client||input.existingId&&!existing)return Response.json({error:"Strategy or client not found in this account."},{status:404});
  if(existing&&existing.clientId!==input.clientId)return Response.json({error:"Keep the strategy linked to its original client."},{status:400});
  if(active.has(user.userId))return Response.json({error:"A strategy is already being generated. Please wait and retry."},{status:429});active.add(user.userId);lock=user.userId;

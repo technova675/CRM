@@ -4,6 +4,7 @@ import {tenantPlan} from "./tenantPlan";
 import {trimAudit} from "./auditServer";
 import {createHash,createHmac,timingSafeEqual} from "node:crypto";
 import {supabaseRequest} from "./db";
+import {attachCampaignRows,persistCampaignRows} from "./campaignMetrics";
 import type {CRMLibrary} from "./domain/crmLibrary";
 import type {Campaign,Recommendation} from "./types";
 function stable(v:unknown):unknown{if(Array.isArray(v))return v.map(stable);if(v&&typeof v==="object")return Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,x])=>[k,stable(x)]));return v;}
@@ -12,9 +13,10 @@ export function mediaFingerprint(c:Campaign,start:string,end:string){return crea
 function sign(owner:string,rec:Recommendation){const secret=process.env.SUPABASE_SERVICE_ROLE_KEY??process.env.SUPABASE_SECRET_KEY;if(!secret)throw new Error("Media review signing is not configured.");const {signature:discard,...plan}=rec.mediaPlan!;void discard;return createHmac("sha256",secret).update("media-review-v1|"+owner+"|"+json({id:rec.id,adId:rec.adId,clientId:rec.clientId,title:rec.title,category:rec.category,recommendation:rec.recommendation,evidence:rec.evidence,plan})).digest("hex");}
 export function signMediaRecommendation(owner:string,rec:Recommendation){return {...rec,mediaPlan:{...rec.mediaPlan!,signature:sign(owner,rec)}};}
 export function validMediaRecommendation(owner:string,rec:Recommendation){try{const expected=Buffer.from(sign(owner,rec),"hex"),actual=Buffer.from(rec.mediaPlan?.signature??"","hex");return expected.length===actual.length&&timingSafeEqual(expected,actual);}catch{return false;}}
+/** Reads the CRM library with campaign rows attached, applies the change, saves rows to campaign_metrics and the rest to the library. */
 export async function mutateMedia(owner:string,operation:string,change:(data:CRMLibrary)=>CRMLibrary){
  for(let attempt=0;attempt<3;attempt++){const [row]=await supabaseRequest<{revision:number;data:CRMLibrary;last_operation?:string}[]>("crm_libraries",{query:{owner_id:`eq.${owner}`,select:"revision,data,last_operation",limit:"1"}});if(!row)throw new Error("Campaign or recommendation not found in this account. Open the CRM library first.");if(row.last_operation===operation)return row;
- const data=change(structuredClone(row.data));checkTenantQuota(row.data,data,tenantPlan(owner,row.data));trimAudit(data);if(Buffer.byteLength(JSON.stringify(data))>8000000)throw new Error("The CRM library exceeds its save limit; reduce the import size.");const revision=await supabaseRequest<number>("rpc/save_crm_library",{method:"POST",body:{p_owner:owner,p_revision:row.revision,p_operation:operation,p_data:data}});if(revision>=0)return {revision,data};}
+ const draft=structuredClone(row.data),snapshot=await attachCampaignRows(owner,draft);const data=change(draft);await persistCampaignRows(owner,data,snapshot,owner);checkTenantQuota(row.data,data,tenantPlan(owner,row.data));trimAudit(data);if(Buffer.byteLength(JSON.stringify(data))>8000000)throw new Error("The CRM library exceeds its save limit; reduce the import size.");const revision=await supabaseRequest<number>("rpc/save_crm_library",{method:"POST",body:{p_owner:owner,p_revision:row.revision,p_operation:operation,p_data:data}});if(revision>=0)return {revision,data};}
  throw new Error("The CRM changed on another laptop. Reload and retry.");
 }
 async function mediaConnection(owner:string){

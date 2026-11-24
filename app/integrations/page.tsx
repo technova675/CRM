@@ -8,7 +8,7 @@ import { ArchitecturePanel } from "@/components/integrations/ArchitecturePanel";
 import { ApiKeysCard } from "@/components/integrations/ApiKeysCard";
 import { useCRM, useMe } from "@/lib/store";
 import { can } from "@/lib/permissions";
-import { MEDIA_PLATFORMS } from "@/lib/domain/performance";
+import { COMING_SOON_PLATFORMS, MEDIA_PLATFORMS } from "@/lib/domain/performance";
 import type { IntegrationRun, SyncPlatform } from "@/lib/domain/integrationRuns";
 import { flushCRMChanges, refreshCRMChanges } from "@/lib/crmSync";
 import { fmtDateTime } from "@/lib/utils";
@@ -106,7 +106,7 @@ function IntegrationsInner() {
       {error&&<p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
       {tab==="connectors"&&<div className="space-y-4">
         {statusError&&<p role="alert" className="text-sm text-danger">{statusError}</p>}
-        {status&&!status.configured&&<Card className="p-4 text-sm text-fg-2">Live connections to ad platforms are not switched on for this workspace yet. Until then, export reports from Meta, Google or LinkedIn and import the CSV as it is in <a className="text-accent-text underline" href="/analytics?tab=sources">Analytics → Data sources</a> or <a className="text-accent-text underline" href="/performance">Performance</a>.</Card>}
+        {status&&!status.configured&&<Card className="p-4 text-sm text-fg-2">Live connections to ad platforms are not switched on for this workspace yet. Until then, enter daily results on each campaign in <a className="text-accent-text underline" href="/campaigns">Campaigns</a>. Meta Ads and Google Ads live sync is coming soon.</Card>}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {MEDIA_PLATFORMS.map(name=>{
             const connections = status?.connections.filter(item=>item.platform===name) ?? [];
@@ -116,10 +116,10 @@ function IntegrationsInner() {
             const verified = active.map(item=>item.lastSyncAt).filter((at):at is string=>!!at).sort().at(-1);
             const last = [lastSync,verified].filter((at):at is string=>!!at).sort().at(-1);
             return <Card key={name} className="space-y-3 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">{name}</h2><Badge tone={active.length?"success":"neutral"}>{!status?"Unverified":active.length?"Connected":status.configured?"Not authorized":"Setup required"}</Badge></div>
+              <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">{name}</h2><Badge tone={active.length?"success":"neutral"}>{active.length?"Connected":COMING_SOON_PLATFORMS.includes(name)?"Coming soon":!status?"Unverified":status.configured?"Not authorized":"Setup required"}</Badge></div>
               {active.length>0&&<p className="break-words text-sm text-fg-2">{active.map(item=>item.accountLabel).join(" · ")}</p>}
               <p className="text-xs text-fg-3">Last successful sync {last?fmtDateTime(last):"—"}</p>
-              {authorize&&writable&&<Button href={authorize} external className="min-h-11" icon={<ExternalLink className="size-4"/>}>{active.length?"Authorize another account":"Connect platform"}</Button>}
+              {authorize&&writable&&!COMING_SOON_PLATFORMS.includes(name)&&<Button href={authorize} external className="min-h-11" icon={<ExternalLink className="size-4"/>}>{active.length?"Authorize another account":"Connect platform"}</Button>}
             </Card>;
           })}
         </div>

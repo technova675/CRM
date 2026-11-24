@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import {approvalSignature,matchesSecret} from "./domain/outreachApproval";
 export {matchesSecret} from "./domain/outreachApproval";
 import { supabaseRequest } from "./db";
+import { attachCampaignRows } from "./campaignMetrics";
 import type { CRMLibrary } from "./domain/crmLibrary";
 import { OUTREACH_CHANNELS } from "./domain/outreach";
 import type { Channel, Lead, OutreachRecipient } from "./types";
 
-export async function ownedLibrary(owner: string) {
+export async function ownedLibrary(owner: string, options: { campaignMetrics?: boolean } = {}) {
   const [row] = await supabaseRequest<{data:CRMLibrary}[]>("crm_libraries",{query:{owner_id:`eq.${owner}`,select:"data",limit:"1"}});
+  if (row?.data && options.campaignMetrics) await attachCampaignRows(owner,row.data);
   return row?.data;
 }
 export async function boundedJSON(req: Pick<Request, "body">, limit = 32000):Promise<unknown> {

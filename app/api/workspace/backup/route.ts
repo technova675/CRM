@@ -9,6 +9,7 @@ import type {CRMLibrary} from "@/lib/domain/crmLibrary";
 import {tenantPlan} from "@/lib/tenantPlan";
 import {backupMac,createBackup,prepareRestore,readBackup,validMac} from "@/lib/workspaceBackup";
 import {vaultConfigured} from "@/lib/workspaceVault";
+import {attachCampaignRows} from "@/lib/campaignMetrics";
 
 const reply=(value:unknown,status=200)=>Response.json(value,{status,headers:{"Cache-Control":"private, no-store"}});
 const restoreInput=z.discriminatedUnion("action",[
@@ -31,6 +32,8 @@ export async function GET(req:Request){
     if(!row)return reply({error:"No saved workspace data to export."},404);
     if(!canManageWorkspace(row.data,user.userId))return reply({error:"Workspace owner access is required."},403);
     if(!vaultConfigured())return reply({error:"Configure WORKSPACE_VAULT_KEY to sign workspace backups."},503);
+    // A backup carries campaign performance too, even though it is stored in its own table.
+    await attachCampaignRows(user.userId,row.data);
     return Response.json(createBackup(user.userId,user.workspace,row.data),{headers:{
       "Cache-Control":"private, no-store","Content-Disposition":'attachment; filename="adbibe-workspace-backup.json"',"X-Content-Type-Options":"nosniff",
     }});

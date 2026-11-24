@@ -1,7 +1,7 @@
 import {z} from "zod";
 import {SERVICES,CAMPAIGN_TYPES,type Campaign,type Creative,type TeamMember} from "../types.ts";
 import {safeClientLink} from "./clientProfile.ts";
-import {mediaMetricSchema} from "./performance.ts";
+import {campaignMediaRows,mediaMetricSchema} from "./performance.ts";
 export const CAMPAIGN_CHANNELS=["Meta Ads","Google Ads","Programmatic","LinkedIn Ads","Retail Media","Ecommerce","Quick Commerce","SEO","Social Media","Influencer",...SERVICES.filter(s=>!["Meta Ads","Google Ads","Programmatic","LinkedIn Ads","Retail Media","Quick Commerce","SEO","Social Media"].includes(s))] as const;
 export const CAMPAIGN_STATUSES=["Planning","Active","Paused","Completed"] as const;
 const id=z.string().min(1).max(150),text=z.string().max(12000),date=z.string().refine(v=>!!v&&Number.isFinite(Date.parse(v)),"Enter a valid date");
@@ -15,9 +15,11 @@ export function campaignReferenceIssues(c:Campaign,library:{clients:{id:string}[
 }
 export function campaignReadyIssues(c:Campaign){const issues:string[]=[];if(!c.goals?.trim())issues.push("Add the campaign goals.");if(!c.audience?.trim())issues.push("Define the target audience.");if(!c.ownerId)issues.push("Assign a campaign owner.");if(!c.channels?.length)issues.push("Select at least one channel.");if(!c.kpis.length)issues.push("Add at least one KPI.");return issues;}
 export function campaignKPIRatio(k:Campaign["kpis"][number]){if(k.measurementRecorded===false||!k.target)return undefined;const lower=k.direction==="lower"||!k.direction&&/^(cpa|cpc|cpl|cac|cost per)/i.test(k.label);return lower?(k.actual?k.target/k.actual*100:undefined):k.actual/k.target*100;}
+/** Daily results for the last `days` days: entered, imported and synced rows, plus older built-in records for days with none.
+ * Unreported values count as 0 here because this feeds charts and simple totals; the Performance page keeps them as unknown. */
 export function campaignMetricRows(c:Campaign,days=30,at=new Date()){
  const today=at.toISOString().slice(0,10),start=new Date(`${today}T00:00:00Z`);start.setUTCDate(start.getUTCDate()-days+1);
- return (c.metrics??[]).filter(row=>row.date.slice(0,10)>=start.toISOString().slice(0,10)&&row.date.slice(0,10)<=today).sort((a,b)=>a.date.localeCompare(b.date));
+ return campaignMediaRows(c,start.toISOString().slice(0,10),today).map(r=>({date:r.date!.slice(0,10),spend:r.spend??0,impressions:r.impressions??0,reach:r.reach??0,clicks:r.clicks??0,leads:r.leads??0,conversions:r.conversions??0,revenue:r.revenue??0})).sort((a,b)=>a.date.localeCompare(b.date));
 }
 export function campaignService(channel:string):Campaign["service"]{return channel==="Influencer"?"Influencer Marketing":(SERVICES as readonly string[]).includes(channel)?channel as Campaign["service"]:"Consulting";}
 

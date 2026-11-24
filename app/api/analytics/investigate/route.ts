@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     try { body = await boundedJSON(req, 4000); } catch { return reply({ error: "Invalid investigation request." }, 400); }
     const input = investigationInput.safeParse(body);
     if (!input.success) return reply({ error: "Choose a valid feed, metric and date window." }, 400);
-    const library = await ownedLibrary(user.userId);
+    const library = await ownedLibrary(user.userId,{campaignMetrics:true});
     if (!library) return reply({ error: "Save or import measured data into your CRM account first." }, 404);
     const actor = library.team.find(member => member.id === user.userId);
     if (!actor || actor.status !== "active" || actor.role === "client" || !can(actor.role, "analytics")) return reply({ error: "You need staff access to Analytics." }, 403);
