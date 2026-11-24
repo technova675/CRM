@@ -64,7 +64,7 @@ const schema = z.object({ revision: z.number().int().nonnegative(), operationId:
 }) });
 
 function withoutVault(data:CRMLibrary){
-  const {credentialVault,...visible}=data; void credentialVault;
+  const {credentialVault,calendarLinks,...visible}=data; void credentialVault; void calendarLinks;
   return visible;
 }
 
@@ -84,6 +84,7 @@ export async function GET(req: Request) {
     delete library.credentialVault;
     delete library.aiVisibility;
     delete library.socialStudio;
+    delete library.calendarLinks;
     delete library.indiaCommerce;
     delete library.tenantProfile;
     delete library.integrationRuns;
@@ -199,7 +200,7 @@ export async function PUT(req: Request) {
     }
     {const knownClients=new Set(data.data.clients.map(c=>c.id));for(const concept of data.data.concepts)if(!knownClients.has(concept.clientId)||concept.existingCreativeIds?.some(id=>!data.data.creatives.some(c=>c.id===id&&c.clientId===concept.clientId)))return Response.json({error:"Concept client and existing creative references must belong to this account."},{status:400});const mapped=new Map<string,string>();for(const creative of data.data.creatives){if(creative.performanceLinks===undefined)continue;const parsedLinks=z.array(z.object({campaignId:id,platform:z.string().min(1).max(100),adId:z.string().min(1).max(200)})).max(100).safeParse(creative.performanceLinks);if(!parsedLinks.success)return Response.json({error:"Invalid creative/ad performance mapping."},{status:400});for(const link of parsedLinks.data){const campaign=data.data.campaigns.find(c=>c.id===link.campaignId&&c.clientId===creative.clientId);const exists=(campaign?.performanceRows as import("@/lib/types").MediaMetricRow[]|undefined)?.some(r=>r.adId===link.adId&&r.platform===link.platform);const key=`${link.campaignId}|${link.platform}|${link.adId}`;if(!exists||mapped.has(key)&&mapped.get(key)!==creative.id)return Response.json({error:"Each dated ad must map to one creative belonging to its client."},{status:400});mapped.set(key,creative.id);}}}
     const [auditBase]=await supabaseRequest<{data:CRMLibrary;revision:number}[]>("crm_libraries",{query:{owner_id:`eq.${user.userId}`,select:"data,revision",limit:"1"}});
-    {const previous=auditBase;Object.assign(data.data,{integrationRuns:previous?.data.integrationRuns,aiApprovalPolicy:previous?.data.aiApprovalPolicy,auditEvents:previous?.data.auditEvents??[],tenantProfile:previous?.data.tenantProfile??(previous?undefined:emptyCRMLibrary({id:user.userId,email:user.email}).tenantProfile),tenantMeter:previous?.data.tenantMeter,staffInvites:previous?.data.staffInvites,workspaceApiKeys:previous?.data.workspaceApiKeys,credentialVault:previous?.data.credentialVault,aiVisibility:previous?.data.aiVisibility,socialStudio:previous?.data.socialStudio,indiaCommerce:previous?.data.indiaCommerce});data.data.notificationPrefs??=previous?.data.notificationPrefs;data.data.readNotificationIds??=previous?.data.readNotificationIds;data.data.clientReporting=previous?.data.clientReporting;data.data.creativeReviews=previous?.data.creativeReviews;const existingStaff=new Map((previous?.data.team??[]).map(member=>[member.id,member]));
+    {const previous=auditBase;Object.assign(data.data,{integrationRuns:previous?.data.integrationRuns,aiApprovalPolicy:previous?.data.aiApprovalPolicy,auditEvents:previous?.data.auditEvents??[],tenantProfile:previous?.data.tenantProfile??(previous?undefined:emptyCRMLibrary({id:user.userId,email:user.email}).tenantProfile),tenantMeter:previous?.data.tenantMeter,staffInvites:previous?.data.staffInvites,workspaceApiKeys:previous?.data.workspaceApiKeys,credentialVault:previous?.data.credentialVault,aiVisibility:previous?.data.aiVisibility,socialStudio:previous?.data.socialStudio,calendarLinks:previous?.data.calendarLinks,indiaCommerce:previous?.data.indiaCommerce});data.data.notificationPrefs??=previous?.data.notificationPrefs;data.data.readNotificationIds??=previous?.data.readNotificationIds;data.data.clientReporting=previous?.data.clientReporting;data.data.creativeReviews=previous?.data.creativeReviews;const existingStaff=new Map((previous?.data.team??[]).map(member=>[member.id,member]));
     const invited=new Set(previous?.data.staffInvites?.map(invite=>invite.memberId)??[]);
     for(const old of existingStaff.values()){
       if(!old.staffAuthId&&!invited.has(old.id))continue;

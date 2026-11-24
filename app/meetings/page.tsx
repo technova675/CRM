@@ -9,6 +9,8 @@ import { cn, DAY, fmtDate, fmtShort, fmtTime, isSameDay, startOfDay } from "@/li
 import { Badge, Button, Card, Drawer, EmptyState, Field, Input, MemberAvatar, Modal, PageHeader, Segmented, Select, StatusBadge, Textarea } from "@/components/ui";
 import { toast } from "@/components/shell/toast";
 import {MeetingImportModal} from "@/components/sales/MeetingImportModal";
+import {CalendarConnect,ExternalEventModal,useCalendarNotice,useExternalCalendar} from "@/components/meetings/CalendarConnect";
+import type {CalendarEvent} from "@/lib/domain/calendar";
 
 const OUTCOMES: MeetingOutcome[] = ["Pending", "Positive", "Needs Follow-up", "Not Interested", "No Show"];
 const OUTCOME_EFFECT: Record<MeetingOutcome, string> = {
@@ -48,13 +50,28 @@ function MeetingRow({ m, onOpen, isClient }: { m: Meeting; onOpen: () => void; i
   );
 }
 
-function WeekGrid({ meetings, onOpen }: { meetings: Meeting[]; onOpen: (id: string) => void }) {
-  const [offset, setOffset] = useState(0);
-  const start = useMemo(() => {
-    const d = startOfDay();
-    const dow = (d.getDay() + 6) % 7; // Monday first
-    return new Date(d.getTime() - dow * DAY + offset * 7 * DAY);
-  }, [offset]);
+function weekStart(offset: number) {
+  const d = startOfDay();
+  const dow = (d.getDay() + 6) % 7; // Monday first
+  return new Date(d.getTime() - dow * DAY + offset * 7 * DAY);
+}
+function monthStart(offset: number) {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth() + offset, 1);
+}
+
+/** A connected calendar's event, shown read-only next to CRM meetings. */
+function ExternalChip({ e, onOpen }: { e: CalendarEvent; onOpen: (e: CalendarEvent) => void }) {
+  return (
+    <button onClick={() => onOpen(e)} className="block w-full rounded-md border-l-2 border-info bg-info-soft px-2 py-1.5 text-left text-[11px] hover:opacity-80" title={`${e.title} · from your calendar`}>
+      <span className="block font-medium tabular-nums text-fg">{e.allDay ? "All day" : fmtTime(e.start)}</span>
+      <span className="line-clamp-2 text-fg-2">{e.title}</span>
+    </button>
+  );
+}
+
+function WeekGrid({ meetings, onOpen, offset, setOffset, external, onOpenExternal }: { meetings: Meeting[]; onOpen: (id: string) => void; offset: number; setOffset: (fn: (o: number) => number) => void; external: CalendarEvent[]; onOpenExternal: (e: CalendarEvent) => void }) {
+  const start = useMemo(() => weekStart(offset), [offset]);
   const days = Array.from({ length: 7 }, (_, i) => new Date(start.getTime() + i * DAY));
   return (
     <Card>
@@ -64,7 +81,7 @@ function WeekGrid({ meetings, onOpen }: { meetings: Meeting[]; onOpen: (id: stri
         </p>
         <div className="flex gap-1">
           <Button size="xs" variant="ghost" onClick={() => setOffset((o) => o - 1)} aria-label="Previous week" icon={<ChevronLeft className="size-3.5" />} />
-          <Button size="xs" variant="ghost" onClick={() => setOffset(0)}>
+          <Button size="xs" variant="ghost" onClick={() => setOffset(() => 0)}>
             Today
           </Button>
           <Button size="xs" variant="ghost" onClick={() => setOffset((o) => o + 1)} aria-label="Next week" icon={<ChevronRight className="size-3.5" />} />
@@ -73,6 +90,7 @@ function WeekGrid({ meetings, onOpen }: { meetings: Meeting[]; onOpen: (id: stri
       <div className="grid grid-cols-1 divide-y divide-border sm:grid-cols-7 sm:divide-x sm:divide-y-0">
         {days.map((d) => {
           const items = meetings.filter((m) => isSameDay(m.startsAt, d)).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+          const ext = external.filter((e) => isSameDay(e.start, d));
           const today = isSameDay(d);
           return (
             <div key={d.toISOString()} className="min-h-24 p-2 sm:min-h-64">
@@ -87,6 +105,50 @@ function WeekGrid({ meetings, onOpen }: { meetings: Meeting[]; onOpen: (id: stri
                     <span className="line-clamp-2 text-fg-2">{m.title}</span>
                   </button>
                 ))}
+                {ext.map((e) => <ExternalChip key={e.id} e={e} onOpen={onOpenExternal} />)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+/** Month at a glance: CRM meetings and calendar events per day; a day with more shows a count. */
+function MonthGrid({ meetings, onOpen, offset, setOffset, external, onOpenExternal }: { meetings: Meeting[]; onOpen: (id: string) => void; offset: number; setOffset: (fn: (o: number) => number) => void; external: CalendarEvent[]; onOpenExternal: (e: CalendarEvent) => void }) {
+  const first = useMemo(() => monthStart(offset), [offset]);
+  const lead = (first.getDay() + 6) % 7;
+  const daysIn = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  const cells = Array.from({ length: Math.ceil((lead + daysIn) / 7) * 7 }, (_, i) => new Date(first.getFullYear(), first.getMonth(), i - lead + 1));
+  return (
+    <Card>
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <p className="text-[13px] font-semibold">{first.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
+        <div className="flex gap-1">
+          <Button size="xs" variant="ghost" onClick={() => setOffset((o) => o - 1)} aria-label="Previous month" icon={<ChevronLeft className="size-3.5" />} />
+          <Button size="xs" variant="ghost" onClick={() => setOffset(() => 0)}>Today</Button>
+          <Button size="xs" variant="ghost" onClick={() => setOffset((o) => o + 1)} aria-label="Next month" icon={<ChevronRight className="size-3.5" />} />
+        </div>
+      </div>
+      <div className="hidden grid-cols-7 border-b border-border sm:grid">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => <p key={d} className="px-2 py-1.5 text-[11px] text-fg-3">{d}</p>)}</div>
+      <div className="grid grid-cols-1 divide-y divide-border sm:grid-cols-7 sm:divide-y-0">
+        {cells.map((d) => {
+          const inMonth = d.getMonth() === first.getMonth();
+          const items = meetings.filter((m) => isSameDay(m.startsAt, d)).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+          const ext = external.filter((e) => isSameDay(e.start, d));
+          if (!inMonth && !items.length && !ext.length) return <div key={d.toISOString()} className="hidden min-h-28 border-b border-r border-border bg-surface-2/40 sm:block" />;
+          const shown = [...items.map((m) => ({ k: "m" as const, at: m.startsAt, m })), ...ext.map((e) => ({ k: "e" as const, at: e.start, e }))].sort((a, b) => a.at.localeCompare(b.at));
+          return (
+            <div key={d.toISOString()} className={cn("min-h-16 p-1.5 sm:min-h-28 sm:border-b sm:border-r sm:border-border", !inMonth && "bg-surface-2/40")}>
+              <p className={cn("mb-1 text-xs tabular-nums", isSameDay(d) ? "font-semibold text-accent-text" : inMonth ? "text-fg-2" : "text-fg-3")}>
+                <span className="sm:hidden">{d.toLocaleDateString("en-IN", { weekday: "short" })} </span>{d.getDate()}
+              </p>
+              <div className="space-y-1">
+                {shown.slice(0, 3).map((x) => x.k === "m"
+                  ? <button key={x.m.id} onClick={() => onOpen(x.m.id)} className={cn("block w-full truncate rounded border-l-2 px-1.5 py-0.5 text-left text-[11px] hover:opacity-80", x.m.clientId ? "border-success bg-success-soft" : "border-accent bg-accent-soft")}>{fmtTime(x.m.startsAt)} {x.m.title}</button>
+                  : <button key={x.e.id} onClick={() => onOpenExternal(x.e)} className="block w-full truncate rounded border-l-2 border-info bg-info-soft px-1.5 py-0.5 text-left text-[11px] hover:opacity-80">{x.e.allDay ? "" : fmtTime(x.e.start) + " "}{x.e.title}</button>)}
+                {shown.length > 3 && <p className="px-1.5 text-[11px] text-fg-3">+{shown.length - 3} more</p>}
               </div>
             </div>
           );
@@ -360,7 +422,26 @@ export default function MeetingsPage() {
   const all = useCRM((s) => s.meetings);
   const me = useMe();
   const canWrite = can(me.role, "meetings", "write") && me.role !== "client";
-  const [view, setView] = useState<"agenda" | "week">("agenda");
+  const [view, setView] = useState<"agenda" | "week" | "month">("agenda");
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [extOpen, setExtOpen] = useState<CalendarEvent | null>(null);
+  const addMeeting = useCRM((s) => s.addMeeting);
+  // The window of external events to load follows what is on screen; the agenda looks two weeks ahead.
+  const range = useMemo(() => {
+    if (view === "week") { const s = weekStart(weekOffset); return { from: s.toISOString(), to: new Date(s.getTime() + 7 * DAY).toISOString() }; }
+    if (view === "month") { const s = monthStart(monthOffset); const lead = (s.getDay() + 6) % 7; const a = new Date(s.getTime() - lead * DAY); return { from: a.toISOString(), to: new Date(a.getTime() + 42 * DAY).toISOString() }; }
+    const s = startOfDay(); return { from: s.toISOString(), to: new Date(s.getTime() + 14 * DAY).toISOString() };
+  }, [view, weekOffset, monthOffset]);
+  const cal = useExternalCalendar(range.from, range.to);
+  useCalendarNotice();
+  // Bookings already tracked as CRM meetings (same start and title) are not shown twice.
+  const external = useMemo(() => cal.events.filter((e) => !all.some((m) => m.startsAt === e.start && m.title === e.title)), [cal.events, all]);
+  const track = (e: CalendarEvent) => {
+    addMeeting({ title: e.title, startsAt: e.start, durationMin: Math.max(5, Math.round((Date.parse(e.end) - Date.parse(e.start)) / 60000)), link: e.joinUrl || undefined, ownerId: me.id, notes: e.attendees.length ? `Attendees: ${e.attendees.join(", ")}` : "", outcome: "Pending" });
+    toast("Added to Meetings", "Link it to a lead or client to track the outcome.");
+    setExtOpen(null);
+  };
   const [tab, setTab] = useState<"today" | "upcoming" | "past">("upcoming");
   const [open, setOpen] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState(false);
@@ -392,6 +473,7 @@ export default function MeetingsPage() {
               options={[
                 { value: "agenda", label: "Agenda" },
                 { value: "week", label: "Week" },
+                { value: "month", label: "Month" },
               ]}
             />
             {canWrite && (
@@ -419,9 +501,12 @@ export default function MeetingsPage() {
           <p className={cn("text-xl font-semibold tabular-nums", needsOutcome > 0 && "text-warning")}>{needsOutcome}</p>
         </Card>
       </div>
+      {me.role !== "client" && <CalendarConnect status={cal.status} error={cal.error} canConnect onChange={cal.reload} />}
       {view === "week" ? (
-        <WeekGrid meetings={meetings} onOpen={setOpen} />
-      ) : (
+        <WeekGrid meetings={meetings} onOpen={setOpen} offset={weekOffset} setOffset={setWeekOffset} external={external} onOpenExternal={setExtOpen} />
+      ) : view === "month" ? (
+        <MonthGrid meetings={meetings} onOpen={setOpen} offset={monthOffset} setOffset={setMonthOffset} external={external} onOpenExternal={setExtOpen} />
+      ) : (<>
         <Card>
           <div className="flex gap-1 border-b border-border p-2">
             {(["today", "upcoming", "past"] as const).map((t) => (
@@ -440,10 +525,27 @@ export default function MeetingsPage() {
             </div>
           )}
         </Card>
-      )}
+        {cal.status?.link && (
+          <Card className="mt-4">
+            <p className="border-b border-border px-4 py-2.5 text-[13px] font-semibold">On your calendar · next 14 days</p>
+            {cal.loading ? <p className="px-4 py-6 text-sm text-fg-3">Loading your calendar…</p> : external.length === 0 ? <p className="px-4 py-6 text-sm text-fg-3">{cal.error || "Nothing else on your calendar in the next two weeks."}</p> : (
+              <div className="divide-y divide-border">
+                {external.map((e) => (
+                  <button key={e.id} onClick={() => setExtOpen(e)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2">
+                    <div className="w-14 shrink-0 text-center"><p className="text-[11px] uppercase text-fg-3">{new Date(e.start).toLocaleDateString("en-IN", { weekday: "short" })}</p><p className="text-lg font-semibold leading-tight tabular-nums">{new Date(e.start).getDate()}</p></div>
+                    <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-medium">{e.title}</p><p className="truncate text-xs text-fg-3">{e.allDay ? "All day" : `${fmtTime(e.start)} – ${fmtTime(e.end)}`}{e.attendees.length ? ` · ${e.attendees.slice(0, 2).join(", ")}` : ""}</p></div>
+                    <Badge tone="info">Calendar</Badge>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+      </>)}
       <MeetingDrawer id={open} onClose={() => setOpen(null)} />
       <ScheduleModal key={scheduling ? "open" : "closed"} open={scheduling} onClose={() => setScheduling(false)} />
       {importing&&<MeetingImportModal onClose={()=>setImporting(false)}/>}
+      <ExternalEventModal event={extOpen} onClose={() => setExtOpen(null)} onTrack={track} canTrack={canWrite} />
     </div>
   );
 }

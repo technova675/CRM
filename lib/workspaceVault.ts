@@ -16,9 +16,12 @@ export function workspaceCryptoKey(owner:string,purpose:"vault"|"backup"){
   return Buffer.from(hkdfSync("sha256",Buffer.from(process.env.WORKSPACE_VAULT_KEY!,"hex"),owner,"adbibe:"+purpose+":v1",32));
 }
 
-const context=(owner:string,slot:VaultSlot)=>Buffer.from(JSON.stringify(["adbibe-vault-v1",owner,slot]));
+const context=(owner:string,slot:string)=>Buffer.from(JSON.stringify(["adbibe-vault-v1",owner,slot]));
 
-export function sealCredential(owner:string,slot:VaultSlot,secret:string):SealedCredential{
+export function sealCredential(owner:string,slot:VaultSlot,secret:string):SealedCredential{return sealSecret(owner,slot,secret);}
+
+/** Encrypts a secret bound to one owner and one purpose; it cannot be opened under any other owner or purpose. */
+export function sealSecret(owner:string,slot:string,secret:string):SealedCredential{
   const nonce=randomBytes(12),cipher=createCipheriv("aes-256-gcm",workspaceCryptoKey(owner,"vault"),nonce);
   cipher.setAAD(context(owner,slot));
   return {
@@ -32,6 +35,10 @@ export function sealCredential(owner:string,slot:VaultSlot,secret:string):Sealed
 export async function readCredential(owner:string,slot:VaultSlot){
   const entry=(await ownedLibrary(owner))?.credentialVault?.[slot];
   if(!entry)return;
+  return openSecret(owner,slot,entry);
+}
+
+export function openSecret(owner:string,slot:string,entry:SealedCredential){
   try{
     const decipher=createDecipheriv("aes-256-gcm",workspaceCryptoKey(owner,"vault"),Buffer.from(entry.nonce,"base64url"));
     decipher.setAAD(context(owner,slot));

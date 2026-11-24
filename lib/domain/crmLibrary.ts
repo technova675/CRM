@@ -7,6 +7,8 @@ export interface CRMLibrary extends OnboardingLibrary {
   indiaCommerce?: import("./indiaCommerce").IndiaCommerceState;
   aiVisibility?: import("./aiVisibility").VisibilityState;
   socialStudio?: import("./socialStudio").SocialStudioState;
+  /** External calendar connection per login; holds sealed credentials, so it never leaves the server. */
+  calendarLinks?: Record<string, import("./calendar").CalendarLink>;
   credentialVault?: Partial<Record<import("../workspaceVault").VaultSlot,import("../workspaceVault").SealedCredential>>;
   workspaceApiKeys?: {id:string;name:string;prefix:string;hash:string;createdAt:string;revokedAt?:string}[];
   staffInvites?: {memberId:string;hash:string;expiresAt:string}[];
